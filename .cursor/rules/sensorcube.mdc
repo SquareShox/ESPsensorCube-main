@@ -1,0 +1,105 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Sensor Cube - Cursor Rules
+
+## Architektura Systemu
+
+### Konfiguracja dwuelementowa:
+- **Main ESP32**: Zbiera dane z czujnikow UART/I2C, komunikacja WiFi, serwer Modbus
+- **Display ESP32**: Wyswietlacz, klient Modbus do odpytywania Main ESP32
+
+## Glowne Zasady Rozwoju
+
+### 1. Timeout i Bezpieczenstwo
+- **ZAWSZE** implementuj timeouty dla wszystkich operacji I/O
+- Domyslny timeout dla I2C: 100ms
+- Domyslny timeout dla UART: 1000ms  
+- Domyslny timeout dla WiFi: 5000ms
+- Domyslny timeout dla Modbus: 2000ms
+- Implementuj retry mechanism (max 3 proby)
+
+### 2. Magistrala I2C - Priorytet Wydajnosci
+- Używaj najwyzszej mozliwej czestotliwosci I2C (400kHz)
+- Implementuj non-blocking I2C operacje
+- Grupuj odczyty z tego samego urzadzenia
+- Uzyj DMA jesli dostepne
+- Minimalizuj czas blokowania magistrali
+- Implementuj error recovery dla I2C bus stuck
+
+### 3. Struktura Kodu
+```
+src/
+├── main.cpp              # Glowna petla, inicjalizacja
+├── sensors/
+│   ├── sensor_manager.cpp # Glowny manager czujnikow
+│   ├── i2c_sensors.cpp   # Obsluga czujnikow I2C
+│   ├── uart_sensors.cpp  # Obsluga czujnikow UART
+│   ├── mcp3424.cpp       # 18-bit ADC converter
+│   ├── ads1110.cpp       # 16-bit ADC converter
+│   ├── ina219.cpp        # Current/voltage sensor
+│   ├── sps30.cpp         # Particle sensor
+│   └── ips7100.cpp       # Air quality sensor
+├── modbus_handler.cpp    # Komunikacja Modbus
+├── web_server.cpp        # Serwer WWW i WiFi
+└── i2c_manager.cpp       # Dedykowany manager I2C
+```
+```
+
+
+
+
+### 5. Zarzadzanie Pamiecia
+- Unikaj malloc/free w runtime
+- Uzyj statycznych bufforow z znanym rozmiarem
+- Implementuj circular buffer dla danych czujnikow
+- Monitoruj zuzycie stosu (stack usage)
+
+### 6. Komunikacja Modbus
+- Main ESP32 = Modbus Slave (serwer)
+- Display ESP32 = Modbus Master (klient)
+- Adresacja rejestrow:
+  - 0x0000-0x00FF: Dane temperatury
+  - 0x0100-0x01FF: Dane wilgotnosci  
+  - 0x0200-0x02FF: Dane jakosci powietrza
+  - 0x0300-0x03FF: Status systemu
+
+### 7. Obsluga Bledow
+- Implementuj watchdog timer
+- Loguj wszystkie bledy z timestamp
+- Implementuj graceful degradation
+- Status LED dla diagnostyki
+- Periodic self-test
+
+### 8. WiFi i Siec
+- Implementuj WiFi reconnection logic
+- Uzyj NTP dla synchronizacji czasu
+- Implementuj OTA updates
+- Konfiguracja przez WiFi AP mode
+
+```
+
+### 10. Testing
+- Unit testy dla kazdego modulu
+- Integration testy dla komunikacji Modbus
+- Stress test dla magistrali I2C
+- Power consumption profiling
+
+## Wzorce Implementacji
+
+## Priorytety Rozwoju
+1. Stabilna komunikacja I2C z timeoutami
+2. Niezawodna komunikacja Modbus
+3. Efficient sensor data collection
+4. Web interface dla konfiguracji
+5. Diagnostyka i monitorowanie
+
+## Debugowanie
+- Uzyj Serial dla debug output
+- Implementuj debug levels (ERROR, WARN, INFO, DEBUG)
+- Loguj wszystkie timeout events
+- Monitor memory usage
+
+- I2C bus analyzer logs 

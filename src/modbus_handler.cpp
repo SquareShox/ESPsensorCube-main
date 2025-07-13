@@ -1,0 +1,891 @@
+#include <modbus_handler.h>
+#include <sensors.h>
+#include <ips_sensor.h>
+#include <mean.h>
+#include <calib.h>
+
+// Forward declarations for safe printing functions
+void safePrint(const String& message);
+void safePrintln(const String& message);
+
+// Global Modbus objects and data
+ModbusSerial mb(Serial2, MODBUS_SLAVE_ID);
+unsigned int modbusRegisters[REG_COUNT_SOLAR];
+unsigned int modbusRegistersOPCN3[REG_COUNT_OPCN3];
+unsigned int modbusRegistersIPS[REG_COUNT_IPS];
+
+// Modbus activity tracking
+unsigned long lastModbusActivity = 0;
+bool hasHadModbusActivity = false;
+
+// Moving average control (enum defined in header)
+DataType currentDataType = DATA_CURRENT;
+
+// Function to safely switch data type
+bool setCurrentDataType(DataType newType) {
+    if (newType < DATA_CURRENT || newType > DATA_SLOW_AVG) {
+        safePrintln("Invalid data type: " + String((int)newType));
+        return false;
+    }
+    
+    DataType oldType = currentDataType;
+    currentDataType = newType;
+    
+    // Update Modbus register
+   // mb.setHreg(REG_COUNT_SOLAR + REG_COUNT_OPCN3+1, (uint16_t)currentDataType);
+    
+    String typeNames[] = {"Current", "Fast Average (10s)", "Slow Average (5min)"};
+    safePrint("Data type changed from ");
+    safePrint(typeNames[oldType]);
+    safePrint(" to ");
+    safePrintln(typeNames[newType]);
+    
+    return true;
+}
+
+// Get current data type name
+String getCurrentDataTypeName() {
+    switch (currentDataType) {
+        case DATA_CURRENT: return "Current";
+        case DATA_FAST_AVG: return "Fast Average (10s)";
+        case DATA_SLOW_AVG: return "Slow Average (5min)";
+        default: return "Unknown";
+    }
+}
+
+// Cycle through data types
+void cycleDataType() {
+    DataType nextType = (DataType)((currentDataType + 1) % 3);
+    setCurrentDataType(nextType);
+}
+
+// Get current data type
+DataType getCurrentDataType() {
+    return currentDataType;
+}
+
+// External configuration
+extern FeatureConfig config;
+
+void initializeModbus() {
+    if (!config.enableModbus) return;
+    
+    // Initialize Serial2 for Modbus communication
+    Serial2.begin(MODBUS_BAUD, SERIAL_8N1, MODBUS_RX_PIN, MODBUS_TX_PIN);
+    Serial2.setTimeout(1000);
+    
+    // Initialize Modbus
+    mb.config(MODBUS_BAUD);
+    mb.setSlaveId(MODBUS_SLAVE_ID);
+    
+    // Calculate total registers needed
+    int totalRegisters = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30 + REG_COUNT_SHT40+REG_COUNT_CALIBRATION;
+    safePrint("Initializing ");
+    safePrint(String(totalRegisters));
+    safePrintln(" Modbus registers");
+    
+    // Initialize all registers to 0
+    for (int i = 0; i < totalRegisters; i++) {
+        mb.addHreg(i, 0);
+    }
+    
+    // Print register layout
+    safePrintln("Register Layout:");
+    safePrint("Solar:    0-"); safePrintln(String(REG_COUNT_SOLAR-1));
+    safePrint("OPCN3:    "); safePrint(String(REG_COUNT_SOLAR)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3-1));
+    safePrint("I2C:      "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C-1));
+    safePrint("IPS:      "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS-1));
+    safePrint("MCP3424:  "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424-1));
+    safePrint("ADS1110:  "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110-1));
+    safePrint("INA219:   "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219-1));
+    safePrint("SPS30:    "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30-1));
+    safePrint("SHT40:    "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30 + REG_COUNT_SHT40-1));
+    safePrint("Calibration: "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30 + REG_COUNT_SHT40)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30 + REG_COUNT_SHT40 + REG_COUNT_CALIBRATION-1));
+
+    
+    // Initialize activity tracking - give 15 minutes grace period at startup
+    lastModbusActivity = millis();
+    hasHadModbusActivity = false;
+    
+    // Initialize moving averages system
+    //initializeMovingAverages();
+    
+    // Set control registers
+    mb.setHreg(REG_COUNT_SOLAR + REG_COUNT_OPCN3+1, (uint16_t)currentDataType);  // Data type selector
+    mb.setHreg(REG_COUNT_SOLAR + REG_COUNT_OPCN3+3, 1);  // Moving averages status (1 = active)
+    
+    safePrintln("Modbus initialized with IPS support and moving averages");
+}
+
+void updateModbusSolarRegisters() {
+    if (!config.enableModbus || !config.enableSolarSensor) return;
+    
+    // Get appropriate data based on current selection
+    SolarData dataToUse;
+    switch (currentDataType) {
+        case DATA_CURRENT:
+            dataToUse = solarData;
+            break;
+        case DATA_FAST_AVG:
+            dataToUse = getSolarFastAverage();
+            break;
+        case DATA_SLOW_AVG:
+            dataToUse = getSolarSlowAverage();
+            break;
+    }
+    
+    // Header registers - nowy format
+    modbusRegisters[0] = solarSensorStatus ? 1 : 0; // Status flag
+    modbusRegisters[1] = (uint16_t)currentDataType; // Typ danych (0=current, 1=fast avg, 2=slow avg)
+    
+    // Timestamp aktualizacji danych (32-bit)
+    unsigned long updateTime = millis();
+    modbusRegisters[2] = updateTime & 0xFFFF; // Lower 16 bits
+    modbusRegisters[3] = (updateTime >> 16) & 0xFFFF; // Upper 16 bits
+    
+    // Solar data registers - zaczynamy od rejestru 4
+    modbusRegisters[4] = hexToUint16(dataToUse.PID);
+    modbusRegisters[5] = (uint16_t)dataToUse.FW.toInt();
+    modbusRegisters[6] = (uint16_t)dataToUse.SER.toInt();
+    modbusRegisters[7] = (uint16_t)dataToUse.V.toInt();
+    modbusRegisters[8] = (int16_t)dataToUse.I.toInt();
+    modbusRegisters[9] = (uint16_t)dataToUse.VPV.toInt();
+    modbusRegisters[10] = (uint16_t)dataToUse.PPV.toInt();
+    modbusRegisters[11] = (uint16_t)dataToUse.CS.toInt();
+    modbusRegisters[12] = (uint16_t)dataToUse.MPPT.toInt();
+    modbusRegisters[13] = hexToUint16(dataToUse.OR);
+    modbusRegisters[14] = (uint16_t)dataToUse.ERR.toInt();
+    modbusRegisters[15] = dataToUse.LOAD == "ON" ? 1 : 0;
+    modbusRegisters[16] = (uint16_t)dataToUse.IL.toInt();
+    modbusRegisters[17] = (uint16_t)dataToUse.H19.toInt();
+    modbusRegisters[18] = (uint16_t)dataToUse.H20.toInt();
+    modbusRegisters[19] = (uint16_t)dataToUse.H21.toInt();
+    modbusRegisters[20] = (uint16_t)dataToUse.H22.toInt();
+    modbusRegisters[21] = (uint16_t)dataToUse.H23.toInt();
+    modbusRegisters[22] = (uint16_t)dataToUse.HSDS.toInt();
+    
+    // Update Modbus holding registers
+    for (int i = 0; i < REG_COUNT_SOLAR; i++) {
+        mb.setHreg(i, modbusRegisters[i]);
+    }
+}
+
+void updateModbusOPCN3Registers() {
+    if (!config.enableModbus || !config.enableOPCN3Sensor) return;
+    
+    // Header registers - nowy format
+    modbusRegistersOPCN3[0] = opcn3SensorStatus ? 1 : 0; // Status flag
+    modbusRegistersOPCN3[1] = (uint16_t)currentDataType; // Typ danych (0=current, 1=fast avg, 2=slow avg)
+    
+    // Timestamp aktualizacji danych (32-bit)
+    unsigned long updateTime = millis();
+    modbusRegistersOPCN3[2] = updateTime & 0xFFFF; // Lower 16 bits
+    modbusRegistersOPCN3[3] = (updateTime >> 16) & 0xFFFF; // Upper 16 bits
+    
+    if (opcn3Data.valid) {
+        modbusRegistersOPCN3[4] = (uint16_t)(opcn3Data.getTempC() * 100); // Temperature * 100
+        modbusRegistersOPCN3[5] = (uint16_t)(opcn3Data.getHumidity() * 100); // Humidity * 100
+        
+        // Bin counts (24 bins) - MOST IMPORTANT DATA!
+        // Each bin represents particle count in specific size range
+        // Registers 6-29 (4+2+i where i=0-23)
+        for (int i = 0; i < 24; i++) {
+            modbusRegistersOPCN3[6 + i] = opcn3Data.binCounts[i];
+        }
+        
+        // Debug: Print bin counts every 10 seconds
+        static unsigned long lastBinPrint = 0;
+        if (millis() - lastBinPrint > 10000) {
+            lastBinPrint = millis();
+            safePrint("OPCN3 Bin Counts: ");
+            for (int i = 0; i < 24; i++) {
+                safePrint(String(opcn3Data.binCounts[i]));
+                if (i < 23) safePrint(",");
+            }
+            safePrintln("");
+        }
+        
+        // Time to cross values
+        modbusRegistersOPCN3[30] = opcn3Data.bin1TimeToCross;
+        modbusRegistersOPCN3[31] = opcn3Data.bin3TimeToCross;
+        modbusRegistersOPCN3[32] = opcn3Data.bin5TimeToCross;
+        modbusRegistersOPCN3[33] = opcn3Data.bin7TimeToCross;
+        
+        // Additional data
+        modbusRegistersOPCN3[34] = opcn3SensorStatus ? 1 : 0;
+        modbusRegistersOPCN3[35] = (uint16_t)(opcn3Data.sampleFlowRate * 100);
+        modbusRegistersOPCN3[36] = opcn3Data.samplingPeriod;
+        modbusRegistersOPCN3[37] = (uint16_t)(opcn3Data.pm1 * 100);
+        modbusRegistersOPCN3[38] = (uint16_t)(opcn3Data.pm2_5 * 100);
+        modbusRegistersOPCN3[39] = (uint16_t)(opcn3Data.pm10 * 100);
+    }
+    
+    // Update Modbus holding registers
+    for (int i = 0; i < REG_COUNT_OPCN3; i++) {
+        mb.setHreg(REG_COUNT_SOLAR + i, modbusRegistersOPCN3[i]);
+    }
+}
+
+void updateModbusI2CRegisters() {
+    if (!config.enableModbus || !config.enableI2CSensors) return;
+    
+    // Get appropriate data based on current selection
+    I2CSensorData dataToUse;
+    switch (currentDataType) {
+        case DATA_CURRENT:
+            dataToUse = i2cSensorData;
+            break;
+        case DATA_FAST_AVG:
+            dataToUse = getI2CFastAverage();
+            break;
+        case DATA_SLOW_AVG:
+            dataToUse = getI2CSlowAverage();
+            break;
+    }
+    
+    // Use dedicated I2C register block
+    int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3+3;
+    
+    // Header registers - nowy format
+    mb.setHreg(baseReg, i2cSensorStatus ? 1 : 0); // Status
+    mb.setHreg(baseReg + 1, (uint16_t)currentDataType); // Typ danych
+    
+    // Timestamp aktualizacji danych (32-bit)
+    unsigned long updateTime = millis();
+    mb.setHreg(baseReg + 2, updateTime & 0xFFFF); // Lower 16 bits
+    mb.setHreg(baseReg + 3, (updateTime >> 16) & 0xFFFF); // Upper 16 bits
+    
+    if (dataToUse.valid) {
+       // mb.setHreg(baseReg + 4, (uint16_t)(dataToUse.temperature * 100)); // Temperature * 100
+       // mb.setHreg(baseReg + 5, (uint16_t)(dataToUse.humidity * 100)); // Humidity * 100
+       // mb.setHreg(baseReg + 6, (uint16_t)(dataToUse.pressure * 10)); // Pressure * 10
+        mb.setHreg(baseReg + 4, (uint16_t)(dataToUse.co2)); // CO2
+        mb.setHreg(baseReg + 5, (uint16_t)dataToUse.type); // Sensor type
+    } else {
+        // Clear data registers if invalid
+        for (int i = 4; i < 9; i++) {
+            mb.setHreg(baseReg + i, 0);
+        }
+    }
+}
+
+void updateModbusMCP3424Registers() {
+    if (!config.enableModbus || !config.enableMCP3424) {
+        // safePrint("MCP3424 Modbus update skipped - Modbus: ");
+        // safePrint(config.enableModbus ? "ON" : "OFF");
+        // safePrint(", MCP3424: ");
+        // safePrintln(config.enableMCP3424 ? "ON" : "OFF");
+        return;
+    }
+    
+    // Get appropriate data based on current selection
+    MCP3424Data dataToUse;
+    switch (currentDataType) {
+        case DATA_CURRENT:
+            dataToUse = mcp3424Data;
+            break;
+        case DATA_FAST_AVG:
+            dataToUse = getMCP3424FastAverage();
+            break;
+        case DATA_SLOW_AVG:
+            dataToUse = getMCP3424SlowAverage();
+            break;
+    }
+    
+    // Use registers after IPS data for MCP3424 ADC data
+    int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS;
+    
+    // Header registers - nowy format
+    mb.setHreg(baseReg, mcp3424SensorStatus ? 1 : 0); // Status
+    mb.setHreg(baseReg + 1, (uint16_t)currentDataType); // Typ danych
+    
+    // Timestamp aktualizacji danych (32-bit)
+    unsigned long updateTime = millis();
+    mb.setHreg(baseReg + 2, updateTime & 0xFFFF); // Lower 16 bits
+    mb.setHreg(baseReg + 3, (updateTime >> 16) & 0xFFFF); // Upper 16 bits
+    
+    // Total device count
+    mb.setHreg(baseReg + 4, dataToUse.deviceCount);
+    
+    // Process each detected device - zaczynamy od rejestru 5
+    for (uint8_t device = 0; device < dataToUse.deviceCount && device < MAX_MCP3424_DEVICES; device++) {
+        int deviceBaseReg = baseReg + 5 + device * 16;  // Start from baseReg+5, each device gets 16 registers
+        
+        mb.setHreg(deviceBaseReg, dataToUse.valid[device] ? 1 : 0); // Status
+        mb.setHreg(deviceBaseReg + 1, (uint16_t)dataToUse.addresses[device]); // I2C Address
+        mb.setHreg(deviceBaseReg + 2, (uint16_t)dataToUse.resolution); // Resolution
+        mb.setHreg(deviceBaseReg + 3, (uint16_t)dataToUse.gain); // Gain
+        
+        if (dataToUse.valid[device]) {
+            // Store channels as signed 32-bit values (voltage * 1000000 for µV precision)
+            for (int ch = 0; ch < 4; ch++) {
+                int32_t voltage_uv = (int32_t)(dataToUse.channels[device][ch] * 1000000);
+                mb.setHreg(deviceBaseReg + 4 + ch*2, voltage_uv & 0xFFFF);         // Lower 16 bits
+                mb.setHreg(deviceBaseReg + 5 + ch*2, (voltage_uv >> 16) & 0xFFFF); // Upper 16 bits
+            }
+            mb.setHreg(deviceBaseReg + 12, (uint16_t)((millis() - dataToUse.lastUpdate) / 1000)); // Age in seconds
+        } else {
+            // Clear data registers if invalid
+            for (int i = 4; i < 16; i++) {
+                mb.setHreg(deviceBaseReg + i, 0);
+            }
+        }
+    }
+    
+    // Clear unused device registers
+    for (uint8_t device = dataToUse.deviceCount; device < MAX_MCP3424_DEVICES; device++) {
+        int deviceBaseReg = baseReg + 5 + device * 16;
+        for (int i = 0; i < 16; i++) {
+            mb.setHreg(deviceBaseReg + i, 0);
+        }
+    }
+}
+
+void updateModbusADS1110Registers() {
+    if (!config.enableModbus || !config.enableADS1110) return;
+    
+    // Get appropriate data based on current selection
+    ADS1110Data dataToUse;
+    switch (currentDataType) {
+        case DATA_CURRENT:
+            dataToUse = ads1110Data;
+            break;
+        case DATA_FAST_AVG:
+            dataToUse = getADS1110FastAverage();
+            break;
+        case DATA_SLOW_AVG:
+            dataToUse = getADS1110SlowAverage();
+            break;
+    }
+    
+    // Use registers after MCP3424 data for ADS1110 data
+    int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424;
+    
+    // Header registers - nowy format
+    mb.setHreg(baseReg, ads1110SensorStatus ? 1 : 0); // Status
+    mb.setHreg(baseReg + 1, (uint16_t)currentDataType); // Typ danych
+    
+    // Timestamp aktualizacji danych (32-bit)
+    unsigned long updateTime = millis();
+    mb.setHreg(baseReg + 2, updateTime & 0xFFFF); // Lower 16 bits
+    mb.setHreg(baseReg + 3, (updateTime >> 16) & 0xFFFF); // Upper 16 bits
+    
+    mb.setHreg(baseReg + 4, (uint16_t)dataToUse.dataRate); // Data rate
+    mb.setHreg(baseReg + 5, (uint16_t)dataToUse.gain); // Gain
+    
+    if (dataToUse.valid) {
+        // Store voltage as signed 32-bit value (voltage * 1000000 for uV precision)
+        int32_t voltage_uv = (int32_t)(dataToUse.voltage * 1000000);
+        mb.setHreg(baseReg + 6, voltage_uv & 0xFFFF);         // Lower 16 bits
+        mb.setHreg(baseReg + 7, (voltage_uv >> 16) & 0xFFFF); // Upper 16 bits
+        mb.setHreg(baseReg + 8, (uint16_t)((millis() - dataToUse.lastUpdate) / 1000)); // Age in seconds
+    } else {
+        // Clear data registers if invalid
+        for (int i = 6; i < 9; i++) {
+            mb.setHreg(baseReg + i, 0);
+        }
+    }
+}
+
+void updateModbusINA219Registers() {
+    if (!config.enableModbus || !config.enableINA219) return;
+    
+    // Get appropriate data based on current selection
+    INA219Data dataToUse;
+    switch (currentDataType) {
+        case DATA_CURRENT:
+            dataToUse = ina219Data;
+            break;
+        case DATA_FAST_AVG:
+            dataToUse = getINA219FastAverage();
+            break;
+        case DATA_SLOW_AVG:
+            dataToUse = getINA219SlowAverage();
+            break;
+    }
+    
+    // Use registers after ADS1110 data for INA219 data
+    int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110;
+    
+    // Header registers - nowy format
+    mb.setHreg(baseReg, ina219SensorStatus ? 1 : 0); // Status
+    mb.setHreg(baseReg + 1, (uint16_t)currentDataType); // Typ danych
+    
+    // Timestamp aktualizacji danych (32-bit)
+    unsigned long updateTime = millis();
+    mb.setHreg(baseReg + 2, updateTime & 0xFFFF); // Lower 16 bits
+    mb.setHreg(baseReg + 3, (updateTime >> 16) & 0xFFFF); // Upper 16 bits
+    
+    if (dataToUse.valid) {
+        // Bus voltage (mV precision)
+        mb.setHreg(baseReg + 4, (uint16_t)(dataToUse.busVoltage * 1000));
+        // Shunt voltage (already in mV)
+        mb.setHreg(baseReg + 5, (uint16_t)(dataToUse.shuntVoltage * 10)); // 0.1mV precision
+        // Current (mA precision)
+        mb.setHreg(baseReg + 6, (uint16_t)(dataToUse.current));
+        // Power (mW precision)
+        mb.setHreg(baseReg + 7, (uint16_t)(dataToUse.power));
+        mb.setHreg(baseReg + 8, (uint16_t)((millis() - dataToUse.lastUpdate) / 1000)); // Age in seconds
+    } else {
+        // Clear data registers if invalid
+        for (int i = 4; i < 9; i++) {
+            mb.setHreg(baseReg + i, 0);
+        }
+    }
+}
+
+void updateModbusSPS30Registers() {
+    if (!config.enableModbus || !config.enableSPS30) {
+        // safePrint("SPS30 Modbus update skipped - Modbus: ");
+        // safePrint(config.enableModbus ? "ON" : "OFF");
+        // safePrint(", SPS30: ");
+        // safePrintln(config.enableSPS30 ? "ON" : "OFF");
+        return;
+    }
+    
+    // Get appropriate data based on current selection
+    SPS30Data dataToUse;
+    switch (currentDataType) {
+        case DATA_CURRENT:
+            dataToUse = sps30Data;
+            break;
+        case DATA_FAST_AVG:
+            dataToUse = getSPS30FastAverage();
+            break;
+        case DATA_SLOW_AVG:
+            dataToUse = getSPS30SlowAverage();
+            break;
+    }
+    
+    // Debug output every 30 seconds
+    static unsigned long lastSPS30ModbusDebug = 0;
+    if (millis() - lastSPS30ModbusDebug > 30000) {
+        lastSPS30ModbusDebug = millis();
+        safePrint("Updating SPS30 Modbus registers - Status: ");
+        safePrint(sps30SensorStatus ? "OK" : "ERROR");
+        safePrint(", Valid: ");
+        safePrintln(dataToUse.valid ? "true" : "false");
+    }
+    
+    // Use registers after INA219 data for SPS30 data
+    int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219;
+    
+    // Header registers - nowy format
+    mb.setHreg(baseReg, sps30SensorStatus ? 1 : 0); // Status
+    mb.setHreg(baseReg + 1, (uint16_t)currentDataType); // Typ danych
+    
+    // Timestamp aktualizacji danych (32-bit)
+    unsigned long updateTime = millis();
+    mb.setHreg(baseReg + 2, updateTime & 0xFFFF); // Lower 16 bits
+    mb.setHreg(baseReg + 3, (updateTime >> 16) & 0xFFFF); // Upper 16 bits
+    
+    if (dataToUse.valid) {
+        mb.setHreg(baseReg + 4, (uint16_t)(dataToUse.pm1_0 * 1000)); // PM1.0 * 1000
+        mb.setHreg(baseReg + 5, (uint16_t)(dataToUse.pm2_5 * 1000)); // PM2.5 * 1000
+        mb.setHreg(baseReg + 6, (uint16_t)(dataToUse.pm4_0 * 1000)); // PM4.0 * 1000
+        mb.setHreg(baseReg + 7, (uint16_t)(dataToUse.pm10 * 1000)); // PM10 * 1000
+        mb.setHreg(baseReg + 8, (uint16_t)(dataToUse.nc0_5 * 1000)); // NC0.5 * 1000
+        mb.setHreg(baseReg + 9, (uint16_t)(dataToUse.nc1_0 * 1000)); // NC1.0 * 1000
+        mb.setHreg(baseReg + 10, (uint16_t)(dataToUse.nc2_5 * 1000)); // NC2.5 * 1000
+        mb.setHreg(baseReg + 11, (uint16_t)(dataToUse.nc4_0 * 1000)); // NC4.0 * 1000
+        mb.setHreg(baseReg + 12, (uint16_t)(dataToUse.nc10 * 1000)); // NC10 * 1000
+        mb.setHreg(baseReg + 13, (uint16_t)(dataToUse.typical_particle_size * 1000)); // Typical particle size * 1000
+        mb.setHreg(baseReg + 14, (uint16_t)((millis() - dataToUse.lastUpdate) / 1000)); // Age in seconds
+    } else {
+        // Clear data registers if invalid
+        for (int i = 4; i < 15; i++) {
+            mb.setHreg(baseReg + i, 0);
+        }
+    }
+}
+
+void updateModbusIPSRegisters() {
+    if (!config.enableModbus || !config.enableIPS) return;
+    
+    // Get appropriate data based on current selection
+    IPSSensorData dataToUse;
+    switch (currentDataType) {
+        case DATA_CURRENT:
+            dataToUse = ipsSensorData;
+            break;
+        case DATA_FAST_AVG:
+            dataToUse = getIPSFastAverage();
+            break;
+        case DATA_SLOW_AVG:
+            dataToUse = getIPSSlowAverage();
+            break;
+    }
+    
+    // Use registers after I2C data for IPS sensor data
+    int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C;
+    
+    // Header registers - nowy format
+    modbusRegistersIPS[0] = ipsSensorStatus ? 1 : 0; // Status flag
+    modbusRegistersIPS[1] = (uint16_t)currentDataType; // Typ danych
+    
+    // Timestamp aktualizacji danych (32-bit)
+    unsigned long updateTime = millis();
+    modbusRegistersIPS[2] = updateTime & 0xFFFF; // Lower 16 bits
+    modbusRegistersIPS[3] = (updateTime >> 16) & 0xFFFF; // Upper 16 bits
+    
+    modbusRegistersIPS[4] = dataToUse.debugMode ? 1 : 0; // Debug mode flag
+    modbusRegistersIPS[5] = dataToUse.won; // Won period (1=200ms, 2=500ms, 3=1000ms)
+    
+    if (dataToUse.valid && ipsSensorStatus) {
+        // PC Values (7 values) - registers 6-19
+        for (int i = 0; i < 7; i++) {
+            uint32_t pcValue = dataToUse.pc_values[i];
+            // Store as two 16-bit registers for large values
+            modbusRegistersIPS[6 + i*2] = pcValue & 0xFFFF;         // Lower 16 bits
+            modbusRegistersIPS[6 + i*2 + 1] = (pcValue >> 16) & 0xFFFF; // Upper 16 bits
+        }
+        
+        // PM Values (7 values) - registers 20-26 (scaled by 1000 for precision)
+        for (int i = 0; i < 7; i++) {
+            modbusRegistersIPS[20 + i] = (uint16_t)(ipsSensorData.pm_values[i] * 10);
+        }
+        
+        // Debug mode data (only if debug mode enabled)
+        if (dataToUse.debugMode) {
+            // NP Values (7 values) - registers 27-40
+            for (int i = 0; i < 7; i++) {
+                uint32_t npValue = dataToUse.np_values[i];
+                // Store as two 16-bit registers for large values
+                modbusRegistersIPS[27 + i*2] = npValue & 0xFFFF;         // Lower 16 bits
+                modbusRegistersIPS[27 + i*2 + 1] = (npValue >> 16) & 0xFFFF; // Upper 16 bits
+            }
+            
+            // PW Values (7 values) - registers 41-47
+            for (int i = 0; i < 7; i++) {
+                modbusRegistersIPS[41 + i] = (uint16_t)dataToUse.pw_values[i];
+            }
+        } else {
+            // Clear debug registers when not in debug mode
+            for (int i = 27; i < 48; i++) {
+                modbusRegistersIPS[i] = 0;
+            }
+        }
+        
+        // Debug: Print IPS data every 30 seconds
+        static unsigned long lastIPSPrint = 0;
+        if (millis() - lastIPSPrint > 30000) {
+            lastIPSPrint = millis();
+            // safePrint("IPS Modbus Update - Status: ");
+            // safePrint(ipsSensorStatus ? "OK" : "ERROR");
+            // safePrint(", Valid: ");
+            // safePrint(ipsSensorData.valid ? "YES" : "NO");
+            // safePrint(", Debug: ");
+            // safePrint(ipsSensorData.debugMode ? "ON" : "OFF");
+            // safePrint(", Won: ");
+            // safePrint(String(ipsSensorData.won));
+            // safePrint(", PC0: ");
+            // safePrint(String(ipsSensorData.pc_values[0]));
+            // safePrint(", PM0: ");
+            // safePrint(String(ipsSensorData.pm_values[0], 3));
+            // if (ipsSensorData.debugMode) {
+            //     safePrint(", NP0: ");
+            //     safePrint(String(ipsSensorData.np_values[0]));
+            //     safePrint(", PW0: ");
+            //     safePrint(String(ipsSensorData.pw_values[0]));
+            // }
+            // safePrintln("");
+        }
+    } else {
+        // Clear data registers if invalid
+        for (int i = 6; i < REG_COUNT_IPS; i++) {
+            modbusRegistersIPS[i] = 0;
+        }
+    }
+    
+    // Update Modbus holding registers - ensure all registers are updated
+    for (int i = 0; i < REG_COUNT_IPS; i++) {
+        mb.setHreg(baseReg + i, modbusRegistersIPS[i]);
+    }
+}
+
+void updateModbusSHT40Registers() {
+    if (!config.enableModbus || !config.enableSHT40) return;
+    
+    // Get appropriate data based on current selection
+    SHT40Data dataToUse;
+    switch (currentDataType) {
+        case DATA_CURRENT:
+            dataToUse = sht40Data;
+            break;
+        case DATA_FAST_AVG:
+            dataToUse = getSHT40FastAverage();
+            break;
+        case DATA_SLOW_AVG:
+            dataToUse = getSHT40SlowAverage();
+            break;
+    }
+    
+    // Use registers after SPS30 data for SHT40 data
+    int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30;
+    
+    // Header registers - nowy format
+    mb.setHreg(baseReg, sht40SensorStatus ? 1 : 0); // Status
+    mb.setHreg(baseReg + 1, (uint16_t)currentDataType); // Typ danych
+    
+    // Timestamp aktualizacji danych (32-bit)
+    unsigned long updateTime = millis();
+    mb.setHreg(baseReg + 2, updateTime & 0xFFFF); // Lower 16 bits
+    mb.setHreg(baseReg + 3, (updateTime >> 16) & 0xFFFF); // Upper 16 bits
+    
+    if (dataToUse.valid) {
+        // Temperature (x100 for 0.01°C precision)
+        mb.setHreg(baseReg + 4, (int16_t)(dataToUse.temperature * 100));
+        // Humidity (x100 for 0.01% precision)
+        mb.setHreg(baseReg + 5, (uint16_t)(dataToUse.humidity * 100));
+        // Pressure (x10 for 0.1 hPa precision)
+        mb.setHreg(baseReg + 6, (uint16_t)(dataToUse.pressure * 10));
+        // Age in seconds
+        mb.setHreg(baseReg + 7, (uint16_t)((millis() - dataToUse.lastUpdate) / 1000));
+    } else {
+        // Clear data registers if invalid
+        for (int i = 4; i < 8; i++) {
+            mb.setHreg(baseReg + i, 0);
+        }
+    }
+    
+    // Debug output every 30 seconds
+    static unsigned long lastSHT40ModbusDebug = 0;
+    if (millis() - lastSHT40ModbusDebug > 30000) {
+        lastSHT40ModbusDebug = millis();
+        safePrint("Updating SHT40 Modbus registers - Status: ");
+        safePrint(sht40SensorStatus ? "OK" : "ERROR");
+        safePrint(", Valid: ");
+        safePrint(dataToUse.valid ? "true" : "false");
+        if (dataToUse.valid) {
+            safePrint(", Temp: ");
+            safePrint(String(dataToUse.temperature, 2));
+            safePrint("°C, Hum: ");
+            safePrint(String(dataToUse.humidity, 2));
+            safePrint("%, Press: ");
+            safePrint(String(dataToUse.pressure, 2));
+            safePrint(" kPa");
+        }
+        safePrintln("");
+    }
+}
+
+void updateModbusCalibrationRegisters() {
+    if (!config.enableModbus || !calibConfig.enableCalibration) return;
+    
+    // Get appropriate data based on current selection
+    CalibratedSensorData dataToUse = calibratedData;
+    switch (currentDataType) {
+        case DATA_CURRENT:
+            dataToUse = calibratedData;
+            break;
+        case DATA_FAST_AVG:
+            dataToUse = getCalibratedFastAverage();
+            break;
+        case DATA_SLOW_AVG:
+            dataToUse = getCalibratedSlowAverage();
+            break;
+    }
+
+    int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30 + REG_COUNT_SHT40;
+
+    mb.setHreg(baseReg, calibConfig.enableCalibration ? 1 : 0); // Status flag
+    mb.setHreg(baseReg + 1, (uint16_t)currentDataType); // Typ danych
+
+    // Timestamp aktualizacji danych (32-bit)
+    unsigned long updateTime = millis();
+    mb.setHreg(baseReg + 2, updateTime & 0xFFFF); // Lower 16 bits
+    mb.setHreg(baseReg + 3, (updateTime >> 16) & 0xFFFF); // Upper 16 bits
+
+    if (dataToUse.valid) {
+        mb.setHreg(baseReg + 4, (int16_t)(dataToUse.CO * 100));
+        mb.setHreg(baseReg + 5, (int16_t)(dataToUse.NO * 100));
+        mb.setHreg(baseReg + 6, (int16_t)(dataToUse.NO2 * 100));
+        mb.setHreg(baseReg + 7, (int16_t)(dataToUse.O3 * 100));
+        mb.setHreg(baseReg + 8, (int16_t)(dataToUse.SO2 * 100));
+        mb.setHreg(baseReg + 9, (int16_t)(dataToUse.H2S * 100));
+        mb.setHreg(baseReg + 10, (int16_t)(dataToUse.NH3 * 100));
+        mb.setHreg(baseReg + 11, (int16_t)(dataToUse.HCHO * 100));
+        mb.setHreg(baseReg + 12, (int16_t)(dataToUse.PID * 100));
+        mb.setHreg(baseReg + 13, (int16_t)(dataToUse.TGS02 * 100));
+        mb.setHreg(baseReg + 14, (int16_t)(dataToUse.TGS03 * 100));
+        mb.setHreg(baseReg + 15, (int16_t)(dataToUse.TGS12 * 100));
+        mb.setHreg(baseReg + 16, (int16_t)(dataToUse.TGS02_ohm * 100));
+        mb.setHreg(baseReg + 17, (int16_t)(dataToUse.TGS03_ohm * 100));
+        mb.setHreg(baseReg + 18, (int16_t)(dataToUse.TGS12_ohm * 100));
+        // mb.setHreg(baseReg + 19, (int16_t)(dataToUse.TGS02_ppm * 100));
+        // mb.setHreg(baseReg + 20, (int16_t)(dataToUse.TGS03_ppm * 100));
+        // mb.setHreg(baseReg + 21, (int16_t)(dataToUse.TGS12_ppm * 100));
+        // mb.setHreg(baseReg + 22, (int16_t)(dataToUse.TGS02_ppb * 100));
+        // mb.setHreg(baseReg + 23, (int16_t)(dataToUse.TGS03_ppb * 100));
+        // mb.setHreg(baseReg + 24, (int16_t)(dataToUse.TGS12_ppb * 100));
+        mb.setHreg(baseReg + 25, (int16_t)(dataToUse.CO_ppb * 100));
+        mb.setHreg(baseReg + 26, (int16_t)(dataToUse.NO_ppb * 100));
+        mb.setHreg(baseReg + 27, (int16_t)(dataToUse.NO2_ppb * 100));
+        mb.setHreg(baseReg + 28, (int16_t)(dataToUse.O3_ppb * 100));
+        mb.setHreg(baseReg + 29, (int16_t)(dataToUse.SO2_ppb * 100));
+        mb.setHreg(baseReg + 30, (int16_t)(dataToUse.H2S_ppb * 100));
+        mb.setHreg(baseReg + 31, (int16_t)(dataToUse.NH3_ppb * 100));
+        mb.setHreg(baseReg + 32, (int16_t)(dataToUse.HCHO * 100));
+        mb.setHreg(baseReg + 33, (int16_t)(dataToUse.PID * 100));
+
+    } else {
+        // Clear data registers if invalid
+        for (int i = 4; i < 34; i++) {
+            mb.setHreg(baseReg + i, 0);
+        }
+    }
+}
+
+void processModbusTask() {
+    if (!config.enableModbus) return;
+    
+    // Update moving averages with fresh sensor data
+  
+    
+    // Check for Modbus activity BEFORE mb.task() processes and clears the buffer
+    if (Serial2.available() > 0) {
+        lastModbusActivity = millis();
+        hasHadModbusActivity = true;
+        
+        // Debug: log first Modbus activity and periodic updates
+        static bool firstActivity = true;
+        static unsigned long lastActivityLog = 0;
+        
+        if (firstActivity) {
+            firstActivity = false;
+            safePrintln("First Modbus activity detected!");
+            WebSerial.println("First Modbus activity detected!");
+        }
+        
+        // Log activity every 30 seconds
+        if (millis() - lastActivityLog > 30000) {
+            lastActivityLog = millis();
+            safePrintln("Modbus activity detected - updating timestamp");
+           // Serial2.println("Modbus activity detected - updating timestamp");
+            WebSerial.println("Modbus activity detected - updating timestamp");
+        }
+    }
+    
+    mb.task();
+    
+    // Also update activity if any commands were processed
+    static uint16_t lastChecksum = 0;
+    uint16_t currentChecksum = 0;
+    // Simple checksum of first few registers to detect any changes
+    for (int i = 0; i < 5; i++) {
+        currentChecksum += mb.hreg(i);
+    }
+    
+    if (currentChecksum != lastChecksum) {
+        lastModbusActivity = millis();
+        hasHadModbusActivity = true;
+        lastChecksum = currentChecksum;
+    }
+    
+    // Check for data type selection changes (register 90)
+    static uint16_t lastDataType = 0;
+    uint16_t newDataType = mb.hreg(REG_COUNT_SOLAR + REG_COUNT_OPCN3+2);
+    
+    if (newDataType != lastDataType && newDataType <= 2) {
+        lastDataType = newDataType;
+        setCurrentDataType((DataType)newDataType);
+    }
+    
+    // Check for special commands from Modbus master
+    static uint16_t lastCommand = 0;
+    uint16_t currentCommand = mb.hreg(REG_COUNT_SOLAR + REG_COUNT_OPCN3+1); // Use register 100 for commands
+    
+    if (currentCommand != lastCommand && currentCommand != 0) {
+        lastCommand = currentCommand;
+        
+        switch (currentCommand) {
+            case 1: // Request fresh OPCN3 reading
+                if (config.enableOPCN3Sensor) {
+                    opcn3Data = myOPCN3.readHistogramData();
+                    updateModbusOPCN3Registers();
+                }
+                mb.setHreg(REG_COUNT_SOLAR + REG_COUNT_OPCN3+1, 0); // Clear command register
+                break;
+                
+            case 2: // Reset system
+                mb.setHreg(REG_COUNT_SOLAR + REG_COUNT_OPCN3+1, 0); // Clear command register
+                delay(100);
+                ESP.restart();
+                break;
+                
+            case 3: // Toggle auto reset
+                config.autoReset = !config.autoReset;
+                mb.setHreg(REG_COUNT_SOLAR + REG_COUNT_OPCN3+2, config.autoReset ? 1 : 0); // Store state in register 92
+                mb.setHreg(REG_COUNT_SOLAR + REG_COUNT_OPCN3+1, 0); // Clear command register
+                break;
+                
+            case 4: // Request fresh IPS reading
+                if (config.enableIPS) {
+                    readIPS(ipsSensorData);
+                    updateModbusIPSRegisters();
+                }
+                mb.setHreg(REG_COUNT_SOLAR + REG_COUNT_OPCN3+1, 0); // Clear command register
+                break;
+                
+            case 5: // Enable IPS debug mode
+                if (config.enableIPS) {
+                    enableIPSDebugMode();
+                    updateModbusIPSRegisters();
+                }
+                mb.setHreg(REG_COUNT_SOLAR + REG_COUNT_OPCN3+1, 0); // Clear command register
+                break;
+                
+            case 6: // Disable IPS debug mode
+                if (config.enableIPS) {
+                    disableIPSDebugMode();
+                    updateModbusIPSRegisters();
+                }
+                mb.setHreg(REG_COUNT_SOLAR + REG_COUNT_OPCN3+1, 0); // Clear command register
+                break;
+                
+            case 7: // Switch to current data
+                setCurrentDataType(DATA_CURRENT);
+                mb.setHreg(REG_COUNT_SOLAR + REG_COUNT_OPCN3+1, 0); // Clear command register
+                break;
+                
+            case 8: // Switch to fast average (10s)
+                setCurrentDataType(DATA_FAST_AVG);
+                mb.setHreg(REG_COUNT_SOLAR + REG_COUNT_OPCN3+1, 0); // Clear command register
+                break;
+                
+            case 9: // Switch to slow average (5min)
+                setCurrentDataType(DATA_SLOW_AVG);
+                mb.setHreg(REG_COUNT_SOLAR + REG_COUNT_OPCN3+1, 0); // Clear command register
+                break;
+                
+            case 11: // Cycle through data types
+                cycleDataType();
+                mb.setHreg(REG_COUNT_SOLAR + REG_COUNT_OPCN3+1, 0); // Clear command register
+                break;
+                
+            case 10: // Print moving average status
+                printMovingAverageStatus();
+                mb.setHreg(REG_COUNT_SOLAR + REG_COUNT_OPCN3+1, 0); // Clear command register
+                break;
+                
+            default:
+                mb.setHreg(REG_COUNT_SOLAR + REG_COUNT_OPCN3+1, 0); // Clear unknown command
+                break;
+        }
+    }
+}
+
+uint16_t hexToUint16(String hex) {
+    if (hex.length() == 0) return 0;
+    return (uint16_t)strtol(hex.c_str(), NULL, 16);
+}
+
+String convertToHex(String value) {
+    String hexString = "";
+    for (int i = 0; i < value.length(); i++) {
+        char hexBuffer[3];
+        sprintf(hexBuffer, "%02X", (unsigned char)value[i]);
+        hexString += hexBuffer;
+    }
+    return hexString;
+} 
