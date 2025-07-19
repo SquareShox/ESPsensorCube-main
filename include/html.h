@@ -1,4 +1,6 @@
 
+// Forward declarations - charts_html moved to chart.h
+
 const char *update_html = R"rawliteral(
 <!DOCTYPE html>
 <html>
@@ -85,10 +87,6 @@ const char *update_html = R"rawliteral(
 <!-- Navigation Links -->
 <div class="webserial-link">
 <a href="/dashboard" class="webserial-btn"> open Live Dashboard</a>
-</div>
-
-<div class="webserial-link">
-<a href="/webserial" class="webserial-btn"> Open WebSerial</a>
 </div>
 <script>
 function updateAutoResetState(state) {
@@ -319,7 +317,6 @@ const char *dashboard_html = R"rawliteral(
   <div class="nav">
     <a href="/">🔧 Update Firmware</a>
     <a href="/dashboard">📊 Dashboard</a>
-    <a href="/webserial">💻 WebSerial</a>
   </div>
 
   <div class="dashboard">
@@ -531,10 +528,202 @@ const char *dashboard_html = R"rawliteral(
       </div>
       <div class="last-update" id="power-update">Ostatnia aktualizacja: --</div>
     </div>
+
+    <!-- HCHO Sensor Card -->
+    <div class="sensor-card" id="hcho-card" style="display: none;">
+      <div class="sensor-header">
+        <div class="sensor-icon env-icon">🧪</div>
+        <div class="sensor-title">HCHO Sensor</div>
+        <div class="status-indicator" id="hcho-status"></div>
+      </div>
+      <div class="sensor-data">
+        <div class="data-item">
+          <div class="data-label">HCHO</div>
+          <div class="data-value" id="hcho-value">--<span class="data-unit">mg/m³</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">VOC</div>
+          <div class="data-value" id="hcho-voc">--<span class="data-unit">mg/m³</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">TVOC</div>
+          <div class="data-value" id="hcho-tvoc">--<span class="data-unit">mg/m³</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">Temperature</div>
+          <div class="data-value" id="hcho-temp">--<span class="data-unit">°C</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">Humidity</div>
+          <div class="data-value" id="hcho-humidity">--<span class="data-unit">%</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">Status</div>
+          <div class="data-value" id="hcho-sensor-status">--</div>
+        </div>
+      </div>
+      <div class="last-update" id="hcho-update">Ostatnia aktualizacja: --</div>
+    </div>
+
+    <!-- IPS Sensor Card -->
+    <div class="sensor-card" id="ips-card" style="display: none;">
+      <div class="sensor-header">
+        <div class="sensor-icon air-icon">🌫️</div>
+        <div class="sensor-title">IPS Sensor</div>
+        <div class="status-indicator" id="ips-status"></div>
+      </div>
+      <div class="sensor-data">
+        <div class="data-item">
+          <div class="data-label">PC 0.3</div>
+          <div class="data-value" id="ips-pc03">--<span class="data-unit">#/cm³</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">PC 0.5</div>
+          <div class="data-value" id="ips-pc05">--<span class="data-unit">#/cm³</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">PC 1.0</div>
+          <div class="data-value" id="ips-pc10">--<span class="data-unit">#/cm³</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">PC 2.5</div>
+          <div class="data-value" id="ips-pc25">--<span class="data-unit">#/cm³</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">PC 5.0</div>
+          <div class="data-value" id="ips-pc50">--<span class="data-unit">#/cm³</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">PC 10.0</div>
+          <div class="data-value" id="ips-pc100">--<span class="data-unit">#/cm³</span></div>
+        </div>
+      </div>
+      <div class="last-update" id="ips-update">Ostatnia aktualizacja: --</div>
+    </div>
+
+    <!-- Calibration Gases Card -->
+    <div class="sensor-card" id="calib-gases-card" style="display: none;">
+      <div class="sensor-header">
+        <div class="sensor-icon env-icon">🧪</div>
+        <div class="sensor-title">Gazy Elektrochemiczne</div>
+        <div class="status-indicator" id="calib-gases-status"></div>
+      </div>
+      <div class="sensor-data">
+        <div class="data-item">
+          <div class="data-label">CO</div>
+          <div class="data-value" id="calib-co">--<span class="data-unit">ppb</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">NO</div>
+          <div class="data-value" id="calib-no">--<span class="data-unit">ppb</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">NO2</div>
+          <div class="data-value" id="calib-no2">--<span class="data-unit">ppb</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">O3</div>
+          <div class="data-value" id="calib-o3">--<span class="data-unit">ppb</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">SO2</div>
+          <div class="data-value" id="calib-so2">--<span class="data-unit">ppb</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">H2S</div>
+          <div class="data-value" id="calib-h2s">--<span class="data-unit">ppb</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">NH3</div>
+          <div class="data-value" id="calib-nh3">--<span class="data-unit">ppb</span></div>
+        </div>
+      </div>
+      <div class="last-update" id="calib-gases-update">Ostatnia aktualizacja: --</div>
+    </div>
+
+    <!-- Calibration TGS Card -->
+    <div class="sensor-card" id="calib-tgs-card" style="display: none;">
+      <div class="sensor-header">
+        <div class="sensor-icon adc-icon">🔬</div>
+        <div class="sensor-title">Czujniki TGS</div>
+        <div class="status-indicator" id="calib-tgs-status"></div>
+      </div>
+      <div class="sensor-data">
+        <div class="data-item">
+          <div class="data-label">TGS02</div>
+          <div class="data-value" id="calib-tgs02">--<span class="data-unit">ppm</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">TGS03</div>
+          <div class="data-value" id="calib-tgs03">--<span class="data-unit">ppm</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">TGS12</div>
+          <div class="data-value" id="calib-tgs12">--<span class="data-unit">ppm</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">TGS02 Ω</div>
+          <div class="data-value" id="calib-tgs02-ohm">--<span class="data-unit">Ω</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">TGS03 Ω</div>
+          <div class="data-value" id="calib-tgs03-ohm">--<span class="data-unit">Ω</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">TGS12 Ω</div>
+          <div class="data-value" id="calib-tgs12-ohm">--<span class="data-unit">Ω</span></div>
+        </div>
+      </div>
+      <div class="last-update" id="calib-tgs-update">Ostatnia aktualizacja: --</div>
+    </div>
+
+    <!-- Calibration Temperatures Card -->
+    <div class="sensor-card" id="calib-temps-card" style="display: none;">
+      <div class="sensor-header">
+        <div class="sensor-icon env-icon">🌡️</div>
+        <div class="sensor-title">Temperatury Czujników</div>
+        <div class="status-indicator" id="calib-temps-status"></div>
+      </div>
+      <div class="sensor-data">
+        <div class="data-item">
+          <div class="data-label">K1</div>
+          <div class="data-value" id="calib-temp-k1">--<span class="data-unit">°C</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">K2</div>
+          <div class="data-value" id="calib-temp-k2">--<span class="data-unit">°C</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">K3</div>
+          <div class="data-value" id="calib-temp-k3">--<span class="data-unit">°C</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">K4</div>
+          <div class="data-value" id="calib-temp-k4">--<span class="data-unit">°C</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">K5</div>
+          <div class="data-value" id="calib-temp-k5">--<span class="data-unit">°C</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">K6</div>
+          <div class="data-value" id="calib-temp-k6">--<span class="data-unit">°C</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">K7</div>
+          <div class="data-value" id="calib-temp-k7">--<span class="data-unit">°C</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">K8</div>
+          <div class="data-value" id="calib-temp-k8">--<span class="data-unit">°C</span></div>
+        </div>
+      </div>
+      <div class="last-update" id="calib-temps-update">Ostatnia aktualizacja: --</div>
+    </div>
   </div>
 
 <script>
-let eventSource;
+let ws;
 let lastUpdateTime = Date.now();
 
 function formatTime(timestamp) {
@@ -645,14 +834,16 @@ function updateMCP3424Devices(adcData) {
   }
 }
 
-function connectEventSource() {
-  if (eventSource) {
-    eventSource.close();
-  }
-  
-  eventSource = new EventSource('/events');
-  
-  eventSource.addEventListener('sensorData', function(event) {
+function connectWebSocket() {
+  ws = new WebSocket(`ws://${window.location.host}/ws`);
+  ws.onopen = function() {
+    console.log('WebSocket connected');
+  };
+  ws.onclose = function() {
+    console.log('WebSocket disconnected, reconnecting...');
+    setTimeout(connectWebSocket, 5000);
+  };
+  ws.onmessage = function(event) {
     try {
       const data = JSON.parse(event.data);
       lastUpdateTime = Date.now();
@@ -700,6 +891,31 @@ function connectEventSource() {
         } else {
           hideCard('power-card');
         }
+        
+        // HCHO sensor
+        if (data.sensorsEnabled.hcho) {
+          showCard('hcho-card');
+        } else {
+          hideCard('hcho-card');
+        }
+        
+        // IPS sensor
+        if (data.sensorsEnabled.ips) {
+          showCard('ips-card');
+        } else {
+          hideCard('ips-card');
+        }
+        
+        // Calibration cards
+        if (data.calibration && data.calibration.enabled && data.calibration.valid) {
+          showCard('calib-gases-card');
+          showCard('calib-tgs-card');
+          showCard('calib-temps-card');
+        } else {
+          hideCard('calib-gases-card');
+          hideCard('calib-tgs-card');
+          hideCard('calib-temps-card');
+        }
       }
       
       // System status
@@ -723,9 +939,9 @@ function connectEventSource() {
       
       // OPCN3 data
       if (data.opcn3 && data.opcn3.valid) {
-        updateValue('pm1', data.opcn3.pm1 || 0, 1);
-        updateValue('pm25', data.opcn3.pm2_5 || 0, 1);
-        updateValue('pm10', data.opcn3.pm10 || 0, 1);
+        updateValue('pm1', data.opcn3.PM1 || 0, 1);
+        updateValue('pm25', data.opcn3.PM25 || 0, 1);
+        updateValue('pm10', data.opcn3.PM10 || 0, 1);
         updateValue('opcn3-temp', data.opcn3.temperature || 0, 1);
         updateStatus('opcn3-status', true);
         document.getElementById('opcn3-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
@@ -738,7 +954,7 @@ function connectEventSource() {
         updateValue('env-temp', data.i2c.temperature || 0, 1);
         updateValue('env-humidity', data.i2c.humidity || 0, 1);
         updateValue('env-pressure', data.i2c.pressure || 0, 1);
-        updateValue('env-co2', data.i2c.co2 || 0, 0);
+        updateValue('env-co2', data.i2c.CO2 || 0, 0);
         updateStatus('i2c-status', true);
         document.getElementById('i2c-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
       } else {
@@ -747,14 +963,14 @@ function connectEventSource() {
       
       // SPS30 particle sensor data
       if (data.sps30 && data.sps30.valid) {
-        updateValue('sps30-pm1', data.sps30.pm1_0 || 0, 1);
-        updateValue('sps30-pm25', data.sps30.pm2_5 || 0, 1);
-        updateValue('sps30-pm4', data.sps30.pm4_0 || 0, 1);
-        updateValue('sps30-pm10', data.sps30.pm10 || 0, 1);
-        updateValue('sps30-size', data.sps30.typical_particle_size || 0, 1);
-        updateValue('sps30-nc05', data.sps30.nc0_5 || 0, 1);
-        updateValue('sps30-nc1', data.sps30.nc1_0 || 0, 1);
-        updateValue('sps30-nc25', data.sps30.nc2_5 || 0, 1);
+        updateValue('sps30-pm1', data.sps30.PM1 || 0, 1);
+        updateValue('sps30-pm25', data.sps30.PM25 || 0, 1);
+        updateValue('sps30-pm4', data.sps30.PM4 || 0, 1);
+        updateValue('sps30-pm10', data.sps30.PM10 || 0, 1);
+        updateValue('sps30-size', data.sps30.TPS || 0, 1);
+        updateValue('sps30-nc05', data.sps30.NC05 || 0, 1);
+        updateValue('sps30-nc1', data.sps30.NC1 || 0, 1);
+        updateValue('sps30-nc25', data.sps30.NC25 || 0, 1);
         updateStatus('sps30-status', true);
         document.getElementById('sps30-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
       } else {
@@ -789,15 +1005,90 @@ function connectEventSource() {
         updateStatus('power-status', false);
       }
       
+      // HCHO sensor data
+      if (data.hcho && data.hcho.valid) {
+        updateValue('hcho-value', data.hcho.HCHO || 0, 3);
+        updateValue('hcho-voc', data.hcho.VOC || 0, 3);
+        updateValue('hcho-tvoc', data.hcho.TVOC || 0, 3);
+        updateValue('hcho-temp', data.hcho.temperature || 0, 1);
+        updateValue('hcho-humidity', data.hcho.humidity || 0, 1);
+        updateValue('hcho-sensor-status', data.hcho.sensorStatus || 0, 0);
+        updateStatus('hcho-status', true);
+        document.getElementById('hcho-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
+      } else {
+        updateStatus('hcho-status', false);
+      }
+      
+      // IPS sensor data
+      if (data.ips && data.ips.valid) {
+        updateValue('ips-pc03', data.ips.PC[0] || 0, 0);
+        updateValue('ips-pc05', data.ips.PC[1] || 0, 0);
+        updateValue('ips-pc10', data.ips.PC[2] || 0, 0);
+        updateValue('ips-pc25', data.ips.PC[3] || 0, 0);
+        updateValue('ips-pc50', data.ips.PC[4] || 0, 0);
+        updateValue('ips-pc100', data.ips.PC[5] || 0, 0);
+        updateStatus('ips-status', true);
+        document.getElementById('ips-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
+      } else {
+        updateStatus('ips-status', false);
+      }
+      
+      // Calibration data
+      if (data.calibration && data.calibration.enabled && data.calibration.valid) {
+        // Gases (ppb)
+        if (data.calibration.gases_ppb) {
+          updateValue('calib-co', data.calibration.gases_ppb.CO || 0, 1);
+          updateValue('calib-no', data.calibration.gases_ppb.NO || 0, 1);
+          updateValue('calib-no2', data.calibration.gases_ppb.NO2 || 0, 1);
+          updateValue('calib-o3', data.calibration.gases_ppb.O3 || 0, 1);
+          updateValue('calib-so2', data.calibration.gases_ppb.SO2 || 0, 1);
+          updateValue('calib-h2s', data.calibration.gases_ppb.H2S || 0, 1);
+          updateValue('calib-nh3', data.calibration.gases_ppb.NH3 || 0, 1);
+          updateStatus('calib-gases-status', true);
+          document.getElementById('calib-gases-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
+        } else {
+          updateStatus('calib-gases-status', false);
+        }
+        
+        // TGS sensors
+        if (data.calibration.tgs) {
+          updateValue('calib-tgs02', data.calibration.tgs.TGS02 || 0, 3);
+          updateValue('calib-tgs03', data.calibration.tgs.TGS03 || 0, 3);
+          updateValue('calib-tgs12', data.calibration.tgs.TGS12 || 0, 3);
+          updateValue('calib-tgs02-ohm', data.calibration.tgs.TGS02_ohm || 0, 0);
+          updateValue('calib-tgs03-ohm', data.calibration.tgs.TGS03_ohm || 0, 0);
+          updateValue('calib-tgs12-ohm', data.calibration.tgs.TGS12_ohm || 0, 0);
+          updateStatus('calib-tgs-status', true);
+          document.getElementById('calib-tgs-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
+        } else {
+          updateStatus('calib-tgs-status', false);
+        }
+        
+        // Temperatures
+        if (data.calibration.temperatures) {
+          updateValue('calib-temp-k1', data.calibration.temperatures.K1 || 0, 1);
+          updateValue('calib-temp-k2', data.calibration.temperatures.K2 || 0, 1);
+          updateValue('calib-temp-k3', data.calibration.temperatures.K3 || 0, 1);
+          updateValue('calib-temp-k4', data.calibration.temperatures.K4 || 0, 1);
+          updateValue('calib-temp-k5', data.calibration.temperatures.K5 || 0, 1);
+          updateValue('calib-temp-k6', data.calibration.temperatures.K6 || 0, 1);
+          updateValue('calib-temp-k7', data.calibration.temperatures.K7 || 0, 1);
+          updateValue('calib-temp-k8', data.calibration.temperatures.K8 || 0, 1);
+          updateStatus('calib-temps-status', true);
+          document.getElementById('calib-temps-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
+        } else {
+          updateStatus('calib-temps-status', false);
+        }
+      } else {
+        updateStatus('calib-gases-status', false);
+        updateStatus('calib-tgs-status', false);
+        updateStatus('calib-temps-status', false);
+      }
+      
     } catch (error) {
       console.error('Error parsing sensor data:', error);
     }
-  });
-  
-  eventSource.addEventListener('error', function(event) {
-    console.error('EventSource error:', event);
-    setTimeout(connectEventSource, 5000); // Reconnect after 5 seconds
-  });
+  };
 }
 
 // Check for connection timeout and show offline status
@@ -811,14 +1102,12 @@ setInterval(function() {
 
 // Initialize on page load
 window.addEventListener('load', function() {
-  connectEventSource();
+  connectWebSocket();
 });
 
 // Cleanup on page unload
 window.addEventListener('beforeunload', function() {
-  if (eventSource) {
-    eventSource.close();
-  }
+  if (ws) ws.close();
 });
 </script>
 </body>

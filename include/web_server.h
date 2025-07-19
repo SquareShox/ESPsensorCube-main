@@ -5,14 +5,12 @@
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 #include <Update.h>
-#include <WebSerial.h>
 #include "config.h"
 
 // Function declarations
 void initializeWiFi();
 void initializeWebServer();
 void WiFiReconnectTask(void *parameter);
-void recvMsg(uint8_t *data, size_t len);
 
 // Global objects
 extern AsyncWebServer server;

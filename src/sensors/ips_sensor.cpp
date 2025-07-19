@@ -14,7 +14,6 @@ extern bool ipsSensorStatus;
 
 void initializeIPS() {
     safePrintln("Initializing IPS sensor via Serial1 UART...");
-    WebSerial.println("Initializing IPS sensor via Serial1 UART...");
     
     // Initialize Serial1 for IPS sensor (hardware serial)
     Serial1.end();  // End previous serial if running
@@ -45,7 +44,6 @@ void initializeIPS() {
     // Enable debug mode if configured
     if (config.enableIPSDebug) {
         safePrintln("Enabling IPS debug mode...");
-        WebSerial.println("Enabling IPS debug mode...");
         Serial1.write("$Wdebug=1\r\n");
         Serial1.write("$Won=3\r\n");
         ipsSensorData.won=3;
@@ -67,7 +65,6 @@ void initializeIPS() {
     
     ipsSensorStatus = true;
     safePrintln("IPS sensor Serial1 initialization complete");
-    WebSerial.println("IPS sensor Serial1 initialization complete");
 }
 
 void readIPSSensor() {
@@ -113,7 +110,7 @@ void readIPSSensor() {
             static unsigned long lastErrorReport = 0;
             if (currentTime - lastErrorReport > 30000) {
                 safePrintln("IPS sensor disabled due to consecutive errors");
-                WebSerial.println("IPS sensor disabled due to consecutive errors");
+               
                 lastErrorReport = currentTime;
             }
             ipsSensorStatus = false;
@@ -121,7 +118,7 @@ void readIPSSensor() {
             static unsigned long lastNoDataReport = 0;
             if (currentTime - lastNoDataReport > 15000) {
                 safePrintln("No IPS Serial1 data received in last 15 seconds");
-                WebSerial.println("No IPS Serial1 data received in last 15 seconds");
+               
                 lastNoDataReport = currentTime;
             }
         }

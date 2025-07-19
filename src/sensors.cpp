@@ -15,6 +15,7 @@ ADS1110Data ads1110Data;
 INA219Data ina219Data;
 SPS30Data sps30Data;
 SHT40Data sht40Data;
+HCHOData hchoData;  // Global HCHO sensor data
 
 // Global sensor status flags  
 bool solarSensorStatus = false;
@@ -28,4 +29,5 @@ bool sps30SensorStatus = false;
 bool mcp3424SensorStatus = false;
 bool ads1110SensorStatus = false;
 bool ina219SensorStatus = false;
-bool ipsSensorStatus = false; 
+bool ipsSensorStatus = false;
+bool hchoSensorStatus = false;  // Global HCHO sensor status 

@@ -6,7 +6,6 @@
 #include <OPCN3.h>
 #include "config.h"
 #include "sps30_sensor.h"
-#include <WebSerial.h>
 
 // Data structures for sensor readings
 struct SolarData {
@@ -76,10 +75,16 @@ void printSHT40Data();
 
 // IPS sensor functions moved to ips_sensor.h to avoid circular dependency
 
+// HCHO sensor functions
+void initializeHCHO();
+bool readHCHO();
+bool isHCHODataValid();
+void resetHCHOData();
+
 // Serial sensors functions
 void initializeSerialSensors();
 void readSerialSensors();
-void configureSerialSensor(int index, int rxPin, int txPin, long baud, String name, String protocol);
+void configureSerialSensor(int index, int rxPin, int txPin, long baud, const char* name, const char* protocol);
 
 // Status functions
 bool isSensorDataValid(unsigned long lastUpdate, unsigned long timeout);
@@ -106,6 +111,7 @@ extern bool mcp3424SensorStatus;    // Status MCP3424
 extern bool ads1110SensorStatus;    // Status ADS1110
 extern bool ina219SensorStatus;     // Status INA219
 extern bool ipsSensorStatus;        // Status czujnika IPS
+extern bool hchoSensorStatus;       // Status czujnika HCHO
 
 // Global ADC sensor data
 extern MCP3424Data mcp3424Data;
@@ -113,5 +119,6 @@ extern ADS1110Data ads1110Data;
 extern INA219Data ina219Data;
 extern SPS30Data sps30Data;
 extern SHT40Data sht40Data;
+extern HCHOData hchoData;           // HCHO sensor data
 
 #endif 

@@ -257,9 +257,24 @@ void calibrateGasesPPB() {
 
 // Kalibracja HCHO i PID
 void calibrateSpecialSensors() {
-    // HCHO - potrzebne dane z PMS5003ST (UART sensor)
-    // TODO: Implementacja gdy dostepne beda dane z UART
-    // calibratedData.HCHO = RAW * HCHO_B1 * HCHO_PPB_CF; // PPB_CF conversion
+    // HCHO - używamy danych z czujnika CB-HCHO-V4
+    extern HCHOData hchoData;
+    extern bool hchoSensorStatus;
+    
+    if (hchoSensorStatus && hchoData.valid) {
+        // Przeliczamy HCHO z mg/m3 na ppb (1 mg/m3 = 813 ppb dla HCHO w 25C, 1013hPa)
+        calibratedData.HCHO = hchoData.hcho * 813.0f;
+
+        // Opcjonalna kalibracja/korekcja
+        // calibratedData.HCHO = Linear_basic(HCHO_CALIB_MULT, calibratedData.HCHO, HCHO_CALIB_OFFSET);
+        
+        // Ograniczenie wartosci do rozsadnych granic (0-40000 ppb)
+        calibratedData.HCHO = fmax(0.0f, fmin(calibratedData.HCHO, 40000.0f));
+        
+    } else {
+        // Brak danych z czujnika HCHO
+        calibratedData.HCHO = 0.0f;
+    }
     
     // PID-AH v8 - wykorzystujemy Kx kanaly 
     float WRK = getMCP3424Value(5, 2); // Kx_3 - przykładowe przypisanie

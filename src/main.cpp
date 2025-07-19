@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <esp_task_wdt.h>
 #include <Adafruit_NeoPixel.h>
+#include <time.h>
 
 // Project includes
 #include <config.h>
@@ -11,6 +12,7 @@
 #include <web_server.h>
 #include <mean.h>
 #include <calib.h>
+#include <history.h>
 
 //#include <html.h>
 
@@ -33,6 +35,8 @@ void watchDogTask(void *parameter);
 void initializeHardware();
 void processSerialCommands();
 void updateSystemStatus();
+
+
 
 // Safe Serial printing functions
 void safePrint(const String& message) {
@@ -104,6 +108,9 @@ void setup() {
     // Initialize moving averages system
     initializeMovingAverages();
     
+    // Initialize sensor history in PSRAM
+    initializeHistory();
+    
     // Initialize communication protocols
     if (config.enableModbus) {
         lastModbusActivity = millis();
@@ -166,6 +173,11 @@ void loop() {
     if (config.enableIPS) {
         readIPSSensor();
     }
+    
+    if (config.enableHCHO) {
+        readHCHO();
+    }
+    
     readBatteryVoltage();
     readSerialSensors();
     
@@ -205,16 +217,15 @@ void loop() {
             updateModbusIPSRegisters();
         }
         
+        if (hchoSensorStatus) {
+            updateModbusHCHORegisters();
+        }
+        
         // Debug SPS30 status
         static unsigned long lastSPS30Debug = 0;
         if (currentTime - lastSPS30Debug > 15000) { // Every 15 seconds
             lastSPS30Debug = currentTime;
-            // safePrint("SPS30 Debug - Status: ");
-            // safePrint(sps30SensorStatus ? "true" : "false");
-            // safePrint(", Config: ");
-            // safePrint(config.enableSPS30 ? "true" : "false");
-            // safePrint(", Valid: ");
-            // safePrintln(sps30Data.valid ? "true" : "false");
+
         }
         
         if (sps30SensorStatus) {
@@ -235,11 +246,14 @@ void loop() {
     // Update system status indicators
     updateSystemStatus();
 
-    // Update moving averages every 10 seconds
+    // Update moving averages every 5 seconds
     if (currentTime - lastMovingAverageUpdate >= 5000) {
         updateMovingAverages();
         lastMovingAverageUpdate = currentTime;
     }
+    
+    // Update sensor history
+    updateSensorHistory();
     
     // Auto reset check
     if (config.autoReset) {
@@ -301,6 +315,10 @@ void loop() {
                 
                 // Print moving averages buffer status
                 printMovingAverageStatus();
+                
+                // Print history status
+                printHistoryMemoryUsage();
+                printHistoryStatus();
             }
         }
     }
@@ -316,13 +334,13 @@ void initializeHardware() {
     pixels.show();
     
     // Initialize solar sensor serial if enabled
-    if (config.enableSolarSensor) {
-        MySerial.begin(SOLAR_SERIAL_BAUD, SERIAL_8N1, SOLAR_RX_PIN, SOLAR_TX_PIN);
-        while (!MySerial) {
-            delay(100);
-        }
-        safePrintln("Solar sensor serial initialized");
-    }
+    // if (config.enableSolarSensor) {
+    //     MySerial.begin(SOLAR_SERIAL_BAUD, SERIAL_8N1, SOLAR_RX_PIN, SOLAR_TX_PIN);
+    //     while (!MySerial) {
+    //         delay(100);
+    //     }
+    //     safePrintln("Solar sensor serial initialized");
+    // }
     
     // Configure additional serial sensors
     // Example configuration - can be modified as needed
@@ -356,6 +374,8 @@ void processSerialCommands() {
                 safePrintln("  - INA219: " + String(ina219SensorStatus ? "OK" : (config.enableINA219 ? "ERROR" : "DISABLED")));
                 safePrintln("  - SPS30: " + String(sps30SensorStatus ? "OK" : (config.enableSPS30 ? "ERROR" : "DISABLED")));
                 safePrintln("IPS Sensor: " + String(ipsSensorStatus ? "OK" : (config.enableIPS ? "ERROR" : "DISABLED")));
+                safePrintln("HCHO Sensor: " + String(hchoSensorStatus ? "OK" : (config.enableHCHO ? "ERROR" : "DISABLED")));
+                
                 safePrintln("WiFi: " + String(WiFi.status() == WL_CONNECTED ? "CONNECTED" : "DISCONNECTED"));
                 //ip address
                 safePrintln("IP Address: " + String(WiFi.localIP().toString()));    
@@ -369,7 +389,40 @@ void processSerialCommands() {
                     }
                 }
                 safePrintln("Free Heap: " + String(ESP.getFreeHeap()));
+                safePrintln("PSRAM Size: " + String(ESP.getPsramSize() / 1024) + " KB");
+                safePrintln("Free PSRAM: " + String(ESP.getFreePsram() / 1024) + " KB");
                 safePrintln("Uptime: " + String(millis() / 1000) + " seconds");
+                
+                // Time info from ESP32 built-in time functions
+                extern bool timeInitialized;
+                extern String getFormattedTime();
+                extern String getFormattedDate();
+                extern time_t getEpochTime();
+                extern bool isTimeSet();
+                
+                if (isTimeSet()) {
+                    safePrintln("Time: " + getFormattedTime());
+                    safePrintln("Date: " + getFormattedDate());
+                    safePrintln("Epoch: " + String(getEpochTime()));
+                    
+                    struct tm timeinfo;
+                    if (getLocalTime(&timeinfo)) {
+                        safePrintln("Day of Week: " + String(timeinfo.tm_wday));
+                        safePrintln("Timezone: Poland (UTC+1/UTC+2 with DST)");
+                    }
+                } else {
+                    safePrintln("Time: Not synchronized");
+                }
+                
+                // Calibration status
+                extern CalibrationConfig calibConfig;
+                extern CalibratedSensorData calibratedData;
+                safePrintln("Calibration: " + String(calibConfig.enableCalibration ? "ENABLED" : "DISABLED"));
+                if (calibConfig.enableCalibration) {
+                    safePrintln("Calibration Valid: " + String(calibratedData.valid ? "YES" : "NO"));
+                    safePrintln("Last Calibration: " + String((millis() - calibratedData.lastUpdate) / 1000) + " seconds ago");
+                }
+                
                 safePrintln("=== Moving Averages Status ===");
                 printMovingAverageStatus();
             }
@@ -493,6 +546,36 @@ void processSerialCommands() {
                 config.autoReset = false;
                 safePrintln("Auto reset disabled");
             }
+            else if (command.equals("CONFIG_CALIB_ON")) {
+                extern CalibrationConfig calibConfig;
+                calibConfig.enableCalibration = true;
+                safePrintln("Calibration enabled");
+            }
+            else if (command.equals("CONFIG_CALIB_OFF")) {
+                extern CalibrationConfig calibConfig;
+                calibConfig.enableCalibration = false;
+                safePrintln("Calibration disabled");
+            }
+            else if (command.equals("CONFIG_TGS_ON")) {
+                extern CalibrationConfig calibConfig;
+                calibConfig.enableTGSSensors = true;
+                safePrintln("TGS sensors enabled");
+            }
+            else if (command.equals("CONFIG_TGS_OFF")) {
+                extern CalibrationConfig calibConfig;
+                calibConfig.enableTGSSensors = false;
+                safePrintln("TGS sensors disabled");
+            }
+            else if (command.equals("CONFIG_GASES_ON")) {
+                extern CalibrationConfig calibConfig;
+                calibConfig.enableGasSensors = true;
+                safePrintln("Gas sensors enabled");
+            }
+            else if (command.equals("CONFIG_GASES_OFF")) {
+                extern CalibrationConfig calibConfig;
+                calibConfig.enableGasSensors = false;
+                safePrintln("Gas sensors disabled");
+            }
         }
         else if (command.equals("DATATYPE_CURRENT")) {
             if (config.enableModbus) {
@@ -543,6 +626,83 @@ void processSerialCommands() {
                 safePrintln("Last Activity: " + String((millis() - lastModbusActivity) / 1000) + " seconds ago");
                 safePrintln("Timeout: " + String(MODBUS_TIMEOUT / 1000) + " seconds");
                 safePrintln("System Uptime: " + String(millis() / 1000) + " seconds");
+            }
+        }
+        else if (command.equals("CALIB_DATA")) {
+            if (isSerialAvailable()) {
+                extern CalibratedSensorData calibratedData;
+                extern CalibrationConfig calibConfig;
+                
+                safePrintln("=== Calibration Data ===");
+                safePrintln("Enabled: " + String(calibConfig.enableCalibration ? "YES" : "NO"));
+                safePrintln("Valid: " + String(calibratedData.valid ? "YES" : "NO"));
+                
+                if (calibConfig.enableCalibration && calibratedData.valid) {
+                    safePrintln("--- Temperatures ---");
+                    safePrintln("K1: " + String(calibratedData.K1_temp, 1) + "°C");
+                    safePrintln("K2: " + String(calibratedData.K2_temp, 1) + "°C");
+                    safePrintln("K3: " + String(calibratedData.K3_temp, 1) + "°C");
+                    safePrintln("K4: " + String(calibratedData.K4_temp, 1) + "°C");
+                    safePrintln("K5: " + String(calibratedData.K5_temp, 1) + "°C");
+                    
+                    safePrintln("--- Gases (ppb) ---");
+                    safePrintln("CO: " + String(calibratedData.CO_ppb, 1) + " ppb");
+                    safePrintln("NO: " + String(calibratedData.NO_ppb, 1) + " ppb");
+                    safePrintln("NO2: " + String(calibratedData.NO2_ppb, 1) + " ppb");
+                    safePrintln("O3: " + String(calibratedData.O3_ppb, 1) + " ppb");
+                    safePrintln("SO2: " + String(calibratedData.SO2_ppb, 1) + " ppb");
+                    safePrintln("H2S: " + String(calibratedData.H2S_ppb, 1) + " ppb");
+                    safePrintln("NH3: " + String(calibratedData.NH3_ppb, 1) + " ppb");
+                    
+                    safePrintln("--- TGS Sensors ---");
+                    safePrintln("TGS02: " + String(calibratedData.TGS02, 3) + " ppm");
+                    safePrintln("TGS03: " + String(calibratedData.TGS03, 3) + " ppm");
+                    safePrintln("TGS12: " + String(calibratedData.TGS12, 3) + " ppm");
+                    
+                    safePrintln("--- Special Sensors ---");
+                    safePrintln("HCHO: " + String(calibratedData.HCHO, 1) + " ppb");
+                    safePrintln("PID: " + String(calibratedData.PID, 3) + " ppm");
+                } else {
+                    safePrintln("No valid calibration data available");
+                }
+            }
+        }
+        else if (command.equals("TIME_INFO")) {
+            if (isSerialAvailable()) {
+                extern bool isTimeSet();
+                extern String getFormattedTime();
+                extern String getFormattedDate();
+                extern time_t getEpochTime();
+                
+                safePrintln("=== Time Information ===");
+                safePrintln("Time Synchronized: " + String(isTimeSet() ? "YES" : "NO"));
+                if (isTimeSet()) {
+                    safePrintln("Current Time: " + getFormattedTime());
+                    safePrintln("Current Date: " + getFormattedDate());
+                    safePrintln("Epoch Time: " + String(getEpochTime()));
+                    
+                    struct tm timeinfo;
+                    if (getLocalTime(&timeinfo)) {
+                        safePrintln("Day of Week: " + String(timeinfo.tm_wday) + " (0=Sunday)");
+                        safePrintln("Hours: " + String(timeinfo.tm_hour));
+                        safePrintln("Minutes: " + String(timeinfo.tm_min));
+                        safePrintln("Seconds: " + String(timeinfo.tm_sec));
+                        safePrintln("Day: " + String(timeinfo.tm_mday));
+                        safePrintln("Month: " + String(timeinfo.tm_mon + 1));
+                        safePrintln("Year: " + String(timeinfo.tm_year + 1900));
+                        safePrintln("Timezone: Poland (UTC+1/UTC+2 with automatic DST)");
+                    }
+                } else {
+                    safePrintln("Time not synchronized - check WiFi connection");
+                }
+                safePrintln("System Uptime: " + String(millis() / 1000) + " seconds");
+            }
+        }
+        else if (command.equals("HISTORY")) {
+            if (isSerialAvailable()) {
+                safePrintln("=== Sensor History Status ===");
+                printHistoryMemoryUsage();
+                printHistoryStatus();
             }
         }
         else if (command.equals("RESTART")) {

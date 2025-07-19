@@ -96,7 +96,6 @@ void initializeI2C() {
         sht30SensorStatus = true;
         i2cSensorData.type = SENSOR_SHT30;
         safePrintln("SHT30 sensor detected and enabled");
-        WebSerial.println("SHT30 sensor detected and enabled");
     }
     
     if (config.enableBME280 && initializeI2CSensor(SENSOR_BME280)) {
@@ -105,7 +104,6 @@ void initializeI2C() {
             i2cSensorData.type = SENSOR_BME280;
         }
         safePrintln("BME280 sensor detected and enabled");
-        WebSerial.println("BME280 sensor detected and enabled");
     }
     
     if (config.enableSCD41 && initializeI2CSensor(SENSOR_SCD41)) {
@@ -116,24 +114,19 @@ void initializeI2C() {
                 i2cSensorData.type = SENSOR_SCD41;
             }
             safePrintln("SCD41 sensor detected and enabled");
-            WebSerial.println("SCD41 sensor detected and enabled");
         } else {
             safePrintln("SCD41 initialization failed");
-            WebSerial.println("SCD41 initialization failed");
         }
     } else if (config.enableSCD41) {
         safePrintln("SCD41: Sensor not detected at address 0x62");
-        WebSerial.println("SCD41: Sensor not detected at address 0x62");
     }
     
     if (config.enableSHT40 && initializeI2CSensor(SENSOR_SHT40)) {
         if (initializeSHT40()) {
             sht40SensorStatus = true;
             safePrintln("SHT40 sensor detected and enabled");
-            WebSerial.println("SHT40 sensor detected and enabled");
         } else {
             safePrintln("SHT40 initialization failed");
-            WebSerial.println("SHT40 initialization failed");
         }
     }
     
@@ -142,10 +135,8 @@ void initializeI2C() {
         if (initializeSPS30()) {
             sps30SensorStatus = true;
             safePrintln("SPS30 particle sensor initialized and enabled");
-            WebSerial.println("SPS30 particle sensor initialized and enabled");
         } else {
             safePrintln("SPS30 initialization failed");
-            WebSerial.println("SPS30 initialization failed");
         }
     }
     
@@ -153,7 +144,6 @@ void initializeI2C() {
         // Scan for MCP3424 addresses (0x68-0x6F)
     if (config.enableMCP3424) {
         safePrintln("Scanning for MCP3424 devices...");
-        WebSerial.println("Scanning for MCP3424 devices...");
         mcp3424Data.deviceCount = 0;
         
         for (uint8_t addr = 0x68; addr <= 0x6F; addr++) {
@@ -165,8 +155,6 @@ void initializeI2C() {
             if (result == 0 && mcp3424Data.deviceCount < MAX_MCP3424_DEVICES) {
                 safePrint("MCP3424 found at address 0x");
                 safePrintln(String(addr, HEX));
-                WebSerial.println("MCP3424 found at address 0x");
-                WebSerial.println(String(addr, HEX));
                 // Create new instance for this address
                 mcp3424_devices[mcp3424Data.deviceCount] = new MCP342x(addr);
                //  mcp3424_devices[mcp3424Data.deviceCount]->convert
@@ -205,21 +193,15 @@ void initializeI2C() {
             
             safePrint("Found ");
             safePrint(String(mcp3424Data.deviceCount));
-            WebSerial.println("Found ");
-            WebSerial.println(String(mcp3424Data.deviceCount));
             safePrint(" MCP3424 devices with 18-bit resolution (cykliczny tryb kanaly 1-4)");
-            WebSerial.println("MCP3424 devices with 18-bit resolution (cykliczny tryb kanaly 1-4)");
             if (mcp3424_debug_enabled) {
                 safePrint(" - DEBUG ON");
-                WebSerial.println("MCP3424 debug ENABLED - będą wypisywane dane i czasy");
             } else {
                 safePrint(" - DEBUG OFF");
-                WebSerial.println("MCP3424 debug DISABLED - tylko cichy odczyt danych");
             }
             safePrintln("");
         } else {
             safePrintln("No MCP3424 devices found in range 0x68-0x6F");
-            WebSerial.println("No MCP3424 devices found in range 0x68-0x6F");
         }
     }
     
@@ -228,7 +210,6 @@ void initializeI2C() {
         ads1110Data.dataRate = 15;    // Default 15 SPS (00 = 15 SPS)
         ads1110Data.gain = 1;         // Default 1x gain (00 = 1x)
         safePrintln("ADS1110 sensor detected and enabled");
-        WebSerial.println("ADS1110 sensor detected and enabled");
     }
     
     if (config.enableINA219 && initializeI2CSensor(SENSOR_INA219)) {
@@ -236,7 +217,6 @@ void initializeI2C() {
         ina219.begin();
         ina219.setCalibration_32V_2A();  // Default calibration
         safePrintln("INA219 sensor detected and enabled");
-        WebSerial.println("INA219 sensor detected and enabled");
     }
     
     // Update overall I2C status
@@ -660,16 +640,14 @@ void enableI2CSensor(I2CSensorType sensorType) {
             config.enableSHT30 = true;
             if (initializeI2CSensor(SENSOR_SHT30)) {
                 sht30SensorStatus = true;
-                safePrintln("SHT30 sensor enabled");
-                WebSerial.println("SHT30 sensor enabled");
+                        safePrintln("SHT30 sensor enabled");
             }
             break;
         case SENSOR_BME280:
             config.enableBME280 = true;
             if (initializeI2CSensor(SENSOR_BME280)) {
                 bme280SensorStatus = true;
-                safePrintln("BME280 sensor enabled");
-                WebSerial.println("BME280 sensor enabled");
+                        safePrintln("BME280 sensor enabled");
 
             }
             break;
@@ -678,11 +656,9 @@ void enableI2CSensor(I2CSensorType sensorType) {
             if (initializeI2CSensor(SENSOR_SCD41)) {
                 if (initializeSCD41()) {
                     scd41SensorStatus = true;
-                    safePrintln("SCD41 sensor enabled");
-                    WebSerial.println("SCD41 sensor enabled");
+                            safePrintln("SCD41 sensor enabled");
                 } else {
-                    safePrintln("SCD41 sensor initialization failed");
-                    WebSerial.println("SCD41 sensor initialization failed");
+                                safePrintln("SCD41 sensor initialization failed");
                 }
             }
             break;
@@ -691,11 +667,9 @@ void enableI2CSensor(I2CSensorType sensorType) {
             if (initializeI2CSensor(SENSOR_SHT40)) {
                 if (initializeSHT40()) {
                     sht40SensorStatus = true;
-                    safePrintln("SHT40 sensor enabled");
-                    WebSerial.println("SHT40 sensor enabled");
+                            safePrintln("SHT40 sensor enabled");
                 } else {
-                    safePrintln("SHT40 sensor initialization failed");
-                    WebSerial.println("SHT40 sensor initialization failed");
+                                safePrintln("SHT40 sensor initialization failed");
                 }
             }
             break;
@@ -704,11 +678,9 @@ void enableI2CSensor(I2CSensorType sensorType) {
             if (initializeI2CSensor(SENSOR_SPS30)) {
                 if (initializeSPS30()) {
                     sps30SensorStatus = true;
-                    safePrintln("SPS30 sensor enabled");
-                    WebSerial.println("SPS30 sensor enabled");
+                            safePrintln("SPS30 sensor enabled");
                 } else {
-                    safePrintln("SPS30 sensor initialization failed");
-                    WebSerial.println("SPS30 sensor initialization failed");
+                                safePrintln("SPS30 sensor initialization failed");
                 }
             }
             break;
@@ -716,16 +688,14 @@ void enableI2CSensor(I2CSensorType sensorType) {
             config.enableMCP3424 = true;
             if (initializeI2CSensor(SENSOR_MCP3424)) {
                 mcp3424SensorStatus = true;
-                safePrintln("MCP3424 sensor enabled");
-                WebSerial.println("MCP3424 sensor enabled");
+                        safePrintln("MCP3424 sensor enabled");
             }
             break;
         case SENSOR_ADS1110:
             config.enableADS1110 = true;
             if (initializeI2CSensor(SENSOR_ADS1110)) {
                 ads1110SensorStatus = true;
-                safePrintln("ADS1110 sensor enabled");
-                WebSerial.println("ADS1110 sensor enabled");
+                        safePrintln("ADS1110 sensor enabled");
             }
             break;
         case SENSOR_INA219:
@@ -734,8 +704,7 @@ void enableI2CSensor(I2CSensorType sensorType) {
                 ina219SensorStatus = true;
                 ina219.begin();
                 ina219.setCalibration_32V_2A();
-                safePrintln("INA219 sensor enabled");
-                WebSerial.println("INA219 sensor enabled");
+                        safePrintln("INA219 sensor enabled");
             }
             break;
         default:
@@ -752,14 +721,12 @@ void disableI2CSensor(I2CSensorType sensorType) {
         case SENSOR_SHT30:
             config.enableSHT30 = false;
             sht30SensorStatus = false;
-            safePrintln("SHT30 sensor disabled");
-            WebSerial.println("SHT30 sensor disabled");
+                    safePrintln("SHT30 sensor disabled");
             break;
         case SENSOR_BME280:
             config.enableBME280 = false;
             bme280SensorStatus = false;
-            safePrintln("BME280 sensor disabled");
-            WebSerial.println("BME280 sensor disabled");
+                    safePrintln("BME280 sensor disabled");
             break;
         case SENSOR_SCD41:
             config.enableSCD41 = false;
@@ -775,15 +742,13 @@ void disableI2CSensor(I2CSensorType sensorType) {
                 safePrintln("SCD41 task stopped");
             }
             
-            safePrintln("SCD41 sensor disabled");
-            WebSerial.println("SCD41 sensor disabled");
+                    safePrintln("SCD41 sensor disabled");
             break;
         case SENSOR_SHT40:
             config.enableSHT40 = false;
             sht40SensorStatus = false;
             sht40Data.valid = false;
-            safePrintln("SHT40 sensor disabled");
-            WebSerial.println("SHT40 sensor disabled");
+                    safePrintln("SHT40 sensor disabled");
             break;
         case SENSOR_SPS30:
             config.enableSPS30 = false;
@@ -791,27 +756,23 @@ void disableI2CSensor(I2CSensorType sensorType) {
                 stopSPS30Measurement();
                 sps30SensorStatus = false;
                 sps30Data.valid = false;
-                safePrintln("SPS30 sensor disabled");
-                WebSerial.println("SPS30 sensor disabled");
+                        safePrintln("SPS30 sensor disabled");
             }
             break;
         case SENSOR_MCP3424:
             config.enableMCP3424 = false;
             mcp3424SensorStatus = false;
-            safePrintln("MCP3424 sensor disabled");
-            WebSerial.println("MCP3424 sensor disabled");
+                    safePrintln("MCP3424 sensor disabled");
             break;
         case SENSOR_ADS1110:
             config.enableADS1110 = false;
             ads1110SensorStatus = false;
-            safePrintln("ADS1110 sensor disabled");
-            WebSerial.println("ADS1110 sensor disabled");
+                    safePrintln("ADS1110 sensor disabled");
             break;
         case SENSOR_INA219:
             config.enableINA219 = false;
             ina219SensorStatus = false;
-            safePrintln("INA219 sensor disabled");
-            WebSerial.println("INA219 sensor disabled");
+                    safePrintln("INA219 sensor disabled");
             break;
         default:
             break;
@@ -1414,10 +1375,8 @@ void setMCP3424Debug(bool enabled) {
     safePrint("MCP3424 debug ");
     if (enabled) {
         safePrintln("ENABLED - będą wypisywane dane i czasy");
-        WebSerial.println("MCP3424 debug ENABLED - będą wypisywane dane i czasy");
     } else {
         safePrintln("DISABLED - tylko cichy odczyt danych");
-        WebSerial.println("MCP3424 debug DISABLED - tylko cichy odczyt danych");
     }
 }
 

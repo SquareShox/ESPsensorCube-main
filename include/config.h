@@ -1,6 +1,8 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+#include <stdint.h>
+
 // WiFi Configuration
 #define WIFI_SSID "DAC_WIFI"
 #define WIFI_PASSWORD "$GrUnWaLdZkA$"
@@ -17,16 +19,19 @@
 #define MODBUS_TX_PIN 5
 #define I2C_SDA_PIN 7
 #define I2C_SCL_PIN 8
-#define OPCN3_SS_PIN 10
+#define OPCN3_SS_PIN 11
 #define IPS_POWER_PIN 1
 #define IPS_RX_PIN 7         // Serial1 RX for IPS
 #define IPS_TX_PIN 8         // Serial1 TX for IPS
+#define HCHO_RX_PIN 9       // HCHO sensor UART RX pin
+#define HCHO_TX_PIN 10        // HCHO sensor UART TX pin
 
 // Serial Configuration
 #define SERIAL_BAUD 115200
 #define SOLAR_SERIAL_BAUD 19200
 #define MODBUS_BAUD 38400
 #define MODBUS_SLAVE_ID 30
+#define HCHO_SERIAL_BAUD 9600
 
 // Buffer Sizes
 #define BUFFER_SIZE 300
@@ -40,6 +45,7 @@
 #define REG_COUNT_ADS1110 50
 #define REG_COUNT_INA219 50
 #define REG_COUNT_SHT40 50
+#define REG_COUNT_HCHO 50      // Rejestry dla czujnika HCHO
 #define REG_COUNT_CALIBRATION 100
 
 // Timeouts
@@ -49,6 +55,8 @@
 #define OPCN3_READ_INTERVAL 10000 // 10 seconds
 #define OPCN3_SEND_INTERVAL 10000 // 10 seconds
 #define I2C_TIMEOUT_MS 100        // I2C timeout 100ms
+#define HCHO_TIMEOUT_MS 5000      // HCHO sensor timeout 2 seconds
+#define HCHO_READ_INTERVAL 5000   // HCHO read interval 5 seconds
 
 // Feature configuration structure for easy enable/disable of components
 struct FeatureConfig {
@@ -67,6 +75,8 @@ struct FeatureConfig {
     bool enableINA219 = true;      // Current/voltage sensor
     bool enableIPS = false;         // Kontrola czujnika IPS (UART)
     bool enableIPSDebug = false;    // Kontrola IPS debug mode
+    bool enableHCHO = true;        // CB-HCHO-V4 formaldehyde sensor
+    bool enableHistory = true;    // PSRAM-based sensor history system (temporarily disabled due to memory issues)
     bool enableModbus = true;
     bool autoReset = false;
 };
@@ -82,7 +92,8 @@ enum I2CSensorType {
     SENSOR_SPS30 = 6,       // Sensirion SPS30 particle sensor
     SENSOR_MCP3424 = 7,
     SENSOR_ADS1110 = 8,
-    SENSOR_INA219 = 9
+    SENSOR_INA219 = 9,
+    SENSOR_HCHO = 10        // CB-HCHO-V4 formaldehyde sensor
 };
 
 // Serial Sensor Configuration
@@ -91,8 +102,8 @@ struct SerialSensorConfig {
     int rxPin = -1;
     int txPin = -1;
     long baudRate = 9600;
-    String name = "";
-    String protocol = ""; // "NMEA", "JSON", "CSV", "CUSTOM"
+    const char* name = "";
+    const char* protocol = ""; // "NMEA", "JSON", "CSV", "CUSTOM"
 };
 
 #define MAX_SERIAL_SENSORS 4
@@ -184,6 +195,19 @@ struct SPS30Data {
     float nc4_0;                // Number concentration 4.0µm [#/cm³]
     float nc10;                 // Number concentration 10µm [#/cm³]
     float typical_particle_size; // Typical particle size [µm]
+    bool valid = false;
+    unsigned long lastUpdate = 0;
+};
+
+// HCHO Sensor Data Structure - CB-HCHO-V4 formaldehyde sensor
+struct HCHOData {
+    float hcho = 0.0;              // Formaldehyde concentration [mg/m³]
+    float voc = 0.0;               // VOC concentration [mg/m³] 
+    float temperature = 0.0;       // Temperature [°C]
+    float humidity = 0.0;          // Relative humidity [%]
+    float tvoc = 0.0;              // TVOC concentration [mg/m³]
+    uint8_t sensorStatus = 0;      // Sensor status (0=normal, 1=anomaly, etc.)
+    uint8_t autoCalibration = 0;   // Auto calibration status
     bool valid = false;
     unsigned long lastUpdate = 0;
 };

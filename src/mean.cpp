@@ -1502,6 +1502,119 @@ CalibratedSensorData CircularBuffer<CalibratedSensorData, SLOW_BUFFER_SIZE>::div
     return result;
 }
 
+// HCHO sensor averaging - FAST_BUFFER_SIZE specializations
+template<>
+HCHOData CircularBuffer<HCHOData, FAST_BUFFER_SIZE>::addWeighted(const HCHOData& a, const HCHOData& b, float weight) {
+    HCHOData result = a;
+    if (b.valid) {
+        result.valid = true;
+        result.hcho += b.hcho * weight;
+        result.voc += b.voc * weight;
+        result.temperature += b.temperature * weight;
+        result.humidity += b.humidity * weight;
+        result.tvoc += b.tvoc * weight;
+        result.sensorStatus = b.sensorStatus; // Keep latest status
+        result.autoCalibration = b.autoCalibration; // Keep latest calibration setting
+    }
+    return result;
+}
+
+template<>
+HCHOData CircularBuffer<HCHOData, FAST_BUFFER_SIZE>::addSimple(const HCHOData& a, const HCHOData& b) {
+    HCHOData result = a;
+    if (b.valid) {
+        result.valid = true;
+        result.hcho += b.hcho;
+        result.voc += b.voc;
+        result.temperature += b.temperature;
+        result.humidity += b.humidity;
+        result.tvoc += b.tvoc;
+    }
+    return result;
+}
+
+template<>
+HCHOData CircularBuffer<HCHOData, FAST_BUFFER_SIZE>::divideByWeight(const HCHOData& sum, float weight) {
+    HCHOData result = sum;
+    if (weight > 0) {
+        result.hcho /= weight;
+        result.voc /= weight;
+        result.temperature /= weight;
+        result.humidity /= weight;
+        result.tvoc /= weight;
+    }
+    return result;
+}
+
+template<>
+HCHOData CircularBuffer<HCHOData, FAST_BUFFER_SIZE>::divideByCount(const HCHOData& sum, size_t count) {
+    HCHOData result = sum;
+    if (count > 0) {
+        result.hcho /= count;
+        result.voc /= count;
+        result.temperature /= count;
+        result.humidity /= count;
+        result.tvoc /= count;
+    }
+    return result;
+}
+
+// HCHO sensor averaging - SLOW_BUFFER_SIZE specializations
+template<>
+HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::addWeighted(const HCHOData& a, const HCHOData& b, float weight) {
+    HCHOData result = a;
+    if (b.valid) {
+        result.valid = true;
+        result.hcho += b.hcho * weight;
+        result.voc += b.voc * weight;
+        result.temperature += b.temperature * weight;
+        result.humidity += b.humidity * weight;
+        result.tvoc += b.tvoc * weight;
+        result.sensorStatus = b.sensorStatus; // Keep latest status
+        result.autoCalibration = b.autoCalibration; // Keep latest calibration setting
+    }
+    return result;
+}
+
+template<>
+HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::addSimple(const HCHOData& a, const HCHOData& b) {
+    HCHOData result = a;
+    if (b.valid) {
+        result.valid = true;
+        result.hcho += b.hcho;
+        result.voc += b.voc;
+        result.temperature += b.temperature;
+        result.humidity += b.humidity;
+        result.tvoc += b.tvoc;
+    }
+    return result;
+}
+
+template<>
+HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::divideByWeight(const HCHOData& sum, float weight) {
+    HCHOData result = sum;
+    if (weight > 0) {
+        result.hcho /= weight;
+        result.voc /= weight;
+        result.temperature /= weight;
+        result.humidity /= weight;
+        result.tvoc /= weight;
+    }
+    return result;
+}
+
+template<>
+HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::divideByCount(const HCHOData& sum, size_t count) {
+    HCHOData result = sum;
+    if (count > 0) {
+        result.hcho /= count;
+        result.voc /= count;
+        result.temperature /= count;
+        result.humidity /= count;
+        result.tvoc /= count;
+    }
+    return result;
+}
 
 // Moving average manager class
 class MovingAverageManager {
@@ -1516,6 +1629,7 @@ private:
     CircularBuffer<INA219Data, FAST_BUFFER_SIZE>* ina219FastBuffer;
     CircularBuffer<SHT40Data, FAST_BUFFER_SIZE>* sht40FastBuffer;
     CircularBuffer<CalibratedSensorData, FAST_BUFFER_SIZE>* calibFastBuffer;
+    CircularBuffer<HCHOData, FAST_BUFFER_SIZE>* hchoFastBuffer;
     
     // Slow buffers (5 minute averages) - conditionally allocated
     CircularBuffer<SolarData, SLOW_BUFFER_SIZE>* solarSlowBuffer;
@@ -1527,6 +1641,7 @@ private:
     CircularBuffer<INA219Data, SLOW_BUFFER_SIZE>* ina219SlowBuffer;
     CircularBuffer<SHT40Data, SLOW_BUFFER_SIZE>* sht40SlowBuffer;
     CircularBuffer<CalibratedSensorData, SLOW_BUFFER_SIZE>* calibSlowBuffer;
+    CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>* hchoSlowBuffer;
     
     // Sensor enabled flags (cached from config)
     bool solarEnabled;
@@ -1538,6 +1653,7 @@ private:
     bool ina219Enabled;
     bool sht40Enabled;
     bool calibEnabled;
+    bool hchoEnabled;
     
     // Averaged data storage
     SolarData solarFastAvg, solarSlowAvg;
@@ -1549,6 +1665,7 @@ private:
     INA219Data ina219FastAvg, ina219SlowAvg;
     SHT40Data sht40FastAvg, sht40SlowAvg;
     CalibratedSensorData calibFastAvg, calibSlowAvg;
+    HCHOData hchoFastAvg, hchoSlowAvg;
     
     unsigned long lastFastUpdate = 0;
     unsigned long lastSlowUpdate = 0;
@@ -1565,6 +1682,7 @@ public:
         ina219FastBuffer = nullptr;
         sht40FastBuffer = nullptr;
         calibFastBuffer = nullptr;
+        hchoFastBuffer = nullptr;
         
         solarSlowBuffer = nullptr;
         i2cSlowBuffer = nullptr;
@@ -1575,6 +1693,7 @@ public:
         ina219SlowBuffer = nullptr;
         sht40SlowBuffer = nullptr;
         calibSlowBuffer = nullptr;
+        hchoSlowBuffer = nullptr;
         
         // Initialize all flags to false
         solarEnabled = false;
@@ -1586,6 +1705,7 @@ public:
         ina219Enabled = false;
         sht40Enabled = false;
         calibEnabled = false;
+        hchoEnabled = false;
     }
     
     ~MovingAverageManager() {
@@ -1599,6 +1719,7 @@ public:
         delete ina219FastBuffer;
         delete sht40FastBuffer;
         delete calibFastBuffer;
+        delete hchoFastBuffer;
         
         delete solarSlowBuffer;
         delete i2cSlowBuffer;
@@ -1609,6 +1730,7 @@ public:
         delete ina219SlowBuffer;
         delete sht40SlowBuffer;
         delete calibSlowBuffer;
+        delete hchoSlowBuffer;
     }
     
     void initializeBuffers() {
@@ -1624,6 +1746,7 @@ public:
         ina219Enabled = config.enableINA219;
         sht40Enabled = config.enableSHT40;
         calibEnabled = calibConfig.enableMovingAverages;
+        hchoEnabled = config.enableHCHO;
         
         Serial.println("Initializing moving average buffers for enabled sensors:");
         
@@ -1682,6 +1805,12 @@ public:
             Serial.println("  - Calibration buffers allocated");
         }
         
+        if (hchoEnabled) {
+            hchoFastBuffer = new CircularBuffer<HCHOData, FAST_BUFFER_SIZE>();
+            hchoSlowBuffer = new CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>();
+            Serial.println("  - HCHO buffers allocated");
+        }
+        
         // Calculate total memory usage estimation
         int enabledSensors = 0;
         if (solarEnabled) enabledSensors++;
@@ -1693,6 +1822,7 @@ public:
         if (ina219Enabled) enabledSensors++;
         if (sht40Enabled) enabledSensors++;
         if (calibEnabled) enabledSensors++;
+        if (hchoEnabled) enabledSensors++;
         
         // Rough estimation: each buffer pair uses ~2KB
         size_t estimatedMemory = enabledSensors * 2048;
@@ -1717,6 +1847,7 @@ public:
         extern INA219Data ina219Data;
         extern SHT40Data sht40Data;
         extern CalibratedSensorData calibratedData;
+        extern HCHOData hchoData;
         
         if (solarEnabled && solarFastBuffer && solarSlowBuffer && solarData.valid) {
             solarFastBuffer->push(solarData, currentTime);
@@ -1763,6 +1894,11 @@ public:
             calibSlowBuffer->push(calibratedData, currentTime);
         }
         
+        if (hchoEnabled && hchoFastBuffer && hchoSlowBuffer && hchoData.valid) {
+            hchoFastBuffer->push(hchoData, currentTime);
+            hchoSlowBuffer->push(hchoData, currentTime);
+        }
+        
         // Update fast averages (every 5 seconds)
         if (currentTime - lastFastUpdate >= 5000) {
             lastFastUpdate = currentTime;
@@ -1797,10 +1933,13 @@ public:
             if (calibEnabled && calibSlowBuffer) {
                 calibSlowAvg = calibSlowBuffer->getWeightedAverage(currentTime, SLOW_PERIOD_MS);
             }
+            if (hchoEnabled && hchoFastBuffer) {
+                hchoFastAvg = hchoFastBuffer->getWeightedAverage(currentTime, FAST_PERIOD_MS);
+            }
         }
         
         // Update slow averages (every 30 seconds)
-        if (currentTime - lastSlowUpdate >= 10000) {
+        if (currentTime - lastSlowUpdate >= 30000) {
             lastSlowUpdate = currentTime;
             
             if (solarEnabled && solarSlowBuffer) {
@@ -1832,6 +1971,9 @@ public:
             }
             if (calibEnabled && calibSlowBuffer) {
                 calibSlowAvg = calibSlowBuffer->getWeightedAverage(currentTime, SLOW_PERIOD_MS);
+            }
+            if (hchoEnabled && hchoSlowBuffer) {
+                hchoSlowAvg = hchoSlowBuffer->getWeightedAverage(currentTime, SLOW_PERIOD_MS);
             }
         }
     }
@@ -1918,6 +2060,15 @@ public:
         return CalibratedSensorData{};
     }
     
+    HCHOData getHCHOFastAverage() const {
+        if (hchoEnabled && hchoFastBuffer) return hchoFastAvg;
+        return HCHOData{};
+    }
+    HCHOData getHCHOSlowAverage() const {
+        if (hchoEnabled && hchoSlowBuffer) return hchoSlowAvg;
+        return HCHOData{};
+    }
+    
     void printAverageStatus() {
         Serial.print("Enabled sensors - Fast buffers: ");
         if (solarEnabled && solarFastBuffer) {
@@ -1944,6 +2095,9 @@ public:
         if (sht40Enabled && sht40FastBuffer) {
             Serial.print("SHT40="); Serial.print(sht40FastBuffer->size());
         }
+        if (hchoEnabled && hchoFastBuffer) {
+            Serial.print("HCHO="); Serial.print(hchoFastBuffer->size());
+        }
         Serial.println();
         
         Serial.print("Disabled sensors: ");
@@ -1955,6 +2109,7 @@ public:
         if (!ads1110Enabled) Serial.print("ADS1110 ");
         if (!ina219Enabled) Serial.print("INA219 ");
         if (!sht40Enabled) Serial.print("SHT40 ");
+        if (!hchoEnabled) Serial.print("HCHO ");
         Serial.println();
     }
 };
@@ -2047,4 +2202,12 @@ CalibratedSensorData getCalibratedFastAverage() {
 
 CalibratedSensorData getCalibratedSlowAverage() {
     return movingAverageManager.getCalibratedSlowAverage();
+}
+
+HCHOData getHCHOFastAverage() {
+    return movingAverageManager.getHCHOFastAverage();
+}
+
+HCHOData getHCHOSlowAverage() {
+    return movingAverageManager.getHCHOSlowAverage();
 }

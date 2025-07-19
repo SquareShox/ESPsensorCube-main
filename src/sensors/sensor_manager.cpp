@@ -3,6 +3,7 @@
 #include "opcn3_sensor.h"
 #include "i2c_sensors.h"
 #include "ips_sensor.h"
+#include "hcho_sensor.h"
 #include <sensors.h>
 
 // Forward declarations for safe printing functions
@@ -11,6 +12,12 @@ void safePrintln(const String& message);
 
 // Global configuration
 extern FeatureConfig config;
+
+// External sensor status flags
+extern bool opcn3SensorStatus;
+extern bool i2cSensorStatus;
+extern bool ipsSensorStatus;
+extern bool hchoSensorStatus;
 
 void initializeSensors() {
     safePrintln("Initializing sensors...");
@@ -37,6 +44,12 @@ void initializeSensors() {
         safePrint("- IPS sensor: ");
         initializeIPS();
         safePrintln(ipsSensorStatus ? "OK" : "FAILED");
+    }
+    
+    if (config.enableHCHO) {
+        safePrint("- HCHO sensor: ");
+        initializeHCHO();
+        safePrintln(hchoSensorStatus ? "OK" : "FAILED");
     }
     
     initializeSerialSensors();
@@ -70,7 +83,7 @@ void readSerialSensors() {
     }
 }
 
-void configureSerialSensor(int index, int rxPin, int txPin, long baud, String name, String protocol) {
+void configureSerialSensor(int index, int rxPin, int txPin, long baud, const char* name, const char* protocol) {
     extern SerialSensorConfig serialSensorConfigs[MAX_SERIAL_SENSORS];
     
     if (index >= 0 && index < MAX_SERIAL_SENSORS) {
@@ -95,6 +108,7 @@ bool isSensorDataValid(unsigned long lastUpdate, unsigned long timeout) {
 void resetSensorData() {
     resetSolarData();
     resetIPSData();
+    resetHCHOData();
     
     // Reset I2C sensor data
     extern I2CSensorData i2cSensorData;

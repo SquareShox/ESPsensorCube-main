@@ -5,7 +5,6 @@
 #include <ModbusSerial.h>
 #include "config.h"
 #include "sensors.h"
-#include <WebSerial.h>
 
 // Data type enumeration
 enum DataType {
@@ -25,6 +24,7 @@ void updateModbusINA219Registers();
 void updateModbusSPS30Registers();
 void updateModbusSHT40Registers();
 void updateModbusIPSRegisters();
+void updateModbusHCHORegisters();
 void updateModbusCalibrationRegisters();
 void processModbusTask();
 

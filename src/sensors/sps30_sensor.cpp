@@ -31,7 +31,6 @@ bool initializeSPS30() {
     // Take I2C semaphore for thread safety
     if (i2c_semaphore && xSemaphoreTake(i2c_semaphore, pdMS_TO_TICKS(100)) != pdTRUE) {
         safePrintln("SPS30: Failed to take I2C semaphore for init");
-        WebSerial.println("SPS30: Failed to take I2C semaphore for init");
         return false;
     }
     
@@ -106,9 +105,7 @@ bool initializeSPS30() {
     
     sps30SensorStatus = true;
     safePrintln("SPS30: Sensor initialized successfully");
-    WebSerial.println("SPS30: Sensor initialized successfully");
     safePrintln("SPS30: Measurement started - data available in ~1 second");
-    WebSerial.println("SPS30: Measurement started - data available in ~1 second");
     
     return true;
 }
@@ -223,19 +220,16 @@ bool readSPS30(SPS30Data& data) {
 void cleanSPS30() {
     if (!sps30SensorStatus) {
         safePrintln("SPS30: Sensor not initialized for cleaning");
-        WebSerial.println("SPS30: Sensor not initialized for cleaning");
         return;
     }
     
     // Take I2C semaphore for thread safety
     if (i2c_semaphore && xSemaphoreTake(i2c_semaphore, pdMS_TO_TICKS(100)) != pdTRUE) {
         safePrintln("SPS30: Failed to take I2C semaphore for cleaning");
-        WebSerial.println("SPS30: Failed to take I2C semaphore for cleaning");
         return;
     }
     
     safePrintln("SPS30: Starting fan cleaning cycle...");
-    WebSerial.println("SPS30: Starting fan cleaning cycle...");
     
     // Note: Function name may vary between library versions
     // int16_t ret = sps30_start_fan_cleaning();

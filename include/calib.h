@@ -10,7 +10,7 @@ struct CalibrationConfig {
     bool enableTGSSensors = true;          // Wlaczenie czujnikow TGS (TGS02, TGS03, TGS12)
     bool enableGasSensors = true;          // Wlaczenie gazow elektrochemicznych
     bool enablePPBConversion = true;       // Wlaczenie konwersji na ppb
-    bool enableSpecialSensors = false;      // Wlaczenie HCHO i PID
+    bool enableSpecialSensors = true;      // Wlaczenie HCHO i PID
 };
 
 // Struktura przechowujaca skalibrowane dane czujnikow

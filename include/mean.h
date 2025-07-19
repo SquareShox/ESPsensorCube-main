@@ -24,6 +24,7 @@ MCP3424Data getMCP3424FastAverage();
 ADS1110Data getADS1110FastAverage();
 INA219Data getINA219FastAverage();
 SHT40Data getSHT40FastAverage();
+HCHOData getHCHOFastAverage();
 
 // Getter functions for slow averages (5 minute period)
 SolarData getSolarSlowAverage();
@@ -34,6 +35,7 @@ MCP3424Data getMCP3424SlowAverage();
 ADS1110Data getADS1110SlowAverage();
 INA219Data getINA219SlowAverage();
 SHT40Data getSHT40SlowAverage();
+HCHOData getHCHOSlowAverage();
 
 // Getter functions for calibrated sensor data averages
 CalibratedSensorData getCalibratedFastAverage();

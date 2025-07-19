@@ -1,0 +1,205 @@
+#include <HardwareSerial.h>
+#include <SoftwareSerial.h>
+#include <CB_HCHO_V4.h>
+#include <config.h>
+
+// Forward declarations for safe printing functions
+void safePrint(const String& message);
+void safePrintln(const String& message);
+
+// Global HCHO sensor object and data - using EspSoftwareSerial
+EspSoftwareSerial::UART hchoSerial; // Use EspSoftwareSerial for HCHO
+CB_HCHO_V4 hchoSensor(&hchoSerial);
+extern HCHOData hchoData;
+extern bool hchoSensorStatus;
+extern FeatureConfig config;
+
+// Last read time for interval control
+unsigned long lastHCHORead = 0;
+bool hchoInitialized = false;
+
+void initializeHCHO() {
+    if (!config.enableHCHO) {
+        hchoSensorStatus = false;
+        return;
+    }
+    
+    safePrintln("Initializing HCHO sensor (CB-HCHO-V4) with EspSoftwareSerial...");
+    
+    // Initialize EspSoftwareSerial for HCHO sensor with proper pin configuration
+    hchoSerial.begin(HCHO_SERIAL_BAUD, SWSERIAL_8N1, HCHO_RX_PIN, HCHO_TX_PIN, false);
+    hchoSerial.setTimeout(HCHO_TIMEOUT_MS);
+
+    // hchoSerial.print("AT\r\n");
+    // delay(1000);
+    // hchoSerial.print("AT+VER\r\n");
+    // delay(1000);
+    // hchoSerial.print("AT+VER\r\n");
+    // delay(1000);
+    
+    // Check if the serial port initialized correctly
+    if (!hchoSerial) {
+        safePrintln("Failed to initialize HCHO serial port - invalid pin configuration");
+        hchoSensorStatus = false;
+        hchoInitialized = false;
+        return;
+    }
+    
+    // Wait for sensor to stabilize
+   // delay(1000);
+    
+    // Try to read from sensor to verify connection
+    bool testRead = hchoSensor.read();
+    
+    if (testRead) {
+        hchoSensorStatus = true;
+        hchoInitialized = true;
+        lastHCHORead = millis();
+        
+        safePrint("HCHO sensor initialized successfully - Status: ");
+        safePrint(String(hchoSensor.getSensorStatus()));
+        safePrint(", Auto Cal: ");
+        safePrintln(String(hchoSensor.getAutoCalibrationSwitch()));
+        
+        // Set auto calibration to manual mode for stable readings
+        if (hchoSensor.setAutoCalibration(CB_HCHO_V4_ACS_MANUAL)) {
+            safePrintln("HCHO auto calibration set to manual mode");
+        } else {
+            safePrintln("Warning: Failed to set HCHO auto calibration mode");
+        }
+        
+    } else {
+        hchoSensorStatus = false;
+        hchoInitialized = false;
+        safePrintln("Failed to initialize HCHO sensor - no response");
+    }
+}
+
+bool readHCHO() {
+    if (!config.enableHCHO || !hchoInitialized) {
+        return false;
+    }
+    
+    // Check if enough time has passed since last read
+    if (millis() - lastHCHORead < HCHO_READ_INTERVAL) {
+        return true; // Return true but don't read yet
+    }
+    
+    bool success = hchoSensor.read();
+    
+    if (success) {
+        // Only collect HCHO data as requested
+        hchoData.hcho = hchoSensor.getHcho();
+        
+        // Store other available data but focus on HCHO
+        hchoData.voc = 0.0;           // Not collecting as per request
+        hchoData.temperature = 0.0;   // Not collecting as per request  
+        hchoData.humidity = 0.0;      // Not collecting as per request
+        hchoData.tvoc = 0.0;          // Not collecting as per request
+        
+        hchoData.sensorStatus = hchoSensor.getSensorStatus();
+        hchoData.autoCalibration = hchoSensor.getAutoCalibrationSwitch();
+        hchoData.valid = true;
+        hchoData.lastUpdate = millis();
+        
+        hchoSensorStatus = true;
+        lastHCHORead = millis();
+        
+        // Debug output every 10 reads
+        static int readCount = 0;
+        readCount++;
+        if (readCount % 10 == 0) {
+            safePrint("HCHO reading - HCHO: ");
+            safePrint(String(hchoData.hcho, 3));
+            safePrint(" mg/m³, Status: ");
+            safePrint(String(hchoData.sensorStatus));
+            safePrint(", Auto Cal: ");
+            safePrintln(String(hchoData.autoCalibration));
+        }
+        
+        return true;
+        
+    } else {
+        // Failed to read
+        hchoData.valid = false;
+        hchoSensorStatus = false;
+        
+        static unsigned long lastErrorLog = 0;
+        if (millis() - lastErrorLog > 30000) { // Log error every 30 seconds
+            lastErrorLog = millis();
+            safePrintln("Error: Failed to read from HCHO sensor");
+        }
+        
+        return false;
+    }
+}
+
+bool isHCHODataValid() {
+    return hchoData.valid && (millis() - hchoData.lastUpdate) < SENSOR_TIMEOUT;
+}
+
+void resetHCHOData() {
+    hchoData.hcho = 0.0;
+    hchoData.voc = 0.0;
+    hchoData.temperature = 0.0;
+    hchoData.humidity = 0.0;
+    hchoData.tvoc = 0.0;
+    hchoData.sensorStatus = 0;
+    hchoData.autoCalibration = 0;
+    hchoData.valid = false;
+    hchoData.lastUpdate = 0;
+}
+
+// Configuration functions
+bool setHCHOAutoCalibration(uint8_t mode) {
+    if (!config.enableHCHO || !hchoInitialized) {
+        return false;
+    }
+    
+    bool result = hchoSensor.setAutoCalibration(mode);
+    if (result) {
+        safePrint("HCHO auto calibration mode set to: ");
+        safePrintln(String(mode));
+    } else {
+        safePrintln("Failed to set HCHO auto calibration mode");
+    }
+    
+    return result;
+}
+
+uint8_t getHCHOSensorStatus() {
+    if (!hchoData.valid) {
+        return 255; // Invalid status
+    }
+    return hchoData.sensorStatus;
+}
+
+float getHCHOConcentration() {
+    if (!hchoData.valid) {
+        return -1.0; // Invalid reading
+    }
+    return hchoData.hcho;
+}
+
+// Diagnostic function
+void printHCHODiagnostics() {
+    safePrintln("=== HCHO Sensor Diagnostics ===");
+    safePrint("Enabled: "); safePrintln(config.enableHCHO ? "YES" : "NO");
+    safePrint("Initialized: "); safePrintln(hchoInitialized ? "YES" : "NO");
+    safePrint("Status: "); safePrintln(hchoSensorStatus ? "OK" : "ERROR");
+    safePrint("Data Valid: "); safePrintln(hchoData.valid ? "YES" : "NO");
+    
+    if (hchoData.valid) {
+        safePrint("HCHO: "); safePrint(String(hchoData.hcho, 3)); safePrintln(" mg/m³");
+        safePrint("Sensor Status: "); safePrintln(String(hchoData.sensorStatus));
+        safePrint("Auto Calibration: "); safePrintln(String(hchoData.autoCalibration));
+        safePrint("Data Age: "); safePrint(String((millis() - hchoData.lastUpdate) / 1000)); safePrintln(" seconds");
+    }
+    
+    safePrintln("Communication: EspSoftwareSerial");
+    safePrint("Serial RX Pin: "); safePrintln(String(HCHO_RX_PIN));
+    safePrint("Serial TX Pin: "); safePrintln(String(HCHO_TX_PIN));
+    safePrint("Baud Rate: "); safePrintln(String(HCHO_SERIAL_BAUD));
+    safePrintln("===============================");
+}
+
