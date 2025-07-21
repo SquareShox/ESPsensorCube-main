@@ -1091,6 +1091,10 @@ CalibratedSensorData CircularBuffer<CalibratedSensorData, FAST_BUFFER_SIZE>::add
         result.HCHO += b.HCHO * weight;
         result.PID += b.PID * weight;
         result.PID_mV += b.PID_mV * weight;
+        
+        // VOC
+        result.VOC += b.VOC * weight;
+        result.VOC_ppb += b.VOC_ppb * weight;
     }
     return result;
 }
@@ -1159,6 +1163,10 @@ CalibratedSensorData CircularBuffer<CalibratedSensorData, FAST_BUFFER_SIZE>::add
         result.HCHO += b.HCHO;
         result.PID += b.PID;
         result.PID_mV += b.PID_mV;
+        
+        // VOC
+        result.VOC += b.VOC;
+        result.VOC_ppb += b.VOC_ppb;
     }
     return result;
 }
@@ -1225,6 +1233,10 @@ CalibratedSensorData CircularBuffer<CalibratedSensorData, FAST_BUFFER_SIZE>::div
         result.HCHO /= weight;
         result.PID /= weight;
         result.PID_mV /= weight;
+        
+        // VOC
+        result.VOC /= weight;
+        result.VOC_ppb /= weight;
     }
     return result;
 }
@@ -1291,6 +1303,10 @@ CalibratedSensorData CircularBuffer<CalibratedSensorData, FAST_BUFFER_SIZE>::div
         result.HCHO /= count;
         result.PID /= count;
         result.PID_mV /= count;
+        
+        // VOC
+        result.VOC /= count;
+        result.VOC_ppb /= count;
     }
     return result;
 }
@@ -1332,6 +1348,10 @@ CalibratedSensorData CircularBuffer<CalibratedSensorData, SLOW_BUFFER_SIZE>::add
         result.HCHO += b.HCHO * weight;
         result.PID += b.PID * weight;
         result.PID_mV += b.PID_mV * weight;
+        
+        // VOC
+        result.VOC += b.VOC * weight;
+        result.VOC_ppb += b.VOC_ppb * weight;
         
         // Temperatury i napiecia czujnikow
         result.K1_temp += b.K1_temp * weight;
@@ -1376,6 +1396,8 @@ CalibratedSensorData CircularBuffer<CalibratedSensorData, SLOW_BUFFER_SIZE>::add
         result.TGS12 += b.TGS12;
         result.HCHO += b.HCHO;
         result.PID += b.PID;
+        result.VOC += b.VOC;
+        result.VOC_ppb += b.VOC_ppb;
     }
     return result;
 }
@@ -1414,6 +1436,10 @@ CalibratedSensorData CircularBuffer<CalibratedSensorData, SLOW_BUFFER_SIZE>::div
         result.HCHO /= weight;
         result.PID /= weight;
         result.PID_mV /= weight;
+        
+        // VOC
+        result.VOC /= weight;
+        result.VOC_ppb /= weight;
         
         // Temperatury i napiecia czujnikow
         result.K1_temp /= weight;
@@ -1476,6 +1502,10 @@ CalibratedSensorData CircularBuffer<CalibratedSensorData, SLOW_BUFFER_SIZE>::div
         result.PID /= count;
         result.PID_mV /= count;
         
+        // VOC
+        result.VOC /= count;
+        result.VOC_ppb /= count;
+        
         // Temperatury i napiecia czujnikow
         result.K1_temp /= count;
         result.K2_temp /= count;
@@ -1509,12 +1539,6 @@ HCHOData CircularBuffer<HCHOData, FAST_BUFFER_SIZE>::addWeighted(const HCHOData&
     if (b.valid) {
         result.valid = true;
         result.hcho += b.hcho * weight;
-        result.voc += b.voc * weight;
-        result.temperature += b.temperature * weight;
-        result.humidity += b.humidity * weight;
-        result.tvoc += b.tvoc * weight;
-        result.sensorStatus = b.sensorStatus; // Keep latest status
-        result.autoCalibration = b.autoCalibration; // Keep latest calibration setting
     }
     return result;
 }
@@ -1525,10 +1549,6 @@ HCHOData CircularBuffer<HCHOData, FAST_BUFFER_SIZE>::addSimple(const HCHOData& a
     if (b.valid) {
         result.valid = true;
         result.hcho += b.hcho;
-        result.voc += b.voc;
-        result.temperature += b.temperature;
-        result.humidity += b.humidity;
-        result.tvoc += b.tvoc;
     }
     return result;
 }
@@ -1538,10 +1558,6 @@ HCHOData CircularBuffer<HCHOData, FAST_BUFFER_SIZE>::divideByWeight(const HCHODa
     HCHOData result = sum;
     if (weight > 0) {
         result.hcho /= weight;
-        result.voc /= weight;
-        result.temperature /= weight;
-        result.humidity /= weight;
-        result.tvoc /= weight;
     }
     return result;
 }
@@ -1551,10 +1567,6 @@ HCHOData CircularBuffer<HCHOData, FAST_BUFFER_SIZE>::divideByCount(const HCHODat
     HCHOData result = sum;
     if (count > 0) {
         result.hcho /= count;
-        result.voc /= count;
-        result.temperature /= count;
-        result.humidity /= count;
-        result.tvoc /= count;
     }
     return result;
 }
@@ -1566,12 +1578,6 @@ HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::addWeighted(const HCHOData&
     if (b.valid) {
         result.valid = true;
         result.hcho += b.hcho * weight;
-        result.voc += b.voc * weight;
-        result.temperature += b.temperature * weight;
-        result.humidity += b.humidity * weight;
-        result.tvoc += b.tvoc * weight;
-        result.sensorStatus = b.sensorStatus; // Keep latest status
-        result.autoCalibration = b.autoCalibration; // Keep latest calibration setting
     }
     return result;
 }
@@ -1582,10 +1588,6 @@ HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::addSimple(const HCHOData& a
     if (b.valid) {
         result.valid = true;
         result.hcho += b.hcho;
-        result.voc += b.voc;
-        result.temperature += b.temperature;
-        result.humidity += b.humidity;
-        result.tvoc += b.tvoc;
     }
     return result;
 }
@@ -1595,10 +1597,6 @@ HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::divideByWeight(const HCHODa
     HCHOData result = sum;
     if (weight > 0) {
         result.hcho /= weight;
-        result.voc /= weight;
-        result.temperature /= weight;
-        result.humidity /= weight;
-        result.tvoc /= weight;
     }
     return result;
 }
@@ -1606,13 +1604,6 @@ HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::divideByWeight(const HCHODa
 template<>
 HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::divideByCount(const HCHOData& sum, size_t count) {
     HCHOData result = sum;
-    if (count > 0) {
-        result.hcho /= count;
-        result.voc /= count;
-        result.temperature /= count;
-        result.humidity /= count;
-        result.tvoc /= count;
-    }
     return result;
 }
 

@@ -74,6 +74,10 @@ struct CalibratedSensorData {
     float PID = 0.0f;        // PID sensor [ppm]
     float PID_mV = 0.0f;     // PID napięcie [mV]
     
+    // VOC (Volatile Organic Compounds) - suma NH3, H2S, SO2
+    float VOC = 0.0f;        // VOC [ug/m3] - suma NH3 + H2S + SO2
+    float VOC_ppb = 0.0f;    // VOC [ppb] - suma NH3 + H2S + SO2
+    
     // Metadata
     bool valid = false;
     unsigned long lastUpdate = 0;

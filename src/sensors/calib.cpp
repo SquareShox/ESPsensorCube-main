@@ -242,6 +242,10 @@ void calibrateGases() {
     // H2S - przykładowa implementacja
     calibratedData.H2S = H2S_B0 + H2S_B1 * Kx_1 + H2S_B2 * Kx_2 + H2S_B3 * T_SO2;
     calibratedData.H2S = fmax(GAS_MIN, fmin(calibratedData.H2S, GAS_MAX));
+    
+    // VOC (Volatile Organic Compounds) - suma NH3 + H2S + SO2
+    calibratedData.VOC = calibratedData.NH3 + calibratedData.H2S + calibratedData.SO2;
+    calibratedData.VOC = fmax(GAS_MIN, fmin(calibratedData.VOC, GAS_MAX));
 }
 
 // Konwersja gazow z ug/m3 na ppb
@@ -253,6 +257,9 @@ void calibrateGasesPPB() {
     calibratedData.SO2_ppb = calibratedData.SO2 / SO2_PPB_DIV;
     calibratedData.H2S_ppb = calibratedData.H2S / H2S_PPB_DIV;
     calibratedData.NH3_ppb = calibratedData.NH3 / NH3_PPB_DIV;
+    
+    // VOC w ppb - suma NH3 + H2S + SO2 w ppb
+    calibratedData.VOC_ppb = calibratedData.NH3_ppb + calibratedData.H2S_ppb + calibratedData.SO2_ppb;
 }
 
 // Kalibracja HCHO i PID

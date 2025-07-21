@@ -4,6 +4,12 @@
 #include <Arduino.h>
 #include <sensors.h>
 #include <calib.h>
+#include <config.h>
+#include <time.h>
+#include <cstring>
+
+// Forward declaration
+void getFormattedDateTime(char* buffer, size_t bufferSize);
 
 // Obliczenia pamięci dla historii uśrednień
 // Założenia:
@@ -23,25 +29,80 @@
 #define SHT40_DATA_SIZE 16        // 3 floats + validity
 #define CALIB_DATA_SIZE 300       // wiele floatów kalibracji
 #define HCHO_DATA_SIZE 32         // 5 floats + flags
+#define FAN_DATA_SIZE 16          // dutyCycle, rpm, flags
 
 // Struktura wpisu historii
 template<typename T>
 struct HistoryEntry {
     unsigned long timestamp;
+    char dateTime[20];  // Format: "YYYY-MM-DD HH:MM:SS" - fixed size array
     T data;
+    
+    // Konstruktor domyślny
+    HistoryEntry() {
+        timestamp = 0;
+        memset(dateTime, 0, sizeof(dateTime));
+        // Inicjalizuj data do bezpiecznych wartości
+        memset(&data, 0, sizeof(T));
+    }
+    
+    // Konstruktor kopiujący
+    HistoryEntry(const HistoryEntry& other) {
+        timestamp = other.timestamp;
+        strncpy(dateTime, other.dateTime, sizeof(dateTime) - 1);
+        dateTime[sizeof(dateTime) - 1] = '\0';
+        data = other.data;
+    }
+    
+    // Operator przypisania
+    HistoryEntry& operator=(const HistoryEntry& other) {
+        if (this != &other) {
+            timestamp = other.timestamp;
+            strncpy(dateTime, other.dateTime, sizeof(dateTime) - 1);
+            dateTime[sizeof(dateTime) - 1] = '\0';
+            data = other.data;
+        }
+        return *this;
+    }
+    
+    // Konstruktor przenoszący
+    HistoryEntry(HistoryEntry&& other) noexcept {
+        timestamp = other.timestamp;
+        strncpy(dateTime, other.dateTime, sizeof(dateTime) - 1);
+        dateTime[sizeof(dateTime) - 1] = '\0';
+        data = other.data;  // Usunięto std::move dla kompatybilności
+        other.timestamp = 0;
+        memset(other.dateTime, 0, sizeof(other.dateTime));
+    }
+    
+    // Operator przenoszący
+    HistoryEntry& operator=(HistoryEntry&& other) noexcept {
+        if (this != &other) {
+            timestamp = other.timestamp;
+            strncpy(dateTime, other.dateTime, sizeof(dateTime) - 1);
+            dateTime[sizeof(dateTime) - 1] = '\0';
+            data = other.data;  // Usunięto std::move dla kompatybilności
+            other.timestamp = 0;
+            memset(other.dateTime, 0, sizeof(other.dateTime));
+        }
+        return *this;
+    }
 };
 
-// Rozmiary pojedynczego wpisu historii (timestamp + data)
-#define SOLAR_ENTRY_SIZE (sizeof(unsigned long) + SOLAR_DATA_SIZE)
-#define I2C_ENTRY_SIZE (sizeof(unsigned long) + I2C_SENSOR_SIZE)
-#define SPS30_ENTRY_SIZE (sizeof(unsigned long) + SPS30_DATA_SIZE)
-#define IPS_ENTRY_SIZE (sizeof(unsigned long) + IPS_SENSOR_SIZE)
-#define MCP3424_ENTRY_SIZE (sizeof(unsigned long) + MCP3424_DATA_SIZE)
-#define ADS1110_ENTRY_SIZE (sizeof(unsigned long) + ADS1110_DATA_SIZE)
-#define INA219_ENTRY_SIZE (sizeof(unsigned long) + INA219_DATA_SIZE)
-#define SHT40_ENTRY_SIZE (sizeof(unsigned long) + SHT40_DATA_SIZE)
-#define CALIB_ENTRY_SIZE (sizeof(unsigned long) + CALIB_DATA_SIZE)
-#define HCHO_ENTRY_SIZE (sizeof(unsigned long) + HCHO_DATA_SIZE)
+// Rozmiary pojedynczego wpisu historii (timestamp + dateTime + data)
+// String dateTime zajmuje około 20 bajtów (19 znaków + null terminator)
+#define DATETIME_SIZE 20
+#define SOLAR_ENTRY_SIZE (sizeof(unsigned long) + DATETIME_SIZE + SOLAR_DATA_SIZE)
+#define I2C_ENTRY_SIZE (sizeof(unsigned long) + DATETIME_SIZE + I2C_SENSOR_SIZE)
+#define SPS30_ENTRY_SIZE (sizeof(unsigned long) + DATETIME_SIZE + SPS30_DATA_SIZE)
+#define IPS_ENTRY_SIZE (sizeof(unsigned long) + DATETIME_SIZE + IPS_SENSOR_SIZE)
+#define MCP3424_ENTRY_SIZE (sizeof(unsigned long) + DATETIME_SIZE + MCP3424_DATA_SIZE)
+#define ADS1110_ENTRY_SIZE (sizeof(unsigned long) + DATETIME_SIZE + ADS1110_DATA_SIZE)
+#define INA219_ENTRY_SIZE (sizeof(unsigned long) + DATETIME_SIZE + INA219_DATA_SIZE)
+#define SHT40_ENTRY_SIZE (sizeof(unsigned long) + DATETIME_SIZE + SHT40_DATA_SIZE)
+#define CALIB_ENTRY_SIZE (sizeof(unsigned long) + DATETIME_SIZE + CALIB_DATA_SIZE)
+#define HCHO_ENTRY_SIZE (sizeof(unsigned long) + DATETIME_SIZE + HCHO_DATA_SIZE)
+#define FAN_ENTRY_SIZE (sizeof(unsigned long) + DATETIME_SIZE + FAN_DATA_SIZE)
 
 // Kalkulacja liczby próbek dla 1MB pamięci
 // Zakładamy równy podział między Fast (1h) i Slow (24h) dla każdego czujnika
@@ -68,6 +129,8 @@ struct HistoryEntry {
 #define CALIB_SLOW_HISTORY 80
 #define HCHO_FAST_HISTORY 360
 #define HCHO_SLOW_HISTORY 288
+#define FAN_FAST_HISTORY 360
+#define FAN_SLOW_HISTORY 288
 
 // Obliczenie całkowitego zużycia pamięci (dla weryfikacji)
 #define TOTAL_MEMORY_ESTIMATE ( \
@@ -80,7 +143,8 @@ struct HistoryEntry {
     (INA219_FAST_HISTORY + INA219_SLOW_HISTORY) * INA219_ENTRY_SIZE + \
     (SHT40_FAST_HISTORY + SHT40_SLOW_HISTORY) * SHT40_ENTRY_SIZE + \
     (CALIB_FAST_HISTORY + CALIB_SLOW_HISTORY) * CALIB_ENTRY_SIZE + \
-    (HCHO_FAST_HISTORY + HCHO_SLOW_HISTORY) * HCHO_ENTRY_SIZE \
+    (HCHO_FAST_HISTORY + HCHO_SLOW_HISTORY) * HCHO_ENTRY_SIZE + \
+    (FAN_FAST_HISTORY + FAN_SLOW_HISTORY) * FAN_ENTRY_SIZE \
 )
 
 // Klasa zarządzająca historią dla jednego typu czujnika
@@ -128,7 +192,9 @@ public:
     void addFastSample(const T& data, unsigned long timestamp) {
         if (!initialized || !fastHistory) return;
         
-        fastHistory[fastHead] = {timestamp, data};
+        fastHistory[fastHead].timestamp = timestamp;
+        getFormattedDateTime(fastHistory[fastHead].dateTime, sizeof(fastHistory[fastHead].dateTime));
+        fastHistory[fastHead].data = data;
         fastHead = (fastHead + 1) % FAST_SIZE;
         if (fastCount < FAST_SIZE) fastCount++;
     }
@@ -136,7 +202,9 @@ public:
     void addSlowSample(const T& data, unsigned long timestamp) {
         if (!initialized || !slowHistory) return;
         
-        slowHistory[slowHead] = {timestamp, data};
+        slowHistory[slowHead].timestamp = timestamp;
+        getFormattedDateTime(slowHistory[slowHead].dateTime, sizeof(slowHistory[slowHead].dateTime));
+        slowHistory[slowHead].data = data;
         slowHead = (slowHead + 1) % SLOW_SIZE;
         if (slowCount < SLOW_SIZE) slowCount++;
     }
@@ -205,6 +273,7 @@ private:
     SensorHistory<SHT40Data, SHT40_FAST_HISTORY, SHT40_SLOW_HISTORY>* sht40History;
     SensorHistory<CalibratedSensorData, CALIB_FAST_HISTORY, CALIB_SLOW_HISTORY>* calibHistory;
     SensorHistory<HCHOData, HCHO_FAST_HISTORY, HCHO_SLOW_HISTORY>* hchoHistory;
+    SensorHistory<FanData, FAN_FAST_HISTORY, FAN_SLOW_HISTORY>* fanHistory;
     
     bool initialized = false;
     size_t totalMemoryUsed = 0;
@@ -229,6 +298,7 @@ public:
     SensorHistory<SHT40Data, SHT40_FAST_HISTORY, SHT40_SLOW_HISTORY>* getSHT40History() { return sht40History; }
     SensorHistory<CalibratedSensorData, CALIB_FAST_HISTORY, CALIB_SLOW_HISTORY>* getCalibHistory() { return calibHistory; }
     SensorHistory<HCHOData, HCHO_FAST_HISTORY, HCHO_SLOW_HISTORY>* getHCHOHistory() { return hchoHistory; }
+    SensorHistory<FanData, FAN_FAST_HISTORY, FAN_SLOW_HISTORY>* getFanHistory() { return fanHistory; }
     
     bool isInitialized() const { return initialized; }
     size_t getTotalMemoryUsed() const { return totalMemoryUsed; }
@@ -244,6 +314,7 @@ void printHistoryStatus();
 
 // Funkcje API do pobierania danych historycznych
 size_t getHistoricalData(const String& sensor, const String& timeRange, 
-                        String& jsonResponse, unsigned long fromTime = 0, unsigned long toTime = 0);
+                        String& jsonResponse, unsigned long fromTime = 0, unsigned long toTime = 0,
+                        const String& sampleType = "fast");
 
 #endif // HISTORY_H 

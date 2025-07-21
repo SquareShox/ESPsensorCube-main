@@ -90,15 +90,6 @@ bool readHCHO() {
     if (success) {
         // Only collect HCHO data as requested
         hchoData.hcho = hchoSensor.getHcho();
-        
-        // Store other available data but focus on HCHO
-        hchoData.voc = 0.0;           // Not collecting as per request
-        hchoData.temperature = 0.0;   // Not collecting as per request  
-        hchoData.humidity = 0.0;      // Not collecting as per request
-        hchoData.tvoc = 0.0;          // Not collecting as per request
-        
-        hchoData.sensorStatus = hchoSensor.getSensorStatus();
-        hchoData.autoCalibration = hchoSensor.getAutoCalibrationSwitch();
         hchoData.valid = true;
         hchoData.lastUpdate = millis();
         
@@ -111,10 +102,7 @@ bool readHCHO() {
         if (readCount % 10 == 0) {
             safePrint("HCHO reading - HCHO: ");
             safePrint(String(hchoData.hcho, 3));
-            safePrint(" mg/m³, Status: ");
-            safePrint(String(hchoData.sensorStatus));
-            safePrint(", Auto Cal: ");
-            safePrintln(String(hchoData.autoCalibration));
+            safePrintln(" mg/m³");
         }
         
         return true;
@@ -140,12 +128,6 @@ bool isHCHODataValid() {
 
 void resetHCHOData() {
     hchoData.hcho = 0.0;
-    hchoData.voc = 0.0;
-    hchoData.temperature = 0.0;
-    hchoData.humidity = 0.0;
-    hchoData.tvoc = 0.0;
-    hchoData.sensorStatus = 0;
-    hchoData.autoCalibration = 0;
     hchoData.valid = false;
     hchoData.lastUpdate = 0;
 }
@@ -167,13 +149,6 @@ bool setHCHOAutoCalibration(uint8_t mode) {
     return result;
 }
 
-uint8_t getHCHOSensorStatus() {
-    if (!hchoData.valid) {
-        return 255; // Invalid status
-    }
-    return hchoData.sensorStatus;
-}
-
 float getHCHOConcentration() {
     if (!hchoData.valid) {
         return -1.0; // Invalid reading
@@ -191,8 +166,6 @@ void printHCHODiagnostics() {
     
     if (hchoData.valid) {
         safePrint("HCHO: "); safePrint(String(hchoData.hcho, 3)); safePrintln(" mg/m³");
-        safePrint("Sensor Status: "); safePrintln(String(hchoData.sensorStatus));
-        safePrint("Auto Calibration: "); safePrintln(String(hchoData.autoCalibration));
         safePrint("Data Age: "); safePrint(String((millis() - hchoData.lastUpdate) / 1000)); safePrintln(" seconds");
     }
     

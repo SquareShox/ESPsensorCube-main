@@ -5,96 +5,406 @@ const char *update_html = R"rawliteral(
 <!DOCTYPE html>
 <html>
 <head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESP Sensor Cube - Panel Sterowania</title>
 <style>
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
   body {
-    background-color: #ff00ff;
-    background-image: linear-gradient(45deg, #ffcc00, #00ffcc, #cc00ff);
-    background-size: 200% 200%;
-    animation: gradient 5s infinite;
     font-family: 'Arial', sans-serif;
-  }
-
-  @keyframes gradient {
-    0% {
-      background-position: 0% 50%;
-    }
-    50% {
-      background-position: 100% 50%;
-    }
-    100% {
-      background-position: 0% 50%;
-    }
-  }
-
-  form, .webserial-link, .auto-reset {
-    margin: 50px;
-    padding: 50px;
-    background-color: rgba(255, 255, 255, 0.8);
-    border-radius: 25px;
-    box-shadow: 0 0 10px 0 rgba(0, 0, 0, 0.5);
-    text-align: center;
-  }
-
-  input[type="file"], .webserial-btn, #toggleAutoReset {
-    color: #000;
-    background-color: #ff69b4;
-    border: 2px solid #000;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
     padding: 20px;
-    cursor: pointer;
+  }
+
+  .header {
+    text-align: center;
+    color: white;
+    margin-bottom: 30px;
+  }
+
+  .header h1 {
+    font-size: 2.5em;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+  }
+
+  .header p {
+    font-size: 1.2em;
+    opacity: 0.9;
+  }
+
+  .nav {
+    text-align: center;
+    margin-bottom: 30px;
+  }
+
+  .nav a {
+    color: white;
+    text-decoration: none;
+    margin: 0 15px;
+    padding: 12px 25px;
+    border: 2px solid white;
+    border-radius: 25px;
+    transition: all 0.3s ease;
     font-weight: bold;
-    margin-top: 20px;
-    width: 80%;
-    max-width: 300px;
-    display: inline-block; /* Centruje przycisk w kontenerze */
+  }
+
+  .nav a:hover {
+    background-color: white;
+    color: #667eea;
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+  }
+
+  .main-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+    gap: 25px;
+  }
+
+  .control-card {
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 20px;
+    padding: 30px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    transition: transform 0.3s ease;
     text-align: center;
   }
 
-  input[type="submit"], .webserial-btn, #toggleAutoReset {
-    background-color: #009688;
-    color: #fff;
+  .control-card:hover {
+    transform: translateY(-5px);
+  }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 25px;
+    padding-bottom: 15px;
+    border-bottom: 3px solid #f0f0f0;
+  }
+
+  .card-icon {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    margin-right: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+    font-size: 24px;
+  }
+
+  .update-icon { background: linear-gradient(45deg, #ff9800, #ffc107); }
+  .system-icon { background: linear-gradient(45deg, #2196f3, #03a9f4); }
+  .dashboard-icon { background: linear-gradient(45deg, #4caf50, #8bc34a); }
+  .charts-icon { background: linear-gradient(45deg, #9c27b0, #e91e63); }
+
+  .card-title {
+    font-size: 1.4em;
+    font-weight: bold;
+    color: #333;
+  }
+
+  .card-description {
+    color: #666;
+    margin-bottom: 25px;
+    line-height: 1.5;
+  }
+
+  .file-input-container {
+    position: relative;
+    margin-bottom: 20px;
+  }
+
+  .file-input {
+    width: 100%;
+    padding: 15px;
+    border: 2px dashed #ddd;
+    border-radius: 10px;
+    background: #f9f9f9;
+    cursor: pointer;
+    transition: all 0.3s ease;
+  }
+
+  .file-input:hover {
+    border-color: #667eea;
+    background: #f0f8ff;
+  }
+
+  .file-input:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 10px rgba(102, 126, 234, 0.3);
+  }
+
+  .btn {
+    background: linear-gradient(45deg, #667eea, #764ba2);
+    color: white;
     border: none;
     border-radius: 25px;
-    font-size: 1.2em;
-    cursor: pointer;
-    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.4);
-    transition: transform 0.2s, background-color 0.3s ease;
-    width: auto; /* Dostosowuje szerokość do treści */
-    padding: 15px 45px;
-  }
-
-  input[type="submit"]:hover, .webserial-btn:hover, #toggleAutoReset:hover {
-    transform: scale(1.05);
-    background-color: #00796b;
-  }
-
-  #autoResetState {
+    padding: 15px 30px;
+    font-size: 1.1em;
     font-weight: bold;
-    margin-top: 20px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-decoration: none;
+    display: inline-block;
+    margin: 10px;
+    min-width: 200px;
+  }
+
+  .btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+  }
+
+  .btn-danger {
+    background: linear-gradient(45deg, #f44336, #ff5722);
+  }
+
+  .btn-success {
+    background: linear-gradient(45deg, #4caf50, #8bc34a);
+  }
+
+  .btn-warning {
+    background: linear-gradient(45deg, #ff9800, #ffc107);
+  }
+
+  .status-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-left: 10px;
+    animation: pulse 2s infinite;
+  }
+
+  .status-ok { background-color: #4caf50; }
+  .status-error { background-color: #f44336; }
+
+  @keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+  }
+
+  .status-text {
+    font-weight: bold;
+    margin-top: 15px;
+    padding: 10px;
+    border-radius: 10px;
+    background: #f8f9fa;
+  }
+
+  .progress-bar {
+    width: 100%;
+    height: 20px;
+    background: #f0f0f0;
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 15px 0;
+    display: none;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(45deg, #4caf50, #8bc34a);
+    width: 0%;
+    transition: width 0.3s ease;
+  }
+
+  @media (max-width: 768px) {
+    .main-container {
+      grid-template-columns: 1fr;
+    }
+    
+    .header h1 {
+      font-size: 2em;
+    }
+    
+    .nav a {
+      display: block;
+      margin: 10px 0;
+    }
   }
 </style>
 </head>
 <body>
-<form method="POST" action="/update" enctype="multipart/form-data">
-<input type="file" name="update">
-<input type="submit" value="Update Firmware">
-</form>
+  <div class="header">
+    <h1>🔧 ESP Sensor Cube - Panel Sterowania</h1>
+    <p>Zarządzanie systemem i aktualizacje</p>
+  </div>
 
-<div class="auto-reset">
-<button id="toggleAutoReset">Toggle Auto Reset</button>
-<p id="autoResetState">Auto Reset is </p>
-</div>
+  <div class="nav">
+    <a href="/">🔧 Panel Sterowania</a>
+    <a href="/dashboard">📊 Dashboard</a>
+    <a href="/charts">📈 Wykresy</a>
+  </div>
 
-<!-- Navigation Links -->
-<div class="webserial-link">
-<a href="/dashboard" class="webserial-btn"> open Live Dashboard</a>
-</div>
+  <div class="main-container">
+    <!-- Firmware Update Card -->
+    <div class="control-card">
+      <div class="card-header">
+        <div class="card-icon update-icon">📦</div>
+        <div class="card-title">Aktualizacja Firmware</div>
+      </div>
+      <div class="card-description">
+        Wybierz plik .bin z nową wersją firmware do aktualizacji systemu
+      </div>
+      
+      <form method="POST" action="/update" enctype="multipart/form-data" id="updateForm">
+        <div class="file-input-container">
+          <input type="file" name="update" class="file-input" accept=".bin" id="firmwareFile">
+        </div>
+        
+        <button type="submit" class="btn btn-warning" id="updateBtn" disabled>
+          📤 Aktualizuj Firmware
+        </button>
+      </form>
+      
+      <div class="progress-bar" id="progressBar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      
+      <div class="status-text" id="updateStatus">
+        Status: Gotowy do aktualizacji
+      </div>
+    </div>
+
+    <!-- System Control Card -->
+    <div class="control-card">
+      <div class="card-header">
+        <div class="card-icon system-icon">⚙️</div>
+        <div class="card-title">Kontrola Systemu</div>
+      </div>
+      <div class="card-description">
+        Zarządzanie ustawieniami systemu i kontrolą automatycznego resetu
+      </div>
+      
+      <button class="btn btn-success" id="toggleAutoReset">
+        🔄 Toggle Auto Reset
+      </button>
+      
+      <div class="status-text" id="autoResetState">
+        Auto Reset: Sprawdzanie...
+      </div>
+      
+      <button class="btn btn-danger" id="restartBtn">
+        🔄 Restart Systemu
+      </button>
+      
+      <div class="status-text" id="systemStatus">
+        Status systemu: Sprawdzanie...
+      </div>
+    </div>
+
+    <!-- Quick Access Card -->
+    <div class="control-card">
+      <div class="card-header">
+        <div class="card-icon dashboard-icon">🚀</div>
+        <div class="card-title">Szybki Dostęp</div>
+      </div>
+      <div class="card-description">
+        Przejdź bezpośrednio do monitorowania i analizy danych
+      </div>
+      
+      <a href="/dashboard" class="btn btn-success">
+        📊 Live Dashboard
+      </a>
+      
+      <a href="/charts" class="btn btn-success">
+        📈 Wykresy Historyczne
+      </a>
+      
+      <div class="status-text">
+        <span class="status-indicator status-ok"></span>
+        System gotowy
+      </div>
+    </div>
+
+    <!-- System Info Card -->
+    <div class="control-card">
+      <div class="card-header">
+        <div class="card-icon charts-icon">ℹ️</div>
+        <div class="card-title">Informacje Systemowe</div>
+      </div>
+      <div class="card-description">
+        Aktualne informacje o stanie systemu i zasobach
+      </div>
+      
+      <div class="status-text" id="systemInfo">
+        <strong>Uptime:</strong> <span id="uptime">--</span><br>
+        <strong>Free Heap:</strong> <span id="freeHeap">--</span> KB<br>
+        <strong>WiFi Signal:</strong> <span id="wifiSignal">--</span> dBm<br>
+        <strong>Last Update:</strong> <span id="lastUpdate">--</span>
+      </div>
+      
+      <button class="btn btn-warning" id="refreshInfo">
+        🔄 Odśwież Info
+      </button>
+    </div>
+  </div>
+
 <script>
-function updateAutoResetState(state) {
-  document.getElementById("autoResetState").innerHTML = "Auto Reset is " + (state == "true" ? "Enabled" : "Disabled");
+let ws;
+
+function connectWebSocket() {
+  ws = new WebSocket(`ws://${window.location.host}/ws`);
+  ws.onopen = function() {
+    console.log('WebSocket connected');
+    updateSystemInfo();
+  };
+  ws.onclose = function() {
+    console.log('WebSocket disconnected, reconnecting...');
+    setTimeout(connectWebSocket, 5000);
+  };
+  ws.onmessage = function(event) {
+    try {
+      const data = JSON.parse(event.data);
+      updateSystemInfo(data);
+    } catch (error) {
+      console.error('Error parsing WebSocket data:', error);
+    }
+  };
 }
 
-document.getElementById("toggleAutoReset").addEventListener("click", function() {
-  var xhr = new XMLHttpRequest();
+function updateSystemInfo(data = null) {
+  if (data) {
+    document.getElementById('uptime').textContent = formatUptime(data.uptime || 0);
+    document.getElementById('freeHeap').textContent = Math.round((data.freeHeap || 0) / 1024);
+    document.getElementById('wifiSignal').textContent = data.wifiSignal || 0;
+    document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('pl-PL');
+  }
+}
+
+function formatUptime(seconds) {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${mins}m`;
+  return `${mins}m`;
+}
+
+function updateAutoResetState(state) {
+  const element = document.getElementById("autoResetState");
+  const isEnabled = state === "true";
+  element.innerHTML = `Auto Reset: <span style="color: ${isEnabled ? '#4caf50' : '#f44336'}">${isEnabled ? 'Włączony' : 'Wyłączony'}</span>`;
+}
+
+function toggleAutoReset() {
+  const xhr = new XMLHttpRequest();
   xhr.open("POST", "/toggleAutoReset", true);
   xhr.onreadystatechange = function() {
     if (xhr.readyState == 4 && xhr.status == 200) {
@@ -102,10 +412,69 @@ document.getElementById("toggleAutoReset").addEventListener("click", function() 
     }
   }
   xhr.send();
+}
+
+function restartSystem() {
+  if (confirm('Czy na pewno chcesz zrestartować system?')) {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/restart", true);
+    xhr.send();
+    document.getElementById('systemStatus').innerHTML = 'System restartuje się...';
+  }
+}
+
+function refreshSystemInfo() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({cmd: "status"}));
+  }
+}
+
+// File input handling
+document.getElementById('firmwareFile').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  const updateBtn = document.getElementById('updateBtn');
+  
+  if (file && file.name.endsWith('.bin')) {
+    updateBtn.disabled = false;
+    document.getElementById('updateStatus').innerHTML = `Wybrano: ${file.name}`;
+  } else {
+    updateBtn.disabled = true;
+    document.getElementById('updateStatus').innerHTML = 'Status: Wybierz plik .bin';
+  }
 });
 
-window.onload = function() {
-  var xhr = new XMLHttpRequest();
+// Update form handling
+document.getElementById('updateForm').addEventListener('submit', function(e) {
+  const progressBar = document.getElementById('progressBar');
+  const progressFill = document.getElementById('progressFill');
+  const updateStatus = document.getElementById('updateStatus');
+  
+  progressBar.style.display = 'block';
+  updateStatus.innerHTML = 'Status: Aktualizacja w toku...';
+  
+  // Simulate progress (in real implementation, this would come from server)
+  let progress = 0;
+  const progressInterval = setInterval(() => {
+    progress += Math.random() * 10;
+    if (progress > 90) progress = 90;
+    progressFill.style.width = progress + '%';
+  }, 500);
+  
+  // Clear interval after form submission
+  setTimeout(() => clearInterval(progressInterval), 5000);
+});
+
+// Event listeners
+document.getElementById('toggleAutoReset').addEventListener('click', toggleAutoReset);
+document.getElementById('restartBtn').addEventListener('click', restartSystem);
+document.getElementById('refreshInfo').addEventListener('click', refreshSystemInfo);
+
+// Initialize
+window.addEventListener('load', function() {
+  connectWebSocket();
+  
+  // Get initial auto reset state
+  const xhr = new XMLHttpRequest();
   xhr.open("GET", "/getAutoReset", true);
   xhr.onreadystatechange = function() {
     if (xhr.readyState == 4 && xhr.status == 200) {
@@ -113,17 +482,14 @@ window.onload = function() {
     }
   }
   xhr.send();
-};
-</script>
-<script>
-var source = new EventSource("/events");
-source.addEventListener('serialData', function(event) {
-  document.getElementById("espData").innerHTML = "ESP Data: " + event.data;
+});
+
+window.addEventListener('beforeunload', function() {
+  if (ws) ws.close();
 });
 </script>
 </body>
 </html>
-
 )rawliteral";
 
 const char *dashboard_html = R"rawliteral(
@@ -315,8 +681,9 @@ const char *dashboard_html = R"rawliteral(
   </div>
 
   <div class="nav">
-    <a href="/">🔧 Update Firmware</a>
+    <a href="/">🔧 Panel Sterowania</a>
     <a href="/dashboard">📊 Dashboard</a>
+    <a href="/charts">📈 Wykresy</a>
   </div>
 
   <div class="dashboard">
@@ -420,12 +787,32 @@ const char *dashboard_html = R"rawliteral(
           <div class="data-label">Ciśnienie</div>
           <div class="data-value" id="env-pressure">--<span class="data-unit">hPa</span></div>
         </div>
-        <div class="data-item">
-          <div class="data-label">CO2</div>
-          <div class="data-value" id="env-co2">--<span class="data-unit">ppm</span></div>
-        </div>
       </div>
       <div class="last-update" id="i2c-update">Ostatnia aktualizacja: --</div>
+    </div>
+
+    <!-- SCD41 CO2 Sensor Card -->
+    <div class="sensor-card" id="scd41-card" style="display: none;">
+      <div class="sensor-header">
+        <div class="sensor-icon env-icon">🌬️</div>
+        <div class="sensor-title">SCD41 CO2 Sensor</div>
+        <div class="status-indicator" id="scd41-status"></div>
+      </div>
+      <div class="sensor-data">
+        <div class="data-item">
+          <div class="data-label">CO2</div>
+          <div class="data-value" id="scd41-co2">--<span class="data-unit">ppm</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">Temperatura</div>
+          <div class="data-value" id="scd41-temp">--<span class="data-unit">°C</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">Wilgotność</div>
+          <div class="data-value" id="scd41-humidity">--<span class="data-unit">%</span></div>
+        </div>
+      </div>
+      <div class="last-update" id="scd41-update">Ostatnia aktualizacja: --</div>
     </div>
 
     <!-- SPS30 Particle Sensor Card -->
@@ -542,24 +929,8 @@ const char *dashboard_html = R"rawliteral(
           <div class="data-value" id="hcho-value">--<span class="data-unit">mg/m³</span></div>
         </div>
         <div class="data-item">
-          <div class="data-label">VOC</div>
-          <div class="data-value" id="hcho-voc">--<span class="data-unit">mg/m³</span></div>
-        </div>
-        <div class="data-item">
-          <div class="data-label">TVOC</div>
-          <div class="data-value" id="hcho-tvoc">--<span class="data-unit">mg/m³</span></div>
-        </div>
-        <div class="data-item">
-          <div class="data-label">Temperature</div>
-          <div class="data-value" id="hcho-temp">--<span class="data-unit">°C</span></div>
-        </div>
-        <div class="data-item">
-          <div class="data-label">Humidity</div>
-          <div class="data-value" id="hcho-humidity">--<span class="data-unit">%</span></div>
-        </div>
-        <div class="data-item">
-          <div class="data-label">Status</div>
-          <div class="data-value" id="hcho-sensor-status">--</div>
+          <div class="data-label">Age</div>
+          <div class="data-value" id="hcho-age">--<span class="data-unit">s</span></div>
         </div>
       </div>
       <div class="last-update" id="hcho-update">Ostatnia aktualizacja: --</div>
@@ -871,6 +1242,13 @@ function connectWebSocket() {
           hideCard('i2c-card');
         }
         
+        // SCD41 CO2 sensor
+        if (data.sensorsEnabled.scd41) {
+          showCard('scd41-card');
+        } else {
+          hideCard('scd41-card');
+        }
+        
         // SPS30 particle sensor
         if (data.sensorsEnabled.sps30) {
           showCard('sps30-card');
@@ -954,11 +1332,21 @@ function connectWebSocket() {
         updateValue('env-temp', data.i2c.temperature || 0, 1);
         updateValue('env-humidity', data.i2c.humidity || 0, 1);
         updateValue('env-pressure', data.i2c.pressure || 0, 1);
-        updateValue('env-co2', data.i2c.CO2 || 0, 0);
         updateStatus('i2c-status', true);
         document.getElementById('i2c-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
       } else {
         updateStatus('i2c-status', false);
+      }
+      
+      // SCD41 CO2 data
+      if (data.scd41 && data.scd41.valid) {
+        updateValue('scd41-co2', data.scd41.CO2 || 0, 0);
+        updateValue('scd41-temp', data.scd41.temperature || 0, 1);
+        updateValue('scd41-humidity', data.scd41.humidity || 0, 1);
+        updateStatus('scd41-status', true);
+        document.getElementById('scd41-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
+      } else {
+        updateStatus('scd41-status', false);
       }
       
       // SPS30 particle sensor data
@@ -1008,11 +1396,7 @@ function connectWebSocket() {
       // HCHO sensor data
       if (data.hcho && data.hcho.valid) {
         updateValue('hcho-value', data.hcho.HCHO || 0, 3);
-        updateValue('hcho-voc', data.hcho.VOC || 0, 3);
-        updateValue('hcho-tvoc', data.hcho.TVOC || 0, 3);
-        updateValue('hcho-temp', data.hcho.temperature || 0, 1);
-        updateValue('hcho-humidity', data.hcho.humidity || 0, 1);
-        updateValue('hcho-sensor-status', data.hcho.sensorStatus || 0, 0);
+        updateValue('hcho-age', data.hcho.age || 0, 0);
         updateStatus('hcho-status', true);
         document.getElementById('hcho-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
       } else {

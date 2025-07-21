@@ -164,7 +164,7 @@ const char *charts_html = R"rawliteral(
   </div>
 
   <div class="nav">
-    <a href="/">🔧 Update</a>
+    <a href="/">🔧 Panel Sterowania</a>
     <a href="/dashboard">📊 Dashboard</a>
     <a href="/charts">📈 Wykresy</a>
   </div>
@@ -183,13 +183,22 @@ const char *charts_html = R"rawliteral(
       <option value="24h">Ostatnie 24 godziny</option>
     </select>
     
+    <label style="color: white;">Typ próbek:</label>
+    <select id="sampleType">
+      <option value="fast">Szybkie (10s)</option>
+      <option value="slow">Wolne (5min)</option>
+    </select>
+    
     <label style="color: white;">Czujnik:</label>
     <select id="sensorType">
-      <option value="i2c">Środowiskowe (I2C)</option>
-      <option value="solar">Solar</option>
       <option value="sps30">SPS30 (Pyłki)</option>
+      <option value="ips">IPS (Pyłki)</option>
       <option value="power">INA219 (Moc)</option>
+      <option value="sht40">SHT40 (Temperatura/Wilgotność)</option>
+      <option value="scd41">SCD41 (CO2)</option>
       <option value="hcho">HCHO (VOC)</option>
+      <option value="calibration">Kalibracja (Gazy)</option>
+      <option value="fan">Wentylator</option>
     </select>
     
     <button onclick="updateCharts()">🔄 Odśwież</button>
@@ -294,15 +303,29 @@ function createChart(containerId, title, datasets) {
 function formatChartData(historyData, valueKey, label, color) {
   if (!historyData || !historyData.length) return [];
   
-  return historyData.map(entry => ({
-    x: new Date(entry.timestamp),
-    y: parseFloat(entry.data[valueKey]) || entry.data[valueKey]
-  })).filter(point => point.y !== undefined && point.y !== null && !isNaN(point.y));
+  return historyData.map(entry => {
+    // Użyj timestamp bezpośrednio (jeśli to epoch time) lub konwertuj
+    let timestamp;
+    if (entry.timestamp > 1600000000000) { // Jeśli to już epoch time (po 2020)
+      timestamp = entry.timestamp;
+    } else {
+      // Konwertuj millis() na epoch time
+      const now = Date.now();
+      const systemUptime = Math.floor(now / 1000);
+      const entryTime = entry.timestamp / 1000;
+      timestamp = (systemUptime - entryTime) * 1000;
+    }
+    
+    return {
+      x: new Date(timestamp),
+      y: parseFloat(entry.data[valueKey]) || entry.data[valueKey]
+    };
+  }).filter(point => point.y !== undefined && point.y !== null && !isNaN(point.y));
 }
 
-async function fetchHistoryData(sensor, timeRange) {
+async function fetchHistoryData(sensor, timeRange, sampleType) {
   try {
-    const response = await fetch(`/api/history?sensor=${sensor}&timeRange=${timeRange}`);
+    const response = await fetch(`/api/history?sensor=${sensor}&timeRange=${timeRange}&sampleType=${sampleType}`);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -326,6 +349,7 @@ async function fetchHistoryData(sensor, timeRange) {
 
 async function updateCharts() {
   const timeRange = document.getElementById('timeRange').value;
+  const sampleType = document.getElementById('sampleType').value;
   const sensorType = document.getElementById('sensorType').value;
   const container = document.getElementById('charts-container');
   
@@ -335,7 +359,7 @@ async function updateCharts() {
   container.innerHTML = '<div class="loading">📊 Ładowanie danych z ' + sensorType + '...</div>';
   
   try {
-    const historyData = await fetchHistoryData(sensorType, timeRange);
+    const historyData = await fetchHistoryData(sensorType, timeRange, sampleType);
     
     if (historyData.error) {
       container.innerHTML = `<div class="no-data">❌ Błąd: ${historyData.error}</div>`;
@@ -348,16 +372,22 @@ async function updateCharts() {
     }
     
     // Create charts based on sensor type
-    if (sensorType === 'i2c') {
-      createEnvironmentalCharts(historyData.data);
-    } else if (sensorType === 'solar') {
-      createSolarCharts(historyData.data);
-    } else if (sensorType === 'sps30') {
-      createAirQualityCharts(historyData.data);
+    if (sensorType === 'sps30') {
+      createSPS30Charts(historyData.data);
+    } else if (sensorType === 'ips') {
+      createIPSCharts(historyData.data);
     } else if (sensorType === 'power') {
       createPowerCharts(historyData.data);
+    } else if (sensorType === 'sht40') {
+      createSHT40Charts(historyData.data);
+    } else if (sensorType === 'scd41') {
+      createSCD41Charts(historyData.data);
     } else if (sensorType === 'hcho') {
       createHCHOCharts(historyData.data);
+    } else if (sensorType === 'calibration') {
+      createCalibrationCharts(historyData.data);
+    } else if (sensorType === 'fan') {
+      createFanCharts(historyData.data);
     }
     
     // Remove loading message
@@ -370,7 +400,8 @@ async function updateCharts() {
     statsDiv.style.textAlign = 'center';
     statsDiv.style.color = 'white';
     statsDiv.style.marginTop = '20px';
-    statsDiv.innerHTML = `📊 Załadowano ${historyData.totalSamples} próbek z ${sensorType}`;
+    const sampleTypeText = sampleType === 'fast' ? 'szybkich (10s)' : 'wolnych (5min)';
+    statsDiv.innerHTML = `📊 Załadowano ${historyData.totalSamples} próbek ${sampleTypeText} z ${sensorType}`;
     container.appendChild(statsDiv);
     
   } catch (error) {
@@ -379,20 +410,240 @@ async function updateCharts() {
   }
 }
 
-function createEnvironmentalCharts(data) {
+function createSPS30Charts(data) {
   const container = document.getElementById('charts-container');
   
-  // Temperature & Humidity
-  const tempHumCard = document.createElement('div');
-  tempHumCard.className = 'chart-card';
-  tempHumCard.innerHTML = `
-    <div class="chart-title">🌡️ Temperatura i Wilgotność</div>
-    <div class="chart-container" id="temp-hum-chart"></div>
-    <div class="chart-info">Dane z czujników I2C</div>
+  // PM Mass Concentration
+  const pmCard = document.createElement('div');
+  pmCard.className = 'chart-card';
+  pmCard.innerHTML = `
+    <div class="chart-title">🌫️ Stężenie Pyłu (SPS30)</div>
+    <div class="chart-container" id="pm-chart"></div>
+    <div class="chart-info">PM1.0, PM2.5, PM4.0, PM10 (µg/m³)</div>
   `;
-  container.appendChild(tempHumCard);
+  container.appendChild(pmCard);
   
-  charts.tempHum = createChart('temp-hum-chart', 'Temperatura i Wilgotność', [
+  charts.pm = createChart('pm-chart', 'Stężenie Pyłu', [
+    {
+      label: 'PM1.0 (µg/m³)',
+      data: formatChartData(data, 'pm1_0'),
+      borderColor: '#e74c3c',
+      backgroundColor: '#e74c3c20',
+      tension: 0.1
+    },
+    {
+      label: 'PM2.5 (µg/m³)',
+      data: formatChartData(data, 'pm2_5'),
+      borderColor: '#f39c12',
+      backgroundColor: '#f39c1220',
+      tension: 0.1
+    },
+    {
+      label: 'PM4.0 (µg/m³)',
+      data: formatChartData(data, 'pm4_0'),
+      borderColor: '#e67e22',
+      backgroundColor: '#e67e2220',
+      tension: 0.1
+    },
+    {
+      label: 'PM10 (µg/m³)',
+      data: formatChartData(data, 'pm10'),
+      borderColor: '#d35400',
+      backgroundColor: '#d3540020',
+      tension: 0.1
+    }
+  ]);
+  
+  // Number Concentration
+  const ncCard = document.createElement('div');
+  ncCard.className = 'chart-card';
+  ncCard.innerHTML = `
+    <div class="chart-title">🔢 Koncentracja Cząstek (SPS30)</div>
+    <div class="chart-container" id="nc-chart"></div>
+    <div class="chart-info">NC0.5, NC1.0, NC2.5, NC4.0, NC10 (#/cm³)</div>
+  `;
+  container.appendChild(ncCard);
+  
+  charts.nc = createChart('nc-chart', 'Koncentracja Cząstek', [
+    {
+      label: 'NC0.5 (#/cm³)',
+      data: formatChartData(data, 'nc0_5'),
+      borderColor: '#3498db',
+      backgroundColor: '#3498db20',
+      tension: 0.1
+    },
+    {
+      label: 'NC1.0 (#/cm³)',
+      data: formatChartData(data, 'nc1_0'),
+      borderColor: '#2980b9',
+      backgroundColor: '#2980b920',
+      tension: 0.1
+    },
+    {
+      label: 'NC2.5 (#/cm³)',
+      data: formatChartData(data, 'nc2_5'),
+      borderColor: '#1abc9c',
+      backgroundColor: '#1abc9c20',
+      tension: 0.1
+    },
+    {
+      label: 'NC4.0 (#/cm³)',
+      data: formatChartData(data, 'nc4_0'),
+      borderColor: '#16a085',
+      backgroundColor: '#16a08520',
+      tension: 0.1
+    },
+    {
+      label: 'NC10 (#/cm³)',
+      data: formatChartData(data, 'nc10'),
+      borderColor: '#27ae60',
+      backgroundColor: '#27ae6020',
+      tension: 0.1
+    }
+  ]);
+}
+
+function createIPSCharts(data) {
+  const container = document.getElementById('charts-container');
+  
+  // PM Mass Concentration
+  const pmCard = document.createElement('div');
+  pmCard.className = 'chart-card';
+  pmCard.innerHTML = `
+    <div class="chart-title">🌫️ Stężenie Pyłu (IPS)</div>
+    <div class="chart-container" id="ips-pm-chart"></div>
+    <div class="chart-info">PM0.1, PM0.3, PM0.5, PM1.0, PM2.5, PM5.0, PM10 (µg/m³)</div>
+  `;
+  container.appendChild(pmCard);
+  
+  charts.ipsPm = createChart('ips-pm-chart', 'Stężenie Pyłu IPS', [
+    {
+      label: 'PM0.1 (µg/m³)',
+      data: formatChartData(data, 'pm0'),
+      borderColor: '#e74c3c',
+      backgroundColor: '#e74c3c20',
+      tension: 0.1
+    },
+    {
+      label: 'PM0.3 (µg/m³)',
+      data: formatChartData(data, 'pm1'),
+      borderColor: '#f39c12',
+      backgroundColor: '#f39c1220',
+      tension: 0.1
+    },
+    {
+      label: 'PM0.5 (µg/m³)',
+      data: formatChartData(data, 'pm2'),
+      borderColor: '#e67e22',
+      backgroundColor: '#e67e2220',
+      tension: 0.1
+    },
+    {
+      label: 'PM1.0 (µg/m³)',
+      data: formatChartData(data, 'pm3'),
+      borderColor: '#d35400',
+      backgroundColor: '#d3540020',
+      tension: 0.1
+    },
+    {
+      label: 'PM2.5 (µg/m³)',
+      data: formatChartData(data, 'pm4'),
+      borderColor: '#8e44ad',
+      backgroundColor: '#8e44ad20',
+      tension: 0.1
+    },
+    {
+      label: 'PM5.0 (µg/m³)',
+      data: formatChartData(data, 'pm5'),
+      borderColor: '#2c3e50',
+      backgroundColor: '#2c3e5020',
+      tension: 0.1
+    },
+    {
+      label: 'PM10 (µg/m³)',
+      data: formatChartData(data, 'pm6'),
+      borderColor: '#34495e',
+      backgroundColor: '#34495e20',
+      tension: 0.1
+    }
+  ]);
+  
+  // Particle Count
+  const pcCard = document.createElement('div');
+  pcCard.className = 'chart-card';
+  pcCard.innerHTML = `
+    <div class="chart-title">🔢 Liczba Cząstek (IPS)</div>
+    <div class="chart-container" id="ips-pc-chart"></div>
+    <div class="chart-info">PC0.1, PC0.3, PC0.5, PC1.0, PC2.5, PC5.0, PC10 (#/cm³)</div>
+  `;
+  container.appendChild(pcCard);
+  
+  charts.ipsPc = createChart('ips-pc-chart', 'Liczba Cząstek IPS', [
+    {
+      label: 'PC0.1 (#/cm³)',
+      data: formatChartData(data, 'pc0'),
+      borderColor: '#3498db',
+      backgroundColor: '#3498db20',
+      tension: 0.1
+    },
+    {
+      label: 'PC0.3 (#/cm³)',
+      data: formatChartData(data, 'pc1'),
+      borderColor: '#2980b9',
+      backgroundColor: '#2980b920',
+      tension: 0.1
+    },
+    {
+      label: 'PC0.5 (#/cm³)',
+      data: formatChartData(data, 'pc2'),
+      borderColor: '#1abc9c',
+      backgroundColor: '#1abc9c20',
+      tension: 0.1
+    },
+    {
+      label: 'PC1.0 (#/cm³)',
+      data: formatChartData(data, 'pc3'),
+      borderColor: '#16a085',
+      backgroundColor: '#16a08520',
+      tension: 0.1
+    },
+    {
+      label: 'PC2.5 (#/cm³)',
+      data: formatChartData(data, 'pc4'),
+      borderColor: '#27ae60',
+      backgroundColor: '#27ae6020',
+      tension: 0.1
+    },
+    {
+      label: 'PC5.0 (#/cm³)',
+      data: formatChartData(data, 'pc5'),
+      borderColor: '#2ecc71',
+      backgroundColor: '#2ecc7120',
+      tension: 0.1
+    },
+    {
+      label: 'PC10 (#/cm³)',
+      data: formatChartData(data, 'pc6'),
+      borderColor: '#55a3ff',
+      backgroundColor: '#55a3ff20',
+      tension: 0.1
+    }
+  ]);
+}
+
+function createSHT40Charts(data) {
+  const container = document.getElementById('charts-container');
+  
+  const sht40Card = document.createElement('div');
+  sht40Card.className = 'chart-card';
+  sht40Card.innerHTML = `
+    <div class="chart-title">🌡️ SHT40 (Temperatura/Wilgotność)</div>
+    <div class="chart-container" id="sht40-chart"></div>
+    <div class="chart-info">Temperatura (°C) i Wilgotność (%)</div>
+  `;
+  container.appendChild(sht40Card);
+  
+  charts.sht40 = createChart('sht40-chart', 'SHT40 - Temperatura i Wilgotność', [
     {
       label: 'Temperatura (°C)',
       data: formatChartData(data, 'temperature'),
@@ -406,67 +657,33 @@ function createEnvironmentalCharts(data) {
       borderColor: '#3498db',
       backgroundColor: '#3498db20',
       tension: 0.1
-    }
-  ]);
-  
-  // Pressure & CO2
-  const pressureCard = document.createElement('div');
-  pressureCard.className = 'chart-card';
-  pressureCard.innerHTML = `
-    <div class="chart-title">🌍 Ciśnienie i CO2</div>
-    <div class="chart-container" id="pressure-chart"></div>
-    <div class="chart-info">Dane atmosferyczne</div>
-  `;
-  container.appendChild(pressureCard);
-  
-  charts.pressure = createChart('pressure-chart', 'Ciśnienie i CO2', [
+    },
     {
-      label: 'Ciśnienie (hPa)',
+      label: 'Ciśnienie (kPa)',
       data: formatChartData(data, 'pressure'),
       borderColor: '#9b59b6',
       backgroundColor: '#9b59b620',
-      tension: 0.1
-    },
-    {
-      label: 'CO2 (ppm)',
-      data: formatChartData(data, 'co2'),
-      borderColor: '#2ecc71',
-      backgroundColor: '#2ecc7120',
       tension: 0.1
     }
   ]);
 }
 
-function createSolarCharts(data) {
+function createSCD41Charts(data) {
   const container = document.getElementById('charts-container');
   
-  const solarCard = document.createElement('div');
-  solarCard.className = 'chart-card';
-  solarCard.innerHTML = `
-    <div class="chart-title">☀️ Monitor Solarny</div>
-    <div class="chart-container" id="solar-chart"></div>
-    <div class="chart-info">Napięcie, prąd i moc PV</div>
+  const scd41Card = document.createElement('div');
+  scd41Card.className = 'chart-card';
+  scd41Card.innerHTML = `
+    <div class="chart-title">🌬️ SCD41 (CO2)</div>
+    <div class="chart-container" id="scd41-chart"></div>
+    <div class="chart-info">Stężenie CO2 (ppm)</div>
   `;
-  container.appendChild(solarCard);
+  container.appendChild(scd41Card);
   
-  charts.solar = createChart('solar-chart', 'Parametry Solarne', [
+  charts.scd41 = createChart('scd41-chart', 'SCD41 - Stężenie CO2', [
     {
-      label: 'Napięcie (V)',
-      data: formatChartData(data, 'V'),
-      borderColor: '#f39c12',
-      backgroundColor: '#f39c1220',
-      tension: 0.1
-    },
-    {
-      label: 'Prąd (A)',
-      data: formatChartData(data, 'I'),
-      borderColor: '#e67e22',
-      backgroundColor: '#e67e2220',
-      tension: 0.1
-    },
-    {
-      label: 'Moc PV (W)',
-      data: formatChartData(data, 'PPV'),
+      label: 'CO2 (ppm)',
+      data: formatChartData(data, 'co2'),
       borderColor: '#27ae60',
       backgroundColor: '#27ae6020',
       tension: 0.1
@@ -474,38 +691,101 @@ function createSolarCharts(data) {
   ]);
 }
 
-function createAirQualityCharts(data) {
+function createCalibrationCharts(data) {
   const container = document.getElementById('charts-container');
   
-  const airCard = document.createElement('div');
-  airCard.className = 'chart-card';
-  airCard.innerHTML = `
-    <div class="chart-title">💨 Jakość Powietrza (SPS30)</div>
-    <div class="chart-container" id="air-chart"></div>
-    <div class="chart-info">Cząstki PM w µg/m³</div>
+  // Gases (ug/m3)
+  const gasesCard = document.createElement('div');
+  gasesCard.className = 'chart-card';
+  gasesCard.innerHTML = `
+    <div class="chart-title">🧪 Gazy (µg/m³)</div>
+    <div class="chart-container" id="gases-chart"></div>
+    <div class="chart-info">CO, NO, NO2, O3, SO2, H2S, NH3</div>
   `;
-  container.appendChild(airCard);
+  container.appendChild(gasesCard);
   
-  charts.air = createChart('air-chart', 'Cząstki PM', [
+  charts.gases = createChart('gases-chart', 'Stężenie Gazów (µg/m³)', [
     {
-      label: 'PM1.0',
-      data: formatChartData(data, 'pm1_0'),
-      borderColor: '#34495e',
-      backgroundColor: '#34495e20',
-      tension: 0.1
-    },
-    {
-      label: 'PM2.5',
-      data: formatChartData(data, 'pm2_5'),
+      label: 'CO (µg/m³)',
+      data: formatChartData(data, 'CO'),
       borderColor: '#e74c3c',
       backgroundColor: '#e74c3c20',
       tension: 0.1
     },
     {
-      label: 'PM10',
-      data: formatChartData(data, 'pm10'),
-      borderColor: '#95a5a6',
-      backgroundColor: '#95a5a620',
+      label: 'NO (µg/m³)',
+      data: formatChartData(data, 'NO'),
+      borderColor: '#f39c12',
+      backgroundColor: '#f39c1220',
+      tension: 0.1
+    },
+    {
+      label: 'NO2 (µg/m³)',
+      data: formatChartData(data, 'NO2'),
+      borderColor: '#e67e22',
+      backgroundColor: '#e67e2220',
+      tension: 0.1
+    },
+    {
+      label: 'O3 (µg/m³)',
+      data: formatChartData(data, 'O3'),
+      borderColor: '#3498db',
+      backgroundColor: '#3498db20',
+      tension: 0.1
+    },
+    {
+      label: 'SO2 (µg/m³)',
+      data: formatChartData(data, 'SO2'),
+      borderColor: '#9b59b6',
+      backgroundColor: '#9b59b620',
+      tension: 0.1
+    },
+    {
+      label: 'H2S (µg/m³)',
+      data: formatChartData(data, 'H2S'),
+      borderColor: '#2c3e50',
+      backgroundColor: '#2c3e5020',
+      tension: 0.1
+    },
+    {
+      label: 'NH3 (µg/m³)',
+      data: formatChartData(data, 'NH3'),
+      borderColor: '#27ae60',
+      backgroundColor: '#27ae6020',
+      tension: 0.1
+    }
+  ]);
+  
+  // Special sensors
+  const specialCard = document.createElement('div');
+  specialCard.className = 'chart-card';
+  specialCard.innerHTML = `
+    <div class="chart-title">🔬 Czujniki Specjalne</div>
+    <div class="chart-container" id="special-chart"></div>
+    <div class="chart-info">HCHO, PID, VOC</div>
+  `;
+  container.appendChild(specialCard);
+  
+  charts.special = createChart('special-chart', 'Czujniki Specjalne', [
+    {
+      label: 'HCHO (ppb)',
+      data: formatChartData(data, 'HCHO'),
+      borderColor: '#8e44ad',
+      backgroundColor: '#8e44ad20',
+      tension: 0.1
+    },
+    {
+      label: 'PID',
+      data: formatChartData(data, 'PID'),
+      borderColor: '#d35400',
+      backgroundColor: '#d3540020',
+      tension: 0.1
+    },
+    {
+      label: 'VOC (µg/m³)',
+      data: formatChartData(data, 'VOC'),
+      borderColor: '#16a085',
+      backgroundColor: '#16a08520',
       tension: 0.1
     }
   ]);
@@ -581,6 +861,60 @@ function createHCHOCharts(data) {
       borderColor: '#16a085',
       backgroundColor: '#16a08520',
       tension: 0.1
+    }
+  ]);
+}
+
+function createFanCharts(data) {
+  const container = document.getElementById('charts-container');
+  
+  // Fan Speed & RPM
+  const fanCard = document.createElement('div');
+  fanCard.className = 'chart-card';
+  fanCard.innerHTML = `
+    <div class="chart-title">💨 Sterowanie Wentylatorem</div>
+    <div class="chart-container" id="fan-chart"></div>
+    <div class="chart-info">Prędkość PWM i RPM</div>
+  `;
+  container.appendChild(fanCard);
+  
+  charts.fan = createChart('fan-chart', 'Parametry Wentylatora', [
+    {
+      label: 'Duty Cycle (%)',
+      data: formatChartData(data, 'dutyCycle'),
+      borderColor: '#3498db',
+      backgroundColor: '#3498db20',
+      tension: 0.1,
+      yAxisID: 'y'
+    },
+    {
+      label: 'RPM',
+      data: formatChartData(data, 'rpm'),
+      borderColor: '#e74c3c',
+      backgroundColor: '#e74c3c20',
+      tension: 0.1,
+      yAxisID: 'y1'
+    }
+  ]);
+  
+  // GLine Router Status
+  const glineCard = document.createElement('div');
+  glineCard.className = 'chart-card';
+  glineCard.innerHTML = `
+    <div class="chart-title">🔌 Status Routera GLine</div>
+    <div class="chart-container" id="gline-chart"></div>
+    <div class="chart-info">Włączony/Wyłączony</div>
+  `;
+  container.appendChild(glineCard);
+  
+  charts.gline = createChart('gline-chart', 'Status GLine Router', [
+    {
+      label: 'GLine Enabled',
+      data: formatChartData(data, 'glineEnabled'),
+      borderColor: '#2ecc71',
+      backgroundColor: '#2ecc7120',
+      tension: 0.1,
+      stepped: true
     }
   ]);
 }

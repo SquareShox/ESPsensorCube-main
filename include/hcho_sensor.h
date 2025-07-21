@@ -12,7 +12,6 @@ void resetHCHOData();
 
 // Configuration functions
 bool setHCHOAutoCalibration(uint8_t mode);
-uint8_t getHCHOSensorStatus();
 float getHCHOConcentration();
 
 // Diagnostic function

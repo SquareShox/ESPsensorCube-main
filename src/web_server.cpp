@@ -8,6 +8,9 @@
 #include <ESPAsyncWebServer.h>
 #include <time.h>
 #include <history.h>
+#include <web_socket.h>
+#include <ArduinoJson.h>
+#include <fan.h>
 
 // Forward declarations for safe printing functions
 void safePrint(const String& message);
@@ -32,6 +35,7 @@ extern MCP3424Data mcp3424Data;
 extern ADS1110Data ads1110Data;
 extern INA219Data ina219Data;
 extern SPS30Data sps30Data;
+extern SHT40Data sht40Data;
 extern HCHOData hchoData;
 extern IPSSensorData ipsSensorData;
 
@@ -39,6 +43,8 @@ extern bool solarSensorStatus;
 extern bool opcn3SensorStatus;
 extern bool i2cSensorStatus;
 extern bool sps30SensorStatus;
+extern bool sht40SensorStatus;
+extern bool scd41SensorStatus;
 extern bool mcp3424SensorStatus;
 extern bool ads1110SensorStatus;
 extern bool ina219SensorStatus;
@@ -85,157 +91,271 @@ bool isTimeSet() {
     return timeInitialized && (time(nullptr) > 8 * 3600 * 2); // > year 1970
 }
 
-void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
-    if (type == WS_EVT_CONNECT) {
-        safePrintln("WebSocket client connected");
-    } else if (type == WS_EVT_DISCONNECT) {
-        safePrintln("WebSocket client disconnected");
-    }
-}
+// WebSocket event handler zostanie zastąpiony przez initializeWebSocket
 
 String getAllSensorJson() {
     // Check memory before building JSON
     if (ESP.getFreeHeap() < 15000) {
-        return "{\"error\":\"Low memory\",\"freeHeap\":" + String(ESP.getFreeHeap()) + "}";
+        DynamicJsonDocument doc(512);
+        doc["error"] = "Low memory";
+        doc["freeHeap"] = ESP.getFreeHeap();
+        String json;
+        serializeJson(doc, json);
+        return json;
     }
     
-    String json;
-    json.reserve(3072); // Reserve 3KB for sensor JSON
-    json = "{";
-    json += "\"t\":" + String(millis() / 1000) + ",";
-    json += "\"uptime\":" + String(millis() / 1000) + ",";
-    json += "\"freeHeap\":" + String(ESP.getFreeHeap()) + ",";
-    json += "\"wifiSignal\":" + String(WiFi.RSSI()) + ",";
-    json += "\"ntpTime\":\"" + getFormattedTime() + "\",";
-    json += "\"ntpEpoch\":" + String(getEpochTime()) + ",";
-    json += "\"ntpDate\":\"" + getFormattedDate() + "\",";
-    json += "\"ntpValid\":" + String(isTimeSet() ? "true" : "false") + ",";
+    // Create JSON document with appropriate size for all sensor data
+    DynamicJsonDocument doc(8192); // 8KB - zmniejszone dla stabilności
+    
+    doc["t"] = millis() / 1000;
+    doc["uptime"] = millis() / 1000;
+    doc["freeHeap"] = ESP.getFreeHeap();
+    doc["wifiSignal"] = WiFi.RSSI();
+    doc["ntpTime"] = getFormattedTime();
+    doc["ntpEpoch"] = getEpochTime();
+    doc["ntpDate"] = getFormattedDate();
+    doc["ntpValid"] = isTimeSet();
     
     // History status
     extern HistoryManager historyManager;
-    json += "\"history\":{";
-    json += "\"configEnabled\":" + String(config.enableHistory ? "true" : "false") + ",";
-    json += "\"enabled\":" + String(config.enableHistory && historyManager.isInitialized() ? "true" : "false") + ",";
-    json += "\"memoryUsed\":" + String(config.enableHistory ? historyManager.getTotalMemoryUsed() : 0) + ",";
-    json += "\"memoryBudget\":" + String(TARGET_MEMORY_BYTES) + "";
-    json += "},";
-    json += "\"psramSize\":" + String(ESP.getPsramSize()) + ",";
-    json += "\"freePsram\":" + String(ESP.getFreePsram()) + ",";
-    json += "\"sensorsEnabled\":{";
-    json += "\"solar\":" + String(solarSensorStatus ? "true" : "false") + ",";
-    json += "\"opcn3\":" + String(opcn3SensorStatus ? "true" : "false") + ",";
-    json += "\"i2c\":" + String(i2cSensorStatus ? "true" : "false") + ",";
-    json += "\"sps30\":" + String(sps30SensorStatus ? "true" : "false") + ",";
-    json += "\"ads1110\":" + String(ads1110SensorStatus ? "true" : "false") + ",";
-    json += "\"ina219\":" + String(ina219SensorStatus ? "true" : "false") + ",";
-    json += "\"hcho\":" + String(hchoSensorStatus ? "true" : "false") + ",";
-    json += "\"ips\":" + String(ipsSensorStatus ? "true" : "false");
-    json += "},";
-    // Solar
-    json += "\"solar\":{\"valid\":" + String(solarSensorStatus && solarData.valid ? "true" : "false");
-    if (solarSensorStatus && solarData.valid) {
-        json += ",\"V\":\"" + solarData.V + "\",\"I\":\"" + solarData.I + "\",\"VPV\":\"" + solarData.VPV + "\",\"PPV\":\"" + solarData.PPV + "\"";
-    }
-    json += "},";
-    // OPCN3
-    json += "\"opcn3\":{\"valid\":" + String(opcn3SensorStatus && opcn3Data.valid ? "true" : "false");
-    if (opcn3SensorStatus && opcn3Data.valid) {
-        json += ",\"PM1\":" + String(opcn3Data.pm1) + ",\"PM25\":" + String(opcn3Data.pm2_5) + ",\"PM10\":" + String(opcn3Data.pm10) + ",\"temperature\":" + String(opcn3Data.getTempC()) + ",\"humidity\":" + String(opcn3Data.getHumidity());
-    }
-    json += "},";
-    // SPS30
-    json += "\"sps30\":{\"valid\":" + String(sps30SensorStatus && sps30Data.valid ? "true" : "false");
-    if (sps30SensorStatus && sps30Data.valid) {
-        json += ",\"PM1\":" + String(sps30Data.pm1_0, 1) + ",\"PM25\":" + String(sps30Data.pm2_5, 1) + ",\"PM4\":" + String(sps30Data.pm4_0, 1) + ",\"PM10\":" + String(sps30Data.pm10, 1) + ",\"NC05\":" + String(sps30Data.nc0_5, 1) + ",\"NC1\":" + String(sps30Data.nc1_0, 1) + ",\"NC25\":" + String(sps30Data.nc2_5, 1) + ",\"NC4\":" + String(sps30Data.nc4_0, 1) + ",\"NC10\":" + String(sps30Data.nc10, 1) + ",\"TPS\":" + String(sps30Data.typical_particle_size, 1);
-    }
-    json += "},";
-    // I2C
-    json += "\"i2c\":{\"valid\":" + String(i2cSensorStatus && i2cSensorData.valid ? "true" : "false");
-    if (i2cSensorStatus && i2cSensorData.valid) {
-        json += ",\"temperature\":" + String(i2cSensorData.temperature) + ",\"humidity\":" + String(i2cSensorData.humidity) + ",\"pressure\":" + String(i2cSensorData.pressure) + ",\"CO2\":" + String(i2cSensorData.co2);
-    }
-    json += "},";
-    // ADC data structure
-    json += "\"adc\":{";
-    // MCP3424
-    json += "\"mcp3424\":{\"deviceCount\":" + String(mcp3424Data.deviceCount) + ",\"enabled\":" + String(mcp3424SensorStatus ? "true" : "false") + ",\"devices\":[";
-    for (uint8_t device = 0; device < mcp3424Data.deviceCount; device++) {
-        json += "{\"address\":\"0x" + String(mcp3424Data.addresses[device], HEX) + "\",\"valid\":" + String(mcp3424Data.valid[device] ? "true" : "false") + ",\"channels\":{\"ch1\":" + String(mcp3424Data.channels[device][0], 6) + ",\"ch2\":" + String(mcp3424Data.channels[device][1], 6) + ",\"ch3\":" + String(mcp3424Data.channels[device][2], 6) + ",\"ch4\":" + String(mcp3424Data.channels[device][3], 6) + "}}";
-        if (device < mcp3424Data.deviceCount - 1) json += ",";
-    }
-    json += "]},";
-    // ADS1110
-    json += "\"ads1110\":{\"enabled\":" + String(ads1110SensorStatus ? "true" : "false") + ",\"valid\":" + String(ads1110SensorStatus && ads1110Data.valid ? "true" : "false") + ",\"voltage\":" + String(ads1110Data.voltage, 6) + ",\"dataRate\":" + String(ads1110Data.dataRate) + ",\"gain\":" + String(ads1110Data.gain) + "}";
-    json += "},";
-    // Power
-    json += "\"power\":{";
-    if (ina219SensorStatus && ina219Data.valid) {
-        json += "\"valid\":true,\"busVoltage\":" + String(ina219Data.busVoltage, 3) + ",\"shuntVoltage\":" + String(ina219Data.shuntVoltage, 2) + ",\"current\":" + String(ina219Data.current, 2) + ",\"power\":" + String(ina219Data.power, 2);
-    } else {
-        json += "\"valid\":false";
-    }
-    json += "},";
-    // HCHO
-    json += "\"hcho\":{\"valid\":" + String(hchoSensorStatus && hchoData.valid ? "true" : "false");
-    if (hchoSensorStatus && hchoData.valid) {
-        json += ",\"HCHO\":" + String(hchoData.hcho, 3) + ",\"VOC\":" + String(hchoData.voc, 3) + ",\"temperature\":" + String(hchoData.temperature, 1) + ",\"humidity\":" + String(hchoData.humidity, 1) + ",\"TVOC\":" + String(hchoData.tvoc, 3) + ",\"sensorStatus\":" + String(hchoData.sensorStatus) + ",\"autoCalibration\":" + String(hchoData.autoCalibration);
-    }
-    json += "},";
-    // IPS
-    json += "\"ips\":{\"valid\":" + String(ipsSensorStatus ? "true" : "false");
-    if (ipsSensorStatus) {
-        json += ",\"PC\":[";
-        for (int i = 0; i < 7; i++) {
-            json += String(ipsSensorData.pc_values[i]);
-            if (i < 6) json += ",";
-        }
-        json += "],\"PM\":[";
-        for (int i = 0; i < 7; i++) {
-            json += String(ipsSensorData.pm_values[i]);
-            if (i < 6) json += ",";
-        }
-        json += "]";
-    }
-    json += "},";
+    JsonObject history = doc.createNestedObject("history");
+    history["configEnabled"] = config.enableHistory;
+    history["enabled"] = config.enableHistory && historyManager.isInitialized();
+    history["memoryUsed"] = config.enableHistory ? historyManager.getTotalMemoryUsed() : 0;
+    history["memoryBudget"] = TARGET_MEMORY_BYTES;
     
-    // Calibration data
-    json += "\"calibration\":{\"enabled\":" + String(calibConfig.enableCalibration ? "true" : "false") + ",\"valid\":" + String(calibratedData.valid ? "true" : "false");
-    if (calibConfig.enableCalibration && calibratedData.valid) {
-        // Temperatures
-        json += ",\"temperatures\":{";
-        json += "\"K1\":" + (isnan(calibratedData.K1_temp) ? "null" : String(calibratedData.K1_temp, 1)) + ",\"K2\":" + (isnan(calibratedData.K2_temp) ? "null" : String(calibratedData.K2_temp, 1)) + ",\"K3\":" + (isnan(calibratedData.K3_temp) ? "null" : String(calibratedData.K3_temp, 1)) + ",\"K4\":" + (isnan(calibratedData.K4_temp) ? "null" : String(calibratedData.K4_temp, 1)) + ",\"K5\":" + (isnan(calibratedData.K5_temp) ? "null" : String(calibratedData.K5_temp, 1));
-        json += ",\"K6\":" + (isnan(calibratedData.K6_temp) ? "null" : String(calibratedData.K6_temp, 1)) + ",\"K7\":" + (isnan(calibratedData.K7_temp) ? "null" : String(calibratedData.K7_temp, 1)) + ",\"K8\":" + (isnan(calibratedData.K8_temp) ? "null" : String(calibratedData.K8_temp, 1)) + ",\"K9\":" + (isnan(calibratedData.K9_temp) ? "null" : String(calibratedData.K9_temp, 1)) + ",\"K12\":" + (isnan(calibratedData.K12_temp) ? "null" : String(calibratedData.K12_temp, 1));
-        json += "},";
-        
-        // Voltages
-        json += "\"voltages\":{";
-        json += "\"K1\":" + (isnan(calibratedData.K1_voltage) ? "null" : String(calibratedData.K1_voltage, 2)) + ",\"K2\":" + (isnan(calibratedData.K2_voltage) ? "null" : String(calibratedData.K2_voltage, 2)) + ",\"K3\":" + (isnan(calibratedData.K3_voltage) ? "null" : String(calibratedData.K3_voltage, 2)) + ",\"K4\":" + (isnan(calibratedData.K4_voltage) ? "null" : String(calibratedData.K4_voltage, 2)) + ",\"K5\":" + (isnan(calibratedData.K5_voltage) ? "null" : String(calibratedData.K5_voltage, 2));
-        json += ",\"K6\":" + (isnan(calibratedData.K6_voltage) ? "null" : String(calibratedData.K6_voltage, 2)) + ",\"K7\":" + (isnan(calibratedData.K7_voltage) ? "null" : String(calibratedData.K7_voltage, 2)) + ",\"K8\":" + (isnan(calibratedData.K8_voltage) ? "null" : String(calibratedData.K8_voltage, 2)) + ",\"K9\":" + (isnan(calibratedData.K9_voltage) ? "null" : String(calibratedData.K9_voltage, 2)) + ",\"K12\":" + (isnan(calibratedData.K12_voltage) ? "null" : String(calibratedData.K12_voltage, 2));
-        json += "},";
-        
-        // Gases (ug/m3)
-        json += "\"gases_ugm3\":{";
-        json += "\"CO\":" + (isnan(calibratedData.CO) ? "null" : String(calibratedData.CO, 1)) + ",\"NO\":" + (isnan(calibratedData.NO) ? "null" : String(calibratedData.NO, 1)) + ",\"NO2\":" + (isnan(calibratedData.NO2) ? "null" : String(calibratedData.NO2, 1)) + ",\"O3\":" + (isnan(calibratedData.O3) ? "null" : String(calibratedData.O3, 1)) + ",\"SO2\":" + (isnan(calibratedData.SO2) ? "null" : String(calibratedData.SO2, 1)) + ",\"H2S\":" + (isnan(calibratedData.H2S) ? "null" : String(calibratedData.H2S, 1)) + ",\"NH3\":" + (isnan(calibratedData.NH3) ? "null" : String(calibratedData.NH3, 1));
-        json += "},";
-        
-        // Gases (ppb)
-        json += "\"gases_ppb\":{";
-        json += "\"CO\":" + (isnan(calibratedData.CO_ppb) ? "null" : String(calibratedData.CO_ppb, 1)) + ",\"NO\":" + (isnan(calibratedData.NO_ppb) ? "null" : String(calibratedData.NO_ppb, 1)) + ",\"NO2\":" + (isnan(calibratedData.NO2_ppb) ? "null" : String(calibratedData.NO2_ppb, 1)) + ",\"O3\":" + (isnan(calibratedData.O3_ppb) ? "null" : String(calibratedData.O3_ppb, 1)) + ",\"SO2\":" + (isnan(calibratedData.SO2_ppb) ? "null" : String(calibratedData.SO2_ppb, 1)) + ",\"H2S\":" + (isnan(calibratedData.H2S_ppb) ? "null" : String(calibratedData.H2S_ppb, 1)) + ",\"NH3\":" + (isnan(calibratedData.NH3_ppb) ? "null" : String(calibratedData.NH3_ppb, 1));
-        json += "},";
-        
-        // TGS sensors
-        json += "\"tgs\":{";
-        json += "\"TGS02\":" + (isnan(calibratedData.TGS02) ? "null" : String(calibratedData.TGS02, 3)) + ",\"TGS03\":" + (isnan(calibratedData.TGS03) ? "null" : String(calibratedData.TGS03, 3)) + ",\"TGS12\":" + (isnan(calibratedData.TGS12) ? "null" : String(calibratedData.TGS12, 3));
-        json += ",\"TGS02_ohm\":" + (isnan(calibratedData.TGS02_ohm) ? "null" : String(calibratedData.TGS02_ohm, 0)) + ",\"TGS03_ohm\":" + (isnan(calibratedData.TGS03_ohm) ? "null" : String(calibratedData.TGS03_ohm, 0)) + ",\"TGS12_ohm\":" + (isnan(calibratedData.TGS12_ohm) ? "null" : String(calibratedData.TGS12_ohm, 0));
-        json += "},";
-        
-        // Special sensors
-        json += "\"special\":{";
-        json += "\"HCHO_ppb\":" + (isnan(calibratedData.HCHO) ? "null" : String(calibratedData.HCHO, 1)) + ",\"PID\":" + (isnan(calibratedData.PID) ? "null" : String(calibratedData.PID, 3)) + ",\"PID_mV\":" + (isnan(calibratedData.PID_mV) ? "null" : String(calibratedData.PID_mV, 2));
-        json += "}";
+    doc["psramSize"] = ESP.getPsramSize();
+    doc["freePsram"] = ESP.getFreePsram();
+    
+    JsonObject sensorsEnabled = doc.createNestedObject("sensorsEnabled");
+    sensorsEnabled["solar"] = solarSensorStatus;
+    sensorsEnabled["opcn3"] = opcn3SensorStatus;
+    sensorsEnabled["sht40"] = sht40SensorStatus;
+    sensorsEnabled["scd41"] = scd41SensorStatus;
+    sensorsEnabled["sps30"] = sps30SensorStatus;
+    sensorsEnabled["mcp3424"] = mcp3424SensorStatus;
+    sensorsEnabled["ads1110"] = ads1110SensorStatus;
+    sensorsEnabled["ina219"] = ina219SensorStatus;
+    sensorsEnabled["hcho"] = hchoSensorStatus;
+    sensorsEnabled["ips"] = ipsSensorStatus;
+    sensorsEnabled["fan"] = config.enableFan; // Fan only if enabled
+    
+    // Solar
+    JsonObject solar = doc.createNestedObject("solar");
+    solar["valid"] = solarSensorStatus && solarData.valid;
+    if (solarSensorStatus && solarData.valid) {
+        solar["V"] = solarData.V;
+        solar["I"] = solarData.I;
+        solar["VPV"] = solarData.VPV;
+        solar["PPV"] = solarData.PPV;
     }
-    json += "}";
-    json += "}";
+    
+    // OPCN3
+    JsonObject opcn3 = doc.createNestedObject("opcn3");
+    opcn3["valid"] = opcn3SensorStatus && opcn3Data.valid;
+    if (opcn3SensorStatus && opcn3Data.valid) {
+        opcn3["PM1"] = opcn3Data.pm1;
+        opcn3["PM25"] = opcn3Data.pm2_5;
+        opcn3["PM10"] = opcn3Data.pm10;
+        opcn3["temperature"] = opcn3Data.getTempC();
+        opcn3["humidity"] = opcn3Data.getHumidity();
+    }
+    
+    // SPS30
+    JsonObject sps30 = doc.createNestedObject("sps30");
+    sps30["valid"] = sps30SensorStatus && sps30Data.valid;
+    if (sps30SensorStatus && sps30Data.valid) {
+        sps30["PM1"] = round(sps30Data.pm1_0 * 10) / 10.0;
+        sps30["PM25"] = round(sps30Data.pm2_5 * 10) / 10.0;
+        sps30["PM4"] = round(sps30Data.pm4_0 * 10) / 10.0;
+        sps30["PM10"] = round(sps30Data.pm10 * 10) / 10.0;
+        sps30["NC05"] = round(sps30Data.nc0_5 * 10) / 10.0;
+        sps30["NC1"] = round(sps30Data.nc1_0 * 10) / 10.0;
+        sps30["NC25"] = round(sps30Data.nc2_5 * 10) / 10.0;
+        sps30["NC4"] = round(sps30Data.nc4_0 * 10) / 10.0;
+        sps30["NC10"] = round(sps30Data.nc10 * 10) / 10.0;
+        sps30["TPS"] = round(sps30Data.typical_particle_size * 10) / 10.0;
+    }
+    
+    // SHT40 (temperature, humidity, pressure)
+    JsonObject sht40 = doc.createNestedObject("sht40");
+    sht40["valid"] = sht40SensorStatus && sht40Data.valid;
+    if (sht40SensorStatus && sht40Data.valid) {
+        sht40["temperature"] = round(sht40Data.temperature * 100) / 100.0;
+        sht40["humidity"] = round(sht40Data.humidity * 100) / 100.0;
+        sht40["pressure"] = round(sht40Data.pressure * 100) / 100.0;
+    }
+    
+    // SCD41 (CO2)
+    JsonObject scd41 = doc.createNestedObject("scd41");
+    scd41["valid"] = scd41SensorStatus ;
+    if (scd41SensorStatus ) {
+        scd41["CO2"] = i2cSensorData.co2;
+    }
+    
+    // MCP3424 (all devices)
+    JsonObject mcp3424 = doc.createNestedObject("mcp3424");
+    mcp3424["enabled"] = mcp3424SensorStatus;
+    mcp3424["deviceCount"] = mcp3424Data.deviceCount;
+    JsonArray devices = mcp3424.createNestedArray("devices");
+    for (uint8_t device = 0; device < mcp3424Data.deviceCount; device++) {
+        JsonObject deviceObj = devices.createNestedObject();
+        deviceObj["address"] = "0x" + String(mcp3424Data.addresses[device], HEX);
+        deviceObj["valid"] = mcp3424Data.valid[device];
+        deviceObj["resolution"] = mcp3424Data.resolution;
+        deviceObj["gain"] = mcp3424Data.gain;
+        JsonObject channels = deviceObj.createNestedObject("channels");
+        channels["ch1"] = round(mcp3424Data.channels[device][0] * 1000000) / 1000000.0;
+        channels["ch2"] = round(mcp3424Data.channels[device][1] * 1000000) / 1000000.0;
+        channels["ch3"] = round(mcp3424Data.channels[device][2] * 1000000) / 1000000.0;
+        channels["ch4"] = round(mcp3424Data.channels[device][3] * 1000000) / 1000000.0;
+    }
+    
+    // ADS1110
+    JsonObject ads1110 = doc.createNestedObject("ads1110");
+    ads1110["enabled"] = ads1110SensorStatus;
+    ads1110["valid"] = ads1110SensorStatus && ads1110Data.valid;
+    if (ads1110SensorStatus && ads1110Data.valid) {
+        ads1110["voltage"] = round(ads1110Data.voltage * 1000000) / 1000000.0;
+        ads1110["dataRate"] = ads1110Data.dataRate;
+        ads1110["gain"] = ads1110Data.gain;
+    }
+    
+    // Power
+    JsonObject power = doc.createNestedObject("power");
+    power["valid"] = ina219SensorStatus && ina219Data.valid;
+    if (ina219SensorStatus && ina219Data.valid) {
+        power["busVoltage"] = round(ina219Data.busVoltage * 1000) / 1000.0;
+        power["shuntVoltage"] = round(ina219Data.shuntVoltage * 100) / 100.0;
+        power["current"] = round(ina219Data.current * 100) / 100.0;
+        power["power"] = round(ina219Data.power * 100) / 100.0;
+    }
+    
+    // HCHO (formaldehyde sensor)
+    JsonObject hcho = doc.createNestedObject("hcho");
+    hcho["enabled"] = hchoSensorStatus;
+    hcho["valid"] = hchoSensorStatus && hchoData.valid;
+    if (hchoSensorStatus && hchoData.valid) {
+        hcho["HCHO"] = round(hchoData.hcho * 1000) / 1000.0;
+        hcho["age"] = (millis() - hchoData.lastUpdate) / 1000;
+    }
+    
+    // IPS (all particle data)
+    JsonObject ips = doc.createNestedObject("ips");
+    ips["enabled"] = ipsSensorStatus;
+    ips["valid"] = ipsSensorStatus && ipsSensorData.valid;
+    if (ipsSensorStatus && ipsSensorData.valid) {
+        JsonArray pc = ips.createNestedArray("PC");
+        JsonArray pm = ips.createNestedArray("PM");
+        JsonArray np = ips.createNestedArray("NP");
+        JsonArray pw = ips.createNestedArray("PW");
+        for (int i = 0; i < 7; i++) {
+            pc.add(ipsSensorData.pc_values[i]);
+            pm.add(round(ipsSensorData.pm_values[i] * 100) / 100.0);
+            np.add(ipsSensorData.np_values[i]);
+            pw.add(ipsSensorData.pw_values[i]);
+        }
+        ips["debugMode"] = ipsSensorData.debugMode;
+        ips["won"] = ipsSensorData.won;
+    }
+    
+    // Fan control system
+    JsonObject fan = doc.createNestedObject("fan");
+    fan["enabled"] = config.enableFan && isFanEnabled();
+    fan["dutyCycle"] = config.enableFan ? getFanDutyCycle() : 0;
+    fan["rpm"] = config.enableFan ? getFanRPM() : 0;
+    fan["glineEnabled"] = config.enableFan && isGLineEnabled();
+    fan["pwmValue"] = config.enableFan ? map(getFanDutyCycle(), 0, 100, 0, 255) : 0;
+    fan["pwmFreq"] = 25000; // 25kHz
+    fan["valid"] = config.enableFan;
+    
+    // Calibration data (all sensors if enabled)
+    JsonObject calibration = doc.createNestedObject("calibration");
+    calibration["enabled"] = calibConfig.enableCalibration;
+    calibration["valid"] = calibratedData.valid;
+    if (calibConfig.enableCalibration && calibratedData.valid) {
+        // Configuration
+        JsonObject configObj = calibration.createNestedObject("config");
+        configObj["tgsSensors"] = calibConfig.enableTGSSensors;
+        configObj["gasSensors"] = calibConfig.enableGasSensors;
+        configObj["ppbConversion"] = calibConfig.enablePPBConversion;
+        configObj["specialSensors"] = calibConfig.enableSpecialSensors;
+        configObj["movingAverages"] = calibConfig.enableMovingAverages;
+        
+        // Temperatures (all K sensors)
+        JsonObject temperatures = calibration.createNestedObject("temperatures");
+        if (!isnan(calibratedData.K1_temp)) temperatures["K1"] = round(calibratedData.K1_temp * 10) / 10.0;
+        if (!isnan(calibratedData.K2_temp)) temperatures["K2"] = round(calibratedData.K2_temp * 10) / 10.0;
+        if (!isnan(calibratedData.K3_temp)) temperatures["K3"] = round(calibratedData.K3_temp * 10) / 10.0;
+        if (!isnan(calibratedData.K4_temp)) temperatures["K4"] = round(calibratedData.K4_temp * 10) / 10.0;
+        if (!isnan(calibratedData.K5_temp)) temperatures["K5"] = round(calibratedData.K5_temp * 10) / 10.0;
+        if (!isnan(calibratedData.K6_temp)) temperatures["K6"] = round(calibratedData.K6_temp * 10) / 10.0;
+        if (!isnan(calibratedData.K7_temp)) temperatures["K7"] = round(calibratedData.K7_temp * 10) / 10.0;
+        if (!isnan(calibratedData.K8_temp)) temperatures["K8"] = round(calibratedData.K8_temp * 10) / 10.0;
+        if (!isnan(calibratedData.K9_temp)) temperatures["K9"] = round(calibratedData.K9_temp * 10) / 10.0;
+        if (!isnan(calibratedData.K12_temp)) temperatures["K12"] = round(calibratedData.K12_temp * 10) / 10.0;
+        
+        // Voltages (all K sensors)
+        JsonObject voltages = calibration.createNestedObject("voltages");
+        if (!isnan(calibratedData.K1_voltage)) voltages["K1"] = round(calibratedData.K1_voltage * 100) / 100.0;
+        if (!isnan(calibratedData.K2_voltage)) voltages["K2"] = round(calibratedData.K2_voltage * 100) / 100.0;
+        if (!isnan(calibratedData.K3_voltage)) voltages["K3"] = round(calibratedData.K3_voltage * 100) / 100.0;
+        if (!isnan(calibratedData.K4_voltage)) voltages["K4"] = round(calibratedData.K4_voltage * 100) / 100.0;
+        if (!isnan(calibratedData.K5_voltage)) voltages["K5"] = round(calibratedData.K5_voltage * 100) / 100.0;
+        if (!isnan(calibratedData.K6_voltage)) voltages["K6"] = round(calibratedData.K6_voltage * 100) / 100.0;
+        if (!isnan(calibratedData.K7_voltage)) voltages["K7"] = round(calibratedData.K7_voltage * 100) / 100.0;
+        if (!isnan(calibratedData.K8_voltage)) voltages["K8"] = round(calibratedData.K8_voltage * 100) / 100.0;
+        if (!isnan(calibratedData.K9_voltage)) voltages["K9"] = round(calibratedData.K9_voltage * 100) / 100.0;
+        if (!isnan(calibratedData.K12_voltage)) voltages["K12"] = round(calibratedData.K12_voltage * 100) / 100.0;
+        
+        // Gases (ug/m3) - if gas sensors enabled
+        if (calibConfig.enableGasSensors) {
+            JsonObject gases_ugm3 = calibration.createNestedObject("gases_ugm3");
+            if (!isnan(calibratedData.CO)) gases_ugm3["CO"] = round(calibratedData.CO * 10) / 10.0;
+            if (!isnan(calibratedData.NO)) gases_ugm3["NO"] = round(calibratedData.NO * 10) / 10.0;
+            if (!isnan(calibratedData.NO2)) gases_ugm3["NO2"] = round(calibratedData.NO2 * 10) / 10.0;
+            if (!isnan(calibratedData.O3)) gases_ugm3["O3"] = round(calibratedData.O3 * 10) / 10.0;
+            if (!isnan(calibratedData.SO2)) gases_ugm3["SO2"] = round(calibratedData.SO2 * 10) / 10.0;
+            if (!isnan(calibratedData.H2S)) gases_ugm3["H2S"] = round(calibratedData.H2S * 10) / 10.0;
+            if (!isnan(calibratedData.NH3)) gases_ugm3["NH3"] = round(calibratedData.NH3 * 10) / 10.0;
+            if (!isnan(calibratedData.VOC)) gases_ugm3["VOC"] = round(calibratedData.VOC * 10) / 10.0;
+            
+            // Gases (ppb) - if PPB conversion enabled
+            if (calibConfig.enablePPBConversion) {
+                JsonObject gases_ppb = calibration.createNestedObject("gases_ppb");
+                if (!isnan(calibratedData.CO_ppb)) gases_ppb["CO"] = round(calibratedData.CO_ppb * 10) / 10.0;
+                if (!isnan(calibratedData.NO_ppb)) gases_ppb["NO"] = round(calibratedData.NO_ppb * 10) / 10.0;
+                if (!isnan(calibratedData.NO2_ppb)) gases_ppb["NO2"] = round(calibratedData.NO2_ppb * 10) / 10.0;
+                if (!isnan(calibratedData.O3_ppb)) gases_ppb["O3"] = round(calibratedData.O3_ppb * 10) / 10.0;
+                if (!isnan(calibratedData.SO2_ppb)) gases_ppb["SO2"] = round(calibratedData.SO2_ppb * 10) / 10.0;
+                if (!isnan(calibratedData.H2S_ppb)) gases_ppb["H2S"] = round(calibratedData.H2S_ppb * 10) / 10.0;
+                if (!isnan(calibratedData.NH3_ppb)) gases_ppb["NH3"] = round(calibratedData.NH3_ppb * 10) / 10.0;
+                if (!isnan(calibratedData.VOC_ppb)) gases_ppb["VOC"] = round(calibratedData.VOC_ppb * 10) / 10.0;
+            }
+        }
+        
+        // TGS sensors - if TGS sensors enabled
+        if (calibConfig.enableTGSSensors) {
+            JsonObject tgs = calibration.createNestedObject("tgs");
+            if (!isnan(calibratedData.TGS02)) tgs["TGS02"] = round(calibratedData.TGS02 * 1000) / 1000.0;
+            if (!isnan(calibratedData.TGS03)) tgs["TGS03"] = round(calibratedData.TGS03 * 1000) / 1000.0;
+            if (!isnan(calibratedData.TGS12)) tgs["TGS12"] = round(calibratedData.TGS12 * 1000) / 1000.0;
+            if (!isnan(calibratedData.TGS02_ohm)) tgs["TGS02_ohm"] = calibratedData.TGS02_ohm;
+            if (!isnan(calibratedData.TGS03_ohm)) tgs["TGS03_ohm"] = calibratedData.TGS03_ohm;
+            if (!isnan(calibratedData.TGS12_ohm)) tgs["TGS12_ohm"] = calibratedData.TGS12_ohm;
+        }
+        
+        // Special sensors - if special sensors enabled
+        if (calibConfig.enableSpecialSensors) {
+            JsonObject special = calibration.createNestedObject("special");
+            if (!isnan(calibratedData.HCHO)) special["HCHO_ppb"] = round(calibratedData.HCHO * 10) / 10.0;
+            if (!isnan(calibratedData.PID)) special["PID"] = round(calibratedData.PID * 1000) / 1000.0;
+            if (!isnan(calibratedData.PID_mV)) special["PID_mV"] = round(calibratedData.PID_mV * 100) / 100.0;
+        }
+    }
+    
+    String json;
+    serializeJson(doc, json);
     return json;
 }
 
@@ -243,9 +363,13 @@ void wsBroadcastTask(void *parameter) {
     for (;;) {
         // Skip broadcast if memory is low
         if (ESP.getFreeHeap() > 20000) {
-            String json = getAllSensorJson();
-            if (json.indexOf("error") == -1) { // Only send if no error
-                ws.textAll(json);
+            // Użyj getAllSensorJson zamiast broadcastSensorData
+            String jsonData = getAllSensorJson();
+            if (jsonData.length() > 0) {
+                ws.textAll(jsonData);
+                safePrintln("WebSocket broadcast: " + String(jsonData.length()) + " bytes");
+            } else {
+                safePrintln("WebSocket broadcast: empty JSON");
             }
         } else {
             safePrintln("Skipping WebSocket broadcast - low memory: " + String(ESP.getFreeHeap()));
@@ -335,15 +459,22 @@ void initializeWebServer() {
     server.on("/charts", HTTP_GET, [](AsyncWebServerRequest *request) {
         request->send(200, "text/html", charts_html);
     });
+    server.on("/test", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/plain", "WebSocket test: " + String(ws.count()) + " clients connected");
+    });
     server.on("/api/history", HTTP_GET, [](AsyncWebServerRequest *request) {
         String sensor = "i2c";  // Default to i2c instead of "all"
         String timeRange = "1h";
+        String sampleType = "fast";  // Default to fast samples
         
         if (request->hasParam("sensor")) {
             sensor = request->getParam("sensor")->value();
         }
         if (request->hasParam("timeRange")) {
             timeRange = request->getParam("timeRange")->value();
+        }
+        if (request->hasParam("sampleType")) {
+            sampleType = request->getParam("sampleType")->value();
         }
         
         // Get current time for range calculation
@@ -367,7 +498,7 @@ void initializeWebServer() {
         }
         
         String jsonResponse;
-        size_t dataCount = getHistoricalData(sensor, timeRange, jsonResponse, fromTime, currentTime);
+        size_t dataCount = getHistoricalData(sensor, timeRange, jsonResponse, fromTime, currentTime, sampleType);
         
         request->send(200, "application/json", jsonResponse);
     });
@@ -397,10 +528,12 @@ void initializeWebServer() {
             }
         }
     });
-    ws.onEvent(onWsEvent);
+    // Inicjalizacja WebSocket z nowym systemem komend
+    initializeWebSocket(ws);
     server.addHandler(&ws);
     server.begin();
     safePrintln("Web server started");
+    safePrintln("WebSocket initialized and ready");
     xTaskCreatePinnedToCore(wsBroadcastTask, "wsBroadcastTask", 4096, NULL, 1, NULL, 1);
     xTaskCreatePinnedToCore(WiFiReconnectTask, "wifiReconnectTask", 4096, NULL, 1, NULL, 0);
     xTaskCreatePinnedToCore(timeCheckTask, "timeCheckTask", 2048, NULL, 1, NULL, 0);

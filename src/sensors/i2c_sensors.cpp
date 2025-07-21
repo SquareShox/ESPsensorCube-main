@@ -345,43 +345,39 @@ void readI2CSensors() {
                 break;
         }
         
-        // Read SHT40 separately (has its own data structure)
+        // Read SHT40 for temperature, humidity and pressure (main environmental data)
         if (config.enableSHT40 && sht40SensorStatus) {
             sht40SensorStatus = readSHT40(sht40Data);
             if (sht40Data.valid) {
-                // safePrint("SHT40 Sensor - Temp: ");
+                // Use SHT40 data as main environmental data
+                i2cSensorData.temperature = sht40Data.temperature;
+                i2cSensorData.humidity = sht40Data.humidity;
+                i2cSensorData.pressure = sht40Data.pressure;
+                i2cSensorData.valid = true;
+                i2cSensorData.lastUpdate = currentTime;
+                i2cSensorData.type = SENSOR_SHT40;
+                
+                // safePrint("SHT40 - Temp: ");
                 // safePrint(String(sht40Data.temperature, 2));
                 // safePrint("°C, Humidity: ");
                 // safePrint(String(sht40Data.humidity, 2));
-                // safePrintln("%");
+                // safePrint("%, Pressure: ");
+                // safePrint(String(sht40Data.pressure, 2));
+                // safePrintln(" hPa");
             }
         }
         
-        // Read SCD41 separately (has its own data structure)
+        // SCD41 data is updated by background task, just check if it's valid
         if (config.enableSCD41 && scd41SensorStatus) {
-            bool readSuccess = readSCD41(i2cSensorData);
-            if (readSuccess && i2cSensorData.valid && i2cSensorData.type == SENSOR_SCD41) {
-                // safePrint("SCD41 - CO2: ");
-                // safePrint(String(i2cSensorData.co2, 0));
-                // safePrint(" ppm, Temp: ");
-                // safePrint(String(i2cSensorData.temperature, 2));
-                // safePrint("°C, Humidity: ");
-                // safePrint(String(i2cSensorData.humidity, 2));
-                // safePrintln("%");
-            } else {
-                // safePrintln("SCD41: Read failed or invalid data");
+            // SCD41 task updates i2cSensorData automatically
+            // Just ensure temperature and humidity come from SHT40 if available
+            if (config.enableSHT40 && sht40Data.valid && i2cSensorData.valid) {
+                i2cSensorData.temperature = sht40Data.temperature;
+                i2cSensorData.humidity = sht40Data.humidity;
+                i2cSensorData.pressure = sht40Data.pressure;
             }
         } else if (config.enableSCD41 && !scd41SensorStatus) {
             safePrintln("SCD41: Sensor enabled but not initialized");
-        }
-        
-        if (i2cSensorData.valid) {
-            i2cSensorData.lastUpdate = currentTime;
-            // safePrint("I2C Sensor - Temp: ");
-            // safePrint(String(i2cSensorData.temperature));
-            // safePrint("°C, Humidity: ");
-            // safePrint(String(i2cSensorData.humidity));
-            // safePrintln("%");
         }
         
         // Read ADC sensors
@@ -615,10 +611,21 @@ bool readSCD41(I2CSensorData& data) {
     
     // Copy data from global structure (updated by task)
     extern I2CSensorData i2cSensorData;
+    extern SHT40Data sht40Data;
+    extern FeatureConfig config;
+    
     if (i2cSensorData.valid && i2cSensorData.type == SENSOR_SCD41) {
-        data.temperature = i2cSensorData.temperature;
-        data.humidity = i2cSensorData.humidity;
-        data.co2 = i2cSensorData.co2;
+        // Use temperature and humidity from SHT40 if available, otherwise from SCD41
+        if (config.enableSHT40 && sht40Data.valid) {
+            data.temperature = sht40Data.temperature;
+            data.humidity = sht40Data.humidity;
+            data.pressure = sht40Data.pressure;
+        } else {
+            data.temperature = i2cSensorData.temperature;
+            data.humidity = i2cSensorData.humidity;
+            data.pressure = i2cSensorData.pressure;
+        }
+        data.co2 = i2cSensorData.co2; // CO2 always from SCD41
         data.valid = true;
         data.lastUpdate = i2cSensorData.lastUpdate;
         data.type = SENSOR_SCD41;
@@ -1428,10 +1435,22 @@ void scd41Task(void* parameters) {
                 temperature >= -40.0 && temperature <= 85.0 &&
                 relativeHumidity >= 0.0 && relativeHumidity <= 100.0) {
                 
-                // Update global data
+                // Update global data - only CO2, preserve temperature and humidity from SHT40
                 extern I2CSensorData i2cSensorData;
-                i2cSensorData.temperature = temperature;
-                i2cSensorData.humidity = relativeHumidity;
+                extern SHT40Data sht40Data;
+                extern FeatureConfig config;
+                
+                // Only update CO2 from SCD41, keep temperature and humidity from SHT40 if available
+                if (config.enableSHT40 && sht40Data.valid) {
+                    i2cSensorData.temperature = sht40Data.temperature;
+                    i2cSensorData.humidity = sht40Data.humidity;
+                    i2cSensorData.pressure = sht40Data.pressure;
+                } else {
+                    // Fallback to SCD41 temperature and humidity if SHT40 not available
+                    i2cSensorData.temperature = temperature;
+                    i2cSensorData.humidity = relativeHumidity;
+                    i2cSensorData.pressure = 0.0; // SCD41 doesn't have pressure
+                }
                 i2cSensorData.co2 = (float)co2Concentration;
                 i2cSensorData.valid = true;
                 i2cSensorData.lastUpdate = millis();
@@ -1507,12 +1526,24 @@ void resetSCD41() {
         safePrintln(errorMessage);
     }
     
-    // Reset global data
+    // Reset global data - only CO2, preserve temperature and humidity from SHT40
     extern I2CSensorData i2cSensorData;
-    i2cSensorData.valid = false;
-    i2cSensorData.temperature = 0.0;
-    i2cSensorData.humidity = 0.0;
-    i2cSensorData.co2 = 0.0;
+    extern SHT40Data sht40Data;
+    extern FeatureConfig config;
+    
+    // Only reset CO2, preserve temperature and humidity from SHT40 if available
+    if (config.enableSHT40 && sht40Data.valid) {
+        i2cSensorData.temperature = sht40Data.temperature;
+        i2cSensorData.humidity = sht40Data.humidity;
+        i2cSensorData.pressure = sht40Data.pressure;
+        i2cSensorData.valid = true; // Keep valid if SHT40 data is available
+    } else {
+        i2cSensorData.valid = false;
+        i2cSensorData.temperature = 0.0;
+        i2cSensorData.humidity = 0.0;
+        i2cSensorData.pressure = 0.0;
+    }
+    i2cSensorData.co2 = 0.0; // Reset CO2
     i2cSensorData.lastUpdate = 0;
     scd41SensorStatus = false;
     

@@ -2,6 +2,10 @@
 #include <sensors.h>
 #include <mean.h>
 #include <calib.h>
+#include <fan.h>
+#include <ArduinoJson.h>
+#include <time.h>
+#include <cstring>
 
 // Forward declarations for safe printing functions
 void safePrint(const String& message);
@@ -25,6 +29,18 @@ extern HCHOData hchoData;
 // External configuration
 extern FeatureConfig config;
 extern CalibrationConfig calibConfig;
+
+// Helper function to get formatted date and time
+void getFormattedDateTime(char* buffer, size_t bufferSize) {
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo)) {
+        strncpy(buffer, "1970-01-01 00:00:00", bufferSize - 1);
+        buffer[bufferSize - 1] = '\0';
+        return;
+    }
+    
+    strftime(buffer, bufferSize, "%Y-%m-%d %H:%M:%S", &timeinfo);
+}
 
 // External averaging functions
 extern SolarData getSolarFastAverage();
@@ -75,6 +91,7 @@ HistoryManager::~HistoryManager() {
     delete sht40History;
     delete calibHistory;
     delete hchoHistory;
+    delete fanHistory;
 }
 
 bool HistoryManager::initialize() {
@@ -282,6 +299,24 @@ bool HistoryManager::initialize() {
         }
     }
     
+    // Fan history - only if enabled
+    if (config.enableFan) {
+        fanHistory = new SensorHistory<FanData, FAN_FAST_HISTORY, FAN_SLOW_HISTORY>();
+        if (fanHistory && fanHistory->initialize()) {
+            safePrint("Fan history initialized: ");
+            safePrint(String(FAN_FAST_HISTORY));
+            safePrint(" fast + ");
+            safePrint(String(FAN_SLOW_HISTORY));
+            safePrint(" slow samples (");
+            safePrint(String((FAN_FAST_HISTORY + FAN_SLOW_HISTORY) * FAN_ENTRY_SIZE));
+            safePrintln(" bytes)");
+            totalMemoryUsed += (FAN_FAST_HISTORY + FAN_SLOW_HISTORY) * FAN_ENTRY_SIZE;
+        } else {
+            safePrintln("Failed to initialize Fan history");
+            allSuccess = false;
+        }
+    }
+    
     initialized = allSuccess;
     
     safePrint("Total actual memory used: ");
@@ -304,7 +339,14 @@ bool HistoryManager::initialize() {
 void HistoryManager::updateHistory() {
     if (!initialized) return;
     
-    unsigned long currentTime = millis();
+    // Użyj epoch time zamiast millis() dla spójności
+    unsigned long currentTime = 0;
+    if (time(nullptr) > 8 * 3600 * 2) { // Jeśli czas jest zsynchronizowany
+        currentTime = time(nullptr) * 1000; // Konwertuj na milisekundy
+    } else {
+        currentTime = millis(); // Fallback do millis()
+    }
+    
     static unsigned long lastFastUpdate = 0;
     static unsigned long lastSlowUpdate = 0;
     
@@ -323,6 +365,9 @@ void HistoryManager::updateHistory() {
             I2CSensorData fastAvg = getI2CFastAverage();
             if (fastAvg.valid) {
                 i2cHistory->addFastSample(fastAvg, currentTime);
+               // safePrintln("History: Added I2C fast sample");
+            } else {
+               // safePrintln("History: I2C data not valid");
             }
         }
         
@@ -380,6 +425,18 @@ void HistoryManager::updateHistory() {
             if (fastAvg.valid) {
                 hchoHistory->addFastSample(fastAvg, currentTime);
             }
+        }
+        
+        // Fan data - only if enabled
+        if (fanHistory && config.enableFan) {
+            FanData fanData;
+            fanData.dutyCycle = getFanDutyCycle();
+            fanData.rpm = getFanRPM();
+            fanData.enabled = isFanEnabled();
+            fanData.glineEnabled = isGLineEnabled();
+            fanData.valid = true;
+            fanData.lastUpdate = currentTime;
+            fanHistory->addFastSample(fanData, currentTime);
         }
     }
     
@@ -455,6 +512,18 @@ void HistoryManager::updateHistory() {
             if (slowAvg.valid) {
                 hchoHistory->addSlowSample(slowAvg, currentTime);
             }
+        }
+        
+        // Fan slow samples - only if enabled
+        if (fanHistory && config.enableFan) {
+            FanData fanData;
+            fanData.dutyCycle = getFanDutyCycle();
+            fanData.rpm = getFanRPM();
+            fanData.enabled = isFanEnabled();
+            fanData.glineEnabled = isGLineEnabled();
+            fanData.valid = true;
+            fanData.lastUpdate = currentTime;
+            fanHistory->addSlowSample(fanData, currentTime);
         }
     }
 }
@@ -570,6 +639,14 @@ void HistoryManager::printHistoryStatus() const {
         safePrint(String(hchoHistory->getSlowCount()));
         safePrintln(" slow samples");
     }
+    
+    if (fanHistory && fanHistory->isInitialized()) {
+        safePrint("Fan: ");
+        safePrint(String(fanHistory->getFastCount()));
+        safePrint(" fast, ");
+        safePrint(String(fanHistory->getSlowCount()));
+        safePrintln(" slow samples");
+    }
 }
 
 // Global interface functions
@@ -583,6 +660,15 @@ void initializeHistory() {
 
 void updateSensorHistory() {
     if (!config.enableHistory) return;
+    
+    // Użyj rzeczywistego czasu zamiast millis()
+    unsigned long currentTime = 0;
+    if (time(nullptr) > 8 * 3600 * 2) { // Jeśli czas jest zsynchronizowany
+        currentTime = time(nullptr) * 1000; // Konwertuj na milisekundy
+    } else {
+        currentTime = millis(); // Fallback do millis()
+    }
+    
     historyManager.updateHistory();
 }
 
@@ -596,38 +682,72 @@ void printHistoryStatus() {
 
 // API function for getting historical data
 size_t getHistoricalData(const String& sensor, const String& timeRange, 
-                        String& jsonResponse, unsigned long fromTime, unsigned long toTime) {
+                        String& jsonResponse, unsigned long fromTime, unsigned long toTime,
+                        const String& sampleType) {
     if (!config.enableHistory) {
-        jsonResponse = "{\"error\":\"History disabled in configuration\",\"data\":[]}";
+        DynamicJsonDocument doc(512);
+        doc["error"] = "History disabled in configuration";
+        doc["data"] = JsonArray();
+        serializeJson(doc, jsonResponse);
         return 0;
     }
     
     if (!historyManager.isInitialized()) {
-        jsonResponse = "{\"error\":\"History not initialized\",\"data\":[]}";
+        DynamicJsonDocument doc(512);
+        doc["error"] = "History not initialized";
+        doc["data"] = JsonArray();
+        serializeJson(doc, jsonResponse);
         return 0;
     }
     
     // Check available memory before starting
     size_t freeHeap = ESP.getFreeHeap();
-    if (freeHeap < 20000) { // Need at least 20KB free
-        jsonResponse = "{\"error\":\"Low memory\",\"data\":[],\"freeHeap\":" + String(freeHeap) + "}";
+    if (freeHeap < 30000) { // Need at least 30KB free
+        DynamicJsonDocument doc(512);
+        doc["error"] = "Low memory";
+        doc["data"] = JsonArray();
+        doc["freeHeap"] = freeHeap;
+        serializeJson(doc, jsonResponse);
         return 0;
     }
     
-    // Reserve memory for JSON response to avoid reallocations
-    jsonResponse.reserve(2048); // Reserve 2KB for single sensor
-    jsonResponse = "{\"sensor\":\"" + sensor + "\",\"timeRange\":\"" + timeRange + "\",\"data\":[";
+    // Create JSON document with appropriate size based on sensor type
+    size_t docSize = 4096; // Reduced base size for stability
+    if (sensor == "calibration" || sensor == "all") {
+        docSize = 6144; // Larger for calibration data
+    } else if (sensor == "mcp3424") {
+        docSize = 4096; // Medium for MCP3424 with multiple devices
+    }
+    
+    // Check memory again before creating JSON document
+    if (ESP.getFreeHeap() < docSize + 10000) {
+        DynamicJsonDocument doc(512);
+        doc["error"] = "Insufficient memory for JSON document";
+        doc["requiredSize"] = docSize;
+        doc["freeHeap"] = ESP.getFreeHeap();
+        serializeJson(doc, jsonResponse);
+        return 0;
+    }
+    
+    DynamicJsonDocument doc(docSize);
+    doc["sensor"] = sensor;
+    doc["timeRange"] = timeRange;
+    JsonArray dataArray = doc.createNestedArray("data");
     
     // Buffer for samples (limited to avoid memory issues)
-    const size_t MAX_SAMPLES = 30; // Further reduced for single sensor requests
-    bool hasData = false;
+    const size_t MAX_SAMPLES = 20; // Further reduced for single sensor requests
     size_t totalSamples = 0;
-    
+    // Uzyj sampleType przekazanego jako argument funkcji, nie deklaruj lokalnie
     if (sensor == "i2c") {
         auto* i2cHist = historyManager.getI2CHistory();
         if (i2cHist && i2cHist->isInitialized()) {
             HistoryEntry<I2CSensorData> buffer[MAX_SAMPLES];
-            size_t count = i2cHist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            size_t count;
+            if (sampleType == "slow") {
+                count = i2cHist->getSlowSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            } else {
+                count = i2cHist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            }
             
             for (size_t i = 0; i < count; i++) {
                 // Check memory before adding more data
@@ -636,13 +756,14 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
                     break;
                 }
                 
-                if (hasData) jsonResponse += ",";
-                jsonResponse += "{\"timestamp\":" + String(buffer[i].timestamp) + 
-                               ",\"data\":{\"temperature\":" + String(buffer[i].data.temperature, 1) +
-                               ",\"humidity\":" + String(buffer[i].data.humidity, 1) +
-                               ",\"pressure\":" + String(buffer[i].data.pressure, 1) +
-                               ",\"co2\":" + String(buffer[i].data.co2) + "}}";
-                hasData = true;
+                JsonObject sample = dataArray.createNestedObject();
+                sample["timestamp"] = buffer[i].timestamp;
+                sample["dateTime"] = buffer[i].dateTime;
+                JsonObject data = sample.createNestedObject("data");
+                data["temperature"] = round(buffer[i].data.temperature * 10) / 10.0;
+                data["humidity"] = round(buffer[i].data.humidity * 10) / 10.0;
+                data["pressure"] = round(buffer[i].data.pressure * 10) / 10.0;
+                data["co2"] = buffer[i].data.co2;
                 totalSamples++;
             }
         }
@@ -650,16 +771,22 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
         auto* solarHist = historyManager.getSolarHistory();
         if (solarHist && solarHist->isInitialized()) {
             HistoryEntry<SolarData> buffer[MAX_SAMPLES];
-            size_t count = solarHist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            size_t count;
+            if (sampleType == "slow") {
+                count = solarHist->getSlowSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            } else {
+                count = solarHist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            }
             
             for (size_t i = 0; i < count; i++) {
                 if (ESP.getFreeHeap() < 10000) break;
-                if (hasData) jsonResponse += ",";
-                jsonResponse += "{\"timestamp\":" + String(buffer[i].timestamp) + 
-                               ",\"data\":{\"V\":\"" + buffer[i].data.V +
-                               "\",\"I\":\"" + buffer[i].data.I +
-                               "\",\"PPV\":\"" + buffer[i].data.PPV + "\"}}";
-                hasData = true;
+                JsonObject sample = dataArray.createNestedObject();
+                sample["timestamp"] = buffer[i].timestamp;
+                sample["dateTime"] = buffer[i].dateTime;
+                JsonObject data = sample.createNestedObject("data");
+                data["V"] = buffer[i].data.V;
+                data["I"] = buffer[i].data.I;
+                data["PPV"] = buffer[i].data.PPV;
                 totalSamples++;
             }
         }
@@ -667,16 +794,22 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
         auto* sps30Hist = historyManager.getSPS30History();
         if (sps30Hist && sps30Hist->isInitialized()) {
             HistoryEntry<SPS30Data> buffer[MAX_SAMPLES];
-            size_t count = sps30Hist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            size_t count;
+            if (sampleType == "slow") {
+                count = sps30Hist->getSlowSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            } else {
+                count = sps30Hist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            }
             
             for (size_t i = 0; i < count; i++) {
                 if (ESP.getFreeHeap() < 10000) break;
-                if (hasData) jsonResponse += ",";
-                jsonResponse += "{\"timestamp\":" + String(buffer[i].timestamp) + 
-                               ",\"data\":{\"pm1_0\":" + String(buffer[i].data.pm1_0, 1) +
-                               ",\"pm2_5\":" + String(buffer[i].data.pm2_5, 1) +
-                               ",\"pm10\":" + String(buffer[i].data.pm10, 1) + "}}";
-                hasData = true;
+                JsonObject sample = dataArray.createNestedObject();
+                sample["timestamp"] = buffer[i].timestamp;
+                sample["dateTime"] = buffer[i].dateTime;
+                JsonObject data = sample.createNestedObject("data");
+                data["pm1_0"] = round(buffer[i].data.pm1_0 * 10) / 10.0;
+                data["pm2_5"] = round(buffer[i].data.pm2_5 * 10) / 10.0;
+                data["pm10"] = round(buffer[i].data.pm10 * 10) / 10.0;
                 totalSamples++;
             }
         }
@@ -684,50 +817,216 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
         auto* powerHist = historyManager.getINA219History();
         if (powerHist && powerHist->isInitialized()) {
             HistoryEntry<INA219Data> buffer[MAX_SAMPLES];
-            size_t count = powerHist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            size_t count;
+            if (sampleType == "slow") {
+                count = powerHist->getSlowSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            } else {
+                count = powerHist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            }
             
             for (size_t i = 0; i < count; i++) {
                 if (ESP.getFreeHeap() < 10000) break;
-                if (hasData) jsonResponse += ",";
-                jsonResponse += "{\"timestamp\":" + String(buffer[i].timestamp) + 
-                               ",\"data\":{\"busVoltage\":" + String(buffer[i].data.busVoltage, 3) +
-                               ",\"current\":" + String(buffer[i].data.current, 2) +
-                               ",\"power\":" + String(buffer[i].data.power, 2) + "}}";
-                hasData = true;
+                JsonObject sample = dataArray.createNestedObject();
+                sample["timestamp"] = buffer[i].timestamp;
+                sample["dateTime"] = buffer[i].dateTime;
+                JsonObject data = sample.createNestedObject("data");
+                data["busVoltage"] = round(buffer[i].data.busVoltage * 1000) / 1000.0;
+                data["current"] = round(buffer[i].data.current * 100) / 100.0;
+                data["power"] = round(buffer[i].data.power * 100) / 100.0;
                 totalSamples++;
+            }
+        }
+    } else if (sensor == "sht40") {
+        auto* sht40Hist = historyManager.getSHT40History();
+        if (sht40Hist && sht40Hist->isInitialized()) {
+            HistoryEntry<SHT40Data> buffer[MAX_SAMPLES];
+            size_t count;
+            if (sampleType == "slow") {
+                count = sht40Hist->getSlowSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            } else {
+                count = sht40Hist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            }
+            
+            for (size_t i = 0; i < count; i++) {
+                if (ESP.getFreeHeap() < 10000) break;
+                JsonObject sample = dataArray.createNestedObject();
+                sample["timestamp"] = buffer[i].timestamp;
+                sample["dateTime"] = buffer[i].dateTime;
+                JsonObject data = sample.createNestedObject("data");
+                data["temperature"] = round(buffer[i].data.temperature * 10) / 10.0;
+                data["humidity"] = round(buffer[i].data.humidity * 10) / 10.0;
+                data["pressure"] = round(buffer[i].data.pressure * 10) / 10.0;
+                totalSamples++;
+            }
+        }
+    } else if (sensor == "scd41") {
+        auto* i2cHist = historyManager.getI2CHistory();
+        if (i2cHist && i2cHist->isInitialized()) {
+            HistoryEntry<I2CSensorData> buffer[MAX_SAMPLES];
+            size_t count;
+            if (sampleType == "slow") {
+                count = i2cHist->getSlowSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            } else {
+                count = i2cHist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            }
+            
+            for (size_t i = 0; i < count; i++) {
+                if (ESP.getFreeHeap() < 10000) break;
+                // Sprawdź czy to SCD41 data
+                if (buffer[i].data.type == SENSOR_SCD41) {
+                    JsonObject sample = dataArray.createNestedObject();
+                    sample["timestamp"] = buffer[i].timestamp;
+                    sample["dateTime"] = buffer[i].dateTime;
+                    JsonObject data = sample.createNestedObject("data");
+                    data["co2"] = buffer[i].data.co2;
+                    data["temperature"] = round(buffer[i].data.temperature * 10) / 10.0;
+                    data["humidity"] = round(buffer[i].data.humidity * 10) / 10.0;
+                    totalSamples++;
+                }
             }
         }
     } else if (sensor == "hcho") {
         auto* hchoHist = historyManager.getHCHOHistory();
         if (hchoHist && hchoHist->isInitialized()) {
             HistoryEntry<HCHOData> buffer[MAX_SAMPLES];
-            size_t count = hchoHist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            size_t count;
+            if (sampleType == "slow") {
+                count = hchoHist->getSlowSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            } else {
+                count = hchoHist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            }
             
             for (size_t i = 0; i < count; i++) {
                 if (ESP.getFreeHeap() < 10000) break;
-                if (hasData) jsonResponse += ",";
-                jsonResponse += "{\"timestamp\":" + String(buffer[i].timestamp) + 
-                               ",\"data\":{\"hcho\":" + String(buffer[i].data.hcho, 3) +
-                               ",\"voc\":" + String(buffer[i].data.voc, 3) +
-                               ",\"tvoc\":" + String(buffer[i].data.tvoc, 3) + "}}";
-                hasData = true;
+                JsonObject sample = dataArray.createNestedObject();
+                sample["timestamp"] = buffer[i].timestamp;
+                sample["dateTime"] = buffer[i].dateTime;
+                JsonObject data = sample.createNestedObject("data");
+                data["hcho"] = round(buffer[i].data.hcho * 1000) / 1000.0;
+                totalSamples++;
+            }
+        }
+    } else if (sensor == "fan") {
+        auto* fanHist = historyManager.getFanHistory();
+        if (fanHist && fanHist->isInitialized()) {
+            HistoryEntry<FanData> buffer[MAX_SAMPLES];
+            size_t count;
+            if (sampleType == "slow") {
+                count = fanHist->getSlowSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            } else {
+                count = fanHist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            }
+            
+            for (size_t i = 0; i < count; i++) {
+                if (ESP.getFreeHeap() < 10000) break;
+                JsonObject sample = dataArray.createNestedObject();
+                sample["timestamp"] = buffer[i].timestamp;
+                sample["dateTime"] = buffer[i].dateTime;
+                JsonObject data = sample.createNestedObject("data");
+                data["dutyCycle"] = buffer[i].data.dutyCycle;
+                data["rpm"] = buffer[i].data.rpm;
+                data["enabled"] = buffer[i].data.enabled;
+                data["glineEnabled"] = buffer[i].data.glineEnabled;
+                totalSamples++;
+            }
+        }
+    } else if (sensor == "calibration" || sensor == "voc" || sensor == "co" || sensor == "no" || 
+               sensor == "no2" || sensor == "o3" || sensor == "so2" || sensor == "h2s" || sensor == "nh3") {
+        auto* calibHist = historyManager.getCalibHistory();
+        if (calibHist && calibHist->isInitialized()) {
+            HistoryEntry<CalibratedSensorData> buffer[MAX_SAMPLES];
+            size_t count;
+            if (sampleType == "slow") {
+                count = calibHist->getSlowSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            } else {
+                count = calibHist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            }
+            
+            for (size_t i = 0; i < count; i++) {
+                if (ESP.getFreeHeap() < 10000) break;
+                
+                JsonObject sample = dataArray.createNestedObject();
+                sample["timestamp"] = buffer[i].timestamp;
+                sample["dateTime"] = buffer[i].dateTime;
+                JsonObject data = sample.createNestedObject("data");
+                
+                if (sensor == "voc") {
+                    // Tylko VOC
+                    data["voc_ugm3"] = round(buffer[i].data.VOC * 10) / 10.0;
+                    data["voc_ppb"] = round(buffer[i].data.VOC_ppb * 10) / 10.0;
+                } else if (sensor == "co") {
+                    // Tylko CO
+                    data["co_ugm3"] = round(buffer[i].data.CO * 10) / 10.0;
+                    data["co_ppb"] = round(buffer[i].data.CO_ppb * 10) / 10.0;
+                } else if (sensor == "no") {
+                    // Tylko NO
+                    data["no_ugm3"] = round(buffer[i].data.NO * 10) / 10.0;
+                    data["no_ppb"] = round(buffer[i].data.NO_ppb * 10) / 10.0;
+                } else if (sensor == "no2") {
+                    // Tylko NO2
+                    data["no2_ugm3"] = round(buffer[i].data.NO2 * 10) / 10.0;
+                    data["no2_ppb"] = round(buffer[i].data.NO2_ppb * 10) / 10.0;
+                } else if (sensor == "o3") {
+                    // Tylko O3
+                    data["o3_ugm3"] = round(buffer[i].data.O3 * 10) / 10.0;
+                    data["o3_ppb"] = round(buffer[i].data.O3_ppb * 10) / 10.0;
+                } else if (sensor == "so2") {
+                    // Tylko SO2
+                    data["so2_ugm3"] = round(buffer[i].data.SO2 * 10) / 10.0;
+                    data["so2_ppb"] = round(buffer[i].data.SO2_ppb * 10) / 10.0;
+                } else if (sensor == "h2s") {
+                    // Tylko H2S
+                    data["h2s_ugm3"] = round(buffer[i].data.H2S * 10) / 10.0;
+                    data["h2s_ppb"] = round(buffer[i].data.H2S_ppb * 10) / 10.0;
+                } else if (sensor == "nh3") {
+                    // Tylko NH3
+                    data["nh3_ugm3"] = round(buffer[i].data.NH3 * 10) / 10.0;
+                    data["nh3_ppb"] = round(buffer[i].data.NH3_ppb * 10) / 10.0;
+                } else {
+                    // Wszystkie gazy (calibration)
+                    data["CO"] = round(buffer[i].data.CO * 10) / 10.0;
+                    data["NO"] = round(buffer[i].data.NO * 10) / 10.0;
+                    data["NO2"] = round(buffer[i].data.NO2 * 10) / 10.0;
+                    data["O3"] = round(buffer[i].data.O3 * 10) / 10.0;
+                    data["SO2"] = round(buffer[i].data.SO2 * 10) / 10.0;
+                    data["H2S"] = round(buffer[i].data.H2S * 10) / 10.0;
+                    data["NH3"] = round(buffer[i].data.NH3 * 10) / 10.0;
+                    data["VOC"] = round(buffer[i].data.VOC * 10) / 10.0;
+                    data["VOC_ppb"] = round(buffer[i].data.VOC_ppb * 10) / 10.0;
+                    data["HCHO"] = round(buffer[i].data.HCHO * 10) / 10.0;
+                    data["PID"] = round(buffer[i].data.PID * 1000) / 1000.0;
+                }
                 totalSamples++;
             }
         }
     } else {
         // Unknown sensor type
-        jsonResponse += "],\"error\":\"Unknown sensor type: " + sensor + "\",\"totalSamples\":0,\"freeHeap\":" + String(ESP.getFreeHeap()) + "}";
+        doc["error"] = "Unknown sensor type: " + sensor;
+        doc["totalSamples"] = 0;
+        doc["freeHeap"] = ESP.getFreeHeap();
+        serializeJson(doc, jsonResponse);
         return 0;
     }
     
-    jsonResponse += "],\"totalSamples\":" + String(totalSamples) + ",\"freeHeap\":" + String(ESP.getFreeHeap()) + "}";
+    // Add metadata
+    doc["totalSamples"] = totalSamples;
+    doc["freeHeap"] = ESP.getFreeHeap();
+    
+    // Serialize to string
+    serializeJson(doc, jsonResponse);
+    //print size of response
+    safePrintln("JSON response size: " + String(jsonResponse.length()) + " bytes");
     
     // Limit response size to prevent memory issues
-    if (jsonResponse.length() > 3000) {
+    if (jsonResponse.length() > 8000) { // Increased limit for DynamicJsonDocument
         safePrintln("JSON response too large: " + String(jsonResponse.length()) + " bytes, truncating");
-        jsonResponse = "{\"error\":\"Response too large\",\"size\":" + String(jsonResponse.length()) + ",\"freeHeap\":" + String(ESP.getFreeHeap()) + "}";
+        DynamicJsonDocument errorDoc(512);
+        errorDoc["error"] = "Response too large";
+        errorDoc["size"] = jsonResponse.length();
+        errorDoc["freeHeap"] = ESP.getFreeHeap();
+        serializeJson(errorDoc, jsonResponse);
         return 0;
     }
     
     return totalSamples;
-} 
+}

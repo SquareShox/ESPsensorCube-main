@@ -21,10 +21,13 @@
 #define I2C_SCL_PIN 8
 #define OPCN3_SS_PIN 11
 #define IPS_POWER_PIN 1
-#define IPS_RX_PIN 7         // Serial1 RX for IPS
-#define IPS_TX_PIN 8         // Serial1 TX for IPS
+#define IPS_RX_PIN 11         // Serial1 RX for IPS
+#define IPS_TX_PIN 12         // Serial1 TX for IPS
 #define HCHO_RX_PIN 9       // HCHO sensor UART RX pin
 #define HCHO_TX_PIN 10        // HCHO sensor UART TX pin
+#define TACHO_PIN 13
+#define PWM_PIN 1 
+#define GLine_PIN 2
 
 // Serial Configuration
 #define SERIAL_BAUD 115200
@@ -76,6 +79,7 @@ struct FeatureConfig {
     bool enableIPS = false;         // Kontrola czujnika IPS (UART)
     bool enableIPSDebug = false;    // Kontrola IPS debug mode
     bool enableHCHO = true;        // CB-HCHO-V4 formaldehyde sensor
+    bool enableFan = true;         // Fan control system (PWM, Tacho, GLine)
     bool enableHistory = true;    // PSRAM-based sensor history system (temporarily disabled due to memory issues)
     bool enableModbus = true;
     bool autoReset = false;
@@ -185,16 +189,16 @@ struct IPSSensorData {
 
 // SPS30 Sensor Data Structure - Sensirion particle sensor
 struct SPS30Data {
-    float pm1_0;                // PM1.0 mass concentration [µg/m³]
-    float pm2_5;                // PM2.5 mass concentration [µg/m³]
-    float pm4_0;                // PM4.0 mass concentration [µg/m³]
-    float pm10;                 // PM10 mass concentration [µg/m³]
-    float nc0_5;                // Number concentration 0.5µm [#/cm³]
-    float nc1_0;                // Number concentration 1.0µm [#/cm³]
-    float nc2_5;                // Number concentration 2.5µm [#/cm³]
-    float nc4_0;                // Number concentration 4.0µm [#/cm³]
-    float nc10;                 // Number concentration 10µm [#/cm³]
-    float typical_particle_size; // Typical particle size [µm]
+    float pm1_0 = 0.0;                // PM1.0 mass concentration [µg/m³]
+    float pm2_5 = 0.0;                // PM2.5 mass concentration [µg/m³]
+    float pm4_0 = 0.0;                // PM4.0 mass concentration [µg/m³]
+    float pm10 = 0.0;                 // PM10 mass concentration [µg/m³]
+    float nc0_5 = 0.0;                // Number concentration 0.5µm [#/cm³]
+    float nc1_0 = 0.0;                // Number concentration 1.0µm [#/cm³]
+    float nc2_5 = 0.0;                // Number concentration 2.5µm [#/cm³]
+    float nc4_0 = 0.0;                // Number concentration 4.0µm [#/cm³]
+    float nc10 = 0.0;                 // Number concentration 10µm [#/cm³]
+    float typical_particle_size = 0.0; // Typical particle size [µm]
     bool valid = false;
     unsigned long lastUpdate = 0;
 };
@@ -202,12 +206,16 @@ struct SPS30Data {
 // HCHO Sensor Data Structure - CB-HCHO-V4 formaldehyde sensor
 struct HCHOData {
     float hcho = 0.0;              // Formaldehyde concentration [mg/m³]
-    float voc = 0.0;               // VOC concentration [mg/m³] 
-    float temperature = 0.0;       // Temperature [°C]
-    float humidity = 0.0;          // Relative humidity [%]
-    float tvoc = 0.0;              // TVOC concentration [mg/m³]
-    uint8_t sensorStatus = 0;      // Sensor status (0=normal, 1=anomaly, etc.)
-    uint8_t autoCalibration = 0;   // Auto calibration status
+    bool valid = false;
+    unsigned long lastUpdate = 0;
+};
+
+// Fan Control Data Structure
+struct FanData {
+    uint8_t dutyCycle = 0;         // PWM duty cycle (0-100%)
+    uint16_t rpm = 0;              // Fan RPM from tacho
+    bool enabled = false;           // Fan enabled/disabled
+    bool glineEnabled = false;      // GLine router enabled/disabled
     bool valid = false;
     unsigned long lastUpdate = 0;
 };

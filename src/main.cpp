@@ -13,6 +13,7 @@
 #include <mean.h>
 #include <calib.h>
 #include <history.h>
+#include <fan.h>
 
 //#include <html.h>
 
@@ -181,6 +182,11 @@ void loop() {
     readBatteryVoltage();
     readSerialSensors();
     
+    // Update fan RPM measurement if enabled
+    if (config.enableFan) {
+        updateFanRPM();
+    }
+    
     // Update Modbus registers
     if (config.enableModbus) {
         processModbusTask();
@@ -347,6 +353,11 @@ void initializeHardware() {
    // configureSerialSensor(0, 16, 17, 9600, "GPS_Module", "NMEA");
    // configureSerialSensor(1, 18, 19, 115200, "Additional_Sensor", "JSON");
     
+    // Initialize fan control system if enabled
+    if (config.enableFan) {
+        initializeFan();
+    }
+    
     safePrintln("Hardware initialization complete");
 }
 
@@ -375,6 +386,12 @@ void processSerialCommands() {
                 safePrintln("  - SPS30: " + String(sps30SensorStatus ? "OK" : (config.enableSPS30 ? "ERROR" : "DISABLED")));
                 safePrintln("IPS Sensor: " + String(ipsSensorStatus ? "OK" : (config.enableIPS ? "ERROR" : "DISABLED")));
                 safePrintln("HCHO Sensor: " + String(hchoSensorStatus ? "OK" : (config.enableHCHO ? "ERROR" : "DISABLED")));
+                if (config.enableFan) {
+                    safePrintln("Fan Control: " + String(isFanEnabled() ? "ON" : "OFF") + " (" + String(getFanDutyCycle()) + "%, " + String(getFanRPM()) + " RPM)");
+                    safePrintln("GLine Router: " + String(isGLineEnabled() ? "ENABLED" : "DISABLED"));
+                } else {
+                    safePrintln("Fan Control: DISABLED");
+                }
                 
                 safePrintln("WiFi: " + String(WiFi.status() == WL_CONNECTED ? "CONNECTED" : "DISCONNECTED"));
                 //ip address
@@ -575,6 +592,38 @@ void processSerialCommands() {
                 extern CalibrationConfig calibConfig;
                 calibConfig.enableGasSensors = false;
                 safePrintln("Gas sensors disabled");
+            }
+            else if (command.startsWith("FAN_")) {
+                // Fan control commands
+                if (!config.enableFan) {
+                    safePrintln("Fan control is DISABLED in configuration");
+                } else {
+                    if (command.equals("FAN_ON")) {
+                        setFanSpeed(50); // Default 50% speed
+                        safePrintln("Fan turned ON at 50% speed");
+                    }
+                    else if (command.equals("FAN_OFF")) {
+                        setFanSpeed(0);
+                        safePrintln("Fan turned OFF");
+                    }
+                    else if (command.startsWith("FAN_SPEED_")) {
+                        int speed = command.substring(10).toInt(); // Remove "FAN_SPEED_"
+                        if (speed >= 0 && speed <= 100) {
+                            setFanSpeed(speed);
+                            safePrintln("Fan speed set to " + String(speed) + "%");
+                        } else {
+                            safePrintln("Invalid fan speed (0-100): " + String(speed));
+                        }
+                    }
+                    else if (command.equals("GLINE_ON")) {
+                        setGLine(true);
+                        safePrintln("GLine router ENABLED");
+                    }
+                    else if (command.equals("GLINE_OFF")) {
+                        setGLine(false);
+                        safePrintln("GLine router DISABLED");
+                    }
+                }
             }
         }
         else if (command.equals("DATATYPE_CURRENT")) {

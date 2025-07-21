@@ -266,11 +266,12 @@ void updateModbusI2CRegisters() {
     mb.setHreg(baseReg + 3, (updateTime >> 16) & 0xFFFF); // Upper 16 bits
     
     if (dataToUse.valid) {
-       // mb.setHreg(baseReg + 4, (uint16_t)(dataToUse.temperature * 100)); // Temperature * 100
-       // mb.setHreg(baseReg + 5, (uint16_t)(dataToUse.humidity * 100)); // Humidity * 100
-       // mb.setHreg(baseReg + 6, (uint16_t)(dataToUse.pressure * 10)); // Pressure * 10
-        mb.setHreg(baseReg + 4, (uint16_t)(dataToUse.co2)); // CO2
-        mb.setHreg(baseReg + 5, (uint16_t)dataToUse.type); // Sensor type
+        mb.setHreg(baseReg + 4, (int16_t)(dataToUse.temperature * 100)); // Temperature * 100
+        mb.setHreg(baseReg + 5, (uint16_t)(dataToUse.humidity * 100)); // Humidity * 100
+        mb.setHreg(baseReg + 6, (uint16_t)(dataToUse.pressure * 10)); // Pressure * 10
+        mb.setHreg(baseReg + 7, (uint16_t)(dataToUse.co2)); // CO2
+       // safePrintln("CO2: " + String(dataToUse.co2));
+        mb.setHreg(baseReg + 8, (uint16_t)dataToUse.type); // Sensor type
         
         // Add current time and date from ESP32 built-in time functions
         if (isTimeSet()) {
@@ -282,27 +283,27 @@ void updateModbusI2CRegisters() {
                 int month = timeinfo.tm_mon + 1;
                 int year = timeinfo.tm_year + 1900;
                 
-                mb.setHreg(baseReg + 6, (uint16_t)(hours * 100 + minutes)); // Time as HHMM
-                mb.setHreg(baseReg + 7, (uint16_t)(day * 100 + month)); // Date as DDMM
-                mb.setHreg(baseReg + 8, (uint16_t)year); // Year
-                mb.setHreg(baseReg + 9, (uint16_t)getEpochTime()); // Epoch time (lower 16 bits)
+                mb.setHreg(baseReg + 9, (uint16_t)(hours * 100 + minutes)); // Time as HHMM
+                mb.setHreg(baseReg + 10, (uint16_t)(day * 100 + month)); // Date as DDMM
+                mb.setHreg(baseReg + 11, (uint16_t)year); // Year
+                mb.setHreg(baseReg + 12, (uint16_t)getEpochTime()); // Epoch time (lower 16 bits)
             } else {
                 // Fallback if getLocalTime fails
-                mb.setHreg(baseReg + 6, 1200); // 12:00
-                mb.setHreg(baseReg + 7, 1801);  // 18/01 (dzisiejszy dzien)
-                mb.setHreg(baseReg + 8, 2024); // 2024
-                mb.setHreg(baseReg + 9, 0); // No epoch time
+                mb.setHreg(baseReg + 9, 1200); // 12:00
+                mb.setHreg(baseReg + 10, 1801);  // 18/01 (dzisiejszy dzien)
+                mb.setHreg(baseReg + 11, 2024); // 2024
+                mb.setHreg(baseReg + 12, 0); // No epoch time
             }
         } else {
             // Default time and date if time not synchronized
-            mb.setHreg(baseReg + 6, 1200); // 12:00
-            mb.setHreg(baseReg + 7, 1801);  // 18/01 (dzisiejszy dzien)
-            mb.setHreg(baseReg + 8, 2024); // 2024
-            mb.setHreg(baseReg + 9, 0); // No epoch time
+            mb.setHreg(baseReg + 9, 1200); // 12:00
+            mb.setHreg(baseReg + 10, 1801);  // 18/01 (dzisiejszy dzien)
+            mb.setHreg(baseReg + 11, 2024); // 2024
+            mb.setHreg(baseReg + 12, 0); // No epoch time
         }
     } else {
         // Clear data registers if invalid
-        for (int i = 4; i < 9; i++) {
+        for (int i = 4; i < 13; i++) {
             mb.setHreg(baseReg + i, 0);
         }
     }
@@ -740,23 +741,11 @@ void updateModbusHCHORegisters() {
     if (dataToUse.valid) {
         // HCHO concentration (x1000 for 0.001 mg/m³ precision) - primary measurement
         mb.setHreg(baseReg + 4, (uint16_t)(dataToUse.hcho * 1000));
-        // VOC concentration (x1000 for 0.001 mg/m³ precision) 
-        mb.setHreg(baseReg + 5, (uint16_t)(dataToUse.voc * 1000));
-        // Temperature (x100 for 0.01°C precision)
-        mb.setHreg(baseReg + 6, (int16_t)(dataToUse.temperature * 100));
-        // Humidity (x100 for 0.01% precision)
-        mb.setHreg(baseReg + 7, (uint16_t)(dataToUse.humidity * 100));
-        // TVOC concentration (x1000 for 0.001 mg/m³ precision)
-        mb.setHreg(baseReg + 8, (uint16_t)(dataToUse.tvoc * 1000));
-        // Sensor status (0=normal, 1=anomaly, 2=recovery, 3=high HCHO, 4=high alcohol)
-        mb.setHreg(baseReg + 9, (uint16_t)dataToUse.sensorStatus);
-        // Auto calibration status (0=manual, 1=auto, 2=zero clearing)
-        mb.setHreg(baseReg + 10, (uint16_t)dataToUse.autoCalibration);
         // Age in seconds
-        mb.setHreg(baseReg + 11, (uint16_t)((millis() - dataToUse.lastUpdate) / 1000));
+        mb.setHreg(baseReg + 5, (uint16_t)((millis() - dataToUse.lastUpdate) / 1000));
     } else {
         // Clear data registers if invalid
-        for (int i = 4; i < 12; i++) {
+        for (int i = 4; i < 6; i++) {
             mb.setHreg(baseReg + i, 0);
         }
     }
@@ -772,10 +761,7 @@ void updateModbusHCHORegisters() {
         if (dataToUse.valid) {
             safePrint(", HCHO: ");
             safePrint(String(dataToUse.hcho, 3));
-            safePrint(" mg/m³, Sensor Status: ");
-            safePrint(String(dataToUse.sensorStatus));
-            safePrint(", Auto Cal: ");
-            safePrint(String(dataToUse.autoCalibration));
+            safePrint(" mg/m³");
         }
         safePrintln("");
     }
@@ -840,10 +826,12 @@ void updateModbusCalibrationRegisters() {
         mb.setHreg(baseReg + 31, (int16_t)(dataToUse.NH3_ppb * 100));
         mb.setHreg(baseReg + 32, (int16_t)(dataToUse.HCHO * 100));
         mb.setHreg(baseReg + 33, (int16_t)(dataToUse.PID * 100));
+        mb.setHreg(baseReg + 34, (int16_t)(dataToUse.VOC * 100));        // VOC ug/m3
+        mb.setHreg(baseReg + 35, (int16_t)(dataToUse.VOC_ppb * 100));    // VOC ppb
 
     } else {
         // Clear data registers if invalid
-        for (int i = 4; i < 34; i++) {
+        for (int i = 4; i < 36; i++) {
             mb.setHreg(baseReg + i, 0);
         }
     }
