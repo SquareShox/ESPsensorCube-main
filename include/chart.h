@@ -167,6 +167,8 @@ const char *charts_html = R"rawliteral(
     <a href="/">🔧 Panel Sterowania</a>
     <a href="/dashboard">📊 Dashboard</a>
     <a href="/charts">📈 Wykresy</a>
+    <a href="/network">🌐 Sieć</a>
+    <a href="/mcp3424">🔌 MCP3424</a>
   </div>
 
   <div class="status-bar" id="status-bar">
@@ -195,7 +197,7 @@ const char *charts_html = R"rawliteral(
       <option value="ips">IPS (Pyłki)</option>
       <option value="power">INA219 (Moc)</option>
       <option value="sht40">SHT40 (Temperatura/Wilgotność)</option>
-      <option value="scd41">SCD41 (CO2)</option>
+      <option value="co2">CO2 (SCD41)</option>
       <option value="hcho">HCHO (VOC)</option>
       <option value="calibration">Kalibracja (Gazy)</option>
       <option value="fan">Wentylator</option>
@@ -203,6 +205,8 @@ const char *charts_html = R"rawliteral(
     
     <button onclick="updateCharts()">🔄 Odśwież</button>
     <button onclick="toggleAutoUpdate()">⏰ Auto: <span id="auto-status">OFF</span></button>
+    <button onclick="window.location.href='/network'" style="background: linear-gradient(45deg, #4caf50, #8bc34a);">🌐 Sieć</button>
+    <button onclick="window.location.href='/mcp3424'" style="background: linear-gradient(45deg, #ff9800, #ffc107);">🔌 MCP3424</button>
   </div>
 
   <div class="charts-container" id="charts-container">
@@ -227,7 +231,15 @@ function connectWebSocket() {
   ws.onmessage = function(event) {
     try {
       const data = JSON.parse(event.data);
-      updateStatusBar(data);
+      
+      // Handle different WebSocket commands
+      if (data.cmd === 'history') {
+        // Handle history data from WebSocket
+        handleHistoryResponse(data);
+      } else {
+        // Update status bar for other messages
+        updateStatusBar(data);
+      }
     } catch (error) {
       console.error('Error parsing WebSocket data:', error);
     }
@@ -241,6 +253,59 @@ function updateStatusBar(data) {
     const memoryPercent = data.history.memoryUsed > 0 ? Math.round((data.history.memoryUsed / data.history.memoryBudget) * 100) : 0;
     document.getElementById('history-status').textContent = 
       `Historia: ${data.history.enabled ? '✅' : '❌'} (${memoryPercent}% pamięci)`;
+  }
+}
+
+// Global variable to store pending history request
+let pendingHistoryRequest = null;
+
+function handleHistoryResponse(data) {
+  if (pendingHistoryRequest) {
+    const { sensorType, timeRange, sampleType, container } = pendingHistoryRequest;
+    pendingHistoryRequest = null;
+    
+    if (data.error) {
+      container.innerHTML = `<div class="no-data">❌ Błąd: ${data.error}</div>`;
+      return;
+    }
+    
+    if (!data.data || data.data.length === 0) {
+      container.innerHTML = '<div class="no-data">📭 Brak danych dla wybranego czujnika</div>';
+      return;
+    }
+    
+    // Create charts based on sensor type
+    if (sensorType === 'sps30') {
+      createSPS30Charts(data.data);
+    } else if (sensorType === 'ips') {
+      createIPSCharts(data.data);
+    } else if (sensorType === 'power') {
+      createPowerCharts(data.data);
+    } else if (sensorType === 'sht40') {
+      createSHT40Charts(data.data);
+    } else if (sensorType === 'co2') {
+      createCO2Charts(data.data);
+    } else if (sensorType === 'hcho') {
+      createHCHOCharts(data.data);
+    } else if (sensorType === 'calibration') {
+      createCalibrationCharts(data.data);
+    } else if (sensorType === 'fan') {
+      createFanCharts(data.data);
+    }
+    
+    // Remove loading message
+    const loading = container.querySelector('.loading');
+    if (loading) loading.remove();
+    
+    // Show stats
+    const statsDiv = document.createElement('div');
+    statsDiv.className = 'chart-info';
+    statsDiv.style.textAlign = 'center';
+    statsDiv.style.color = 'white';
+    statsDiv.style.marginTop = '20px';
+    const sampleTypeText = sampleType === 'fast' ? 'szybkich (10s)' : 'wolnych (5min)';
+    statsDiv.innerHTML = `📊 Załadowano ${data.samples} próbek ${sampleTypeText} z ${sensorType}`;
+    container.appendChild(statsDiv);
   }
 }
 
@@ -323,29 +388,7 @@ function formatChartData(historyData, valueKey, label, color) {
   }).filter(point => point.y !== undefined && point.y !== null && !isNaN(point.y));
 }
 
-async function fetchHistoryData(sensor, timeRange, sampleType) {
-  try {
-    const response = await fetch(`/api/history?sensor=${sensor}&timeRange=${timeRange}&sampleType=${sampleType}`);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    
-    const result = await response.json();
-    
-    if (result.error) {
-      throw new Error(result.error);
-    }
-    
-    return result;
-  } catch (error) {
-    console.error('Error fetching history data:', error);
-    return { 
-      error: error.message, 
-      data: [], 
-      totalSamples: 0 
-    };
-  }
-}
+
 
 async function updateCharts() {
   const timeRange = document.getElementById('timeRange').value;
@@ -358,55 +401,20 @@ async function updateCharts() {
   charts = {};
   container.innerHTML = '<div class="loading">📊 Ładowanie danych z ' + sensorType + '...</div>';
   
-  try {
-    const historyData = await fetchHistoryData(sensorType, timeRange, sampleType);
-    
-    if (historyData.error) {
-      container.innerHTML = `<div class="no-data">❌ Błąd: ${historyData.error}</div>`;
-      return;
-    }
-    
-    if (!historyData.data || historyData.data.length === 0) {
-      container.innerHTML = '<div class="no-data">📭 Brak danych dla wybranego czujnika</div>';
-      return;
-    }
-    
-    // Create charts based on sensor type
-    if (sensorType === 'sps30') {
-      createSPS30Charts(historyData.data);
-    } else if (sensorType === 'ips') {
-      createIPSCharts(historyData.data);
-    } else if (sensorType === 'power') {
-      createPowerCharts(historyData.data);
-    } else if (sensorType === 'sht40') {
-      createSHT40Charts(historyData.data);
-    } else if (sensorType === 'scd41') {
-      createSCD41Charts(historyData.data);
-    } else if (sensorType === 'hcho') {
-      createHCHOCharts(historyData.data);
-    } else if (sensorType === 'calibration') {
-      createCalibrationCharts(historyData.data);
-    } else if (sensorType === 'fan') {
-      createFanCharts(historyData.data);
-    }
-    
-    // Remove loading message
-    const loading = container.querySelector('.loading');
-    if (loading) loading.remove();
-    
-    // Show stats
-    const statsDiv = document.createElement('div');
-    statsDiv.className = 'chart-info';
-    statsDiv.style.textAlign = 'center';
-    statsDiv.style.color = 'white';
-    statsDiv.style.marginTop = '20px';
-    const sampleTypeText = sampleType === 'fast' ? 'szybkich (10s)' : 'wolnych (5min)';
-    statsDiv.innerHTML = `📊 Załadowano ${historyData.totalSamples} próbek ${sampleTypeText} z ${sensorType}`;
-    container.appendChild(statsDiv);
-    
-  } catch (error) {
-    console.error('Error updating charts:', error);
-    container.innerHTML = '<div class="no-data">❌ Błąd podczas ładowania danych</div>';
+  // Store pending request
+  pendingHistoryRequest = { sensorType, timeRange, sampleType, container };
+  
+  // Send WebSocket command
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const command = {
+      cmd: 'getHistory',
+      sensor: sensorType,
+      timeRange: timeRange,
+      sampleType: sampleType
+    };
+    ws.send(JSON.stringify(command));
+  } else {
+    container.innerHTML = '<div class="no-data">❌ Brak połączenia WebSocket</div>';
   }
 }
 
@@ -426,28 +434,28 @@ function createSPS30Charts(data) {
   charts.pm = createChart('pm-chart', 'Stężenie Pyłu', [
     {
       label: 'PM1.0 (µg/m³)',
-      data: formatChartData(data, 'pm1_0'),
+      data: formatChartData(data, 'PM1'),
       borderColor: '#e74c3c',
       backgroundColor: '#e74c3c20',
       tension: 0.1
     },
     {
       label: 'PM2.5 (µg/m³)',
-      data: formatChartData(data, 'pm2_5'),
+      data: formatChartData(data, 'PM25'),
       borderColor: '#f39c12',
       backgroundColor: '#f39c1220',
       tension: 0.1
     },
     {
       label: 'PM4.0 (µg/m³)',
-      data: formatChartData(data, 'pm4_0'),
+      data: formatChartData(data, 'PM4'),
       borderColor: '#e67e22',
       backgroundColor: '#e67e2220',
       tension: 0.1
     },
     {
       label: 'PM10 (µg/m³)',
-      data: formatChartData(data, 'pm10'),
+      data: formatChartData(data, 'PM10'),
       borderColor: '#d35400',
       backgroundColor: '#d3540020',
       tension: 0.1
@@ -467,35 +475,35 @@ function createSPS30Charts(data) {
   charts.nc = createChart('nc-chart', 'Koncentracja Cząstek', [
     {
       label: 'NC0.5 (#/cm³)',
-      data: formatChartData(data, 'nc0_5'),
+      data: formatChartData(data, 'NC05'),
       borderColor: '#3498db',
       backgroundColor: '#3498db20',
       tension: 0.1
     },
     {
       label: 'NC1.0 (#/cm³)',
-      data: formatChartData(data, 'nc1_0'),
+      data: formatChartData(data, 'NC1'),
       borderColor: '#2980b9',
       backgroundColor: '#2980b920',
       tension: 0.1
     },
     {
       label: 'NC2.5 (#/cm³)',
-      data: formatChartData(data, 'nc2_5'),
+      data: formatChartData(data, 'NC25'),
       borderColor: '#1abc9c',
       backgroundColor: '#1abc9c20',
       tension: 0.1
     },
     {
       label: 'NC4.0 (#/cm³)',
-      data: formatChartData(data, 'nc4_0'),
+      data: formatChartData(data, 'NC4'),
       borderColor: '#16a085',
       backgroundColor: '#16a08520',
       tension: 0.1
     },
     {
       label: 'NC10 (#/cm³)',
-      data: formatChartData(data, 'nc10'),
+      data: formatChartData(data, 'NC10'),
       borderColor: '#27ae60',
       backgroundColor: '#27ae6020',
       tension: 0.1
@@ -519,49 +527,49 @@ function createIPSCharts(data) {
   charts.ipsPm = createChart('ips-pm-chart', 'Stężenie Pyłu IPS', [
     {
       label: 'PM0.1 (µg/m³)',
-      data: formatChartData(data, 'pm0'),
+      data: formatChartData(data, 'pm_1'),
       borderColor: '#e74c3c',
       backgroundColor: '#e74c3c20',
       tension: 0.1
     },
     {
       label: 'PM0.3 (µg/m³)',
-      data: formatChartData(data, 'pm1'),
+      data: formatChartData(data, 'pm_2'),
       borderColor: '#f39c12',
       backgroundColor: '#f39c1220',
       tension: 0.1
     },
     {
       label: 'PM0.5 (µg/m³)',
-      data: formatChartData(data, 'pm2'),
+      data: formatChartData(data, 'pm_3'),
       borderColor: '#e67e22',
       backgroundColor: '#e67e2220',
       tension: 0.1
     },
     {
       label: 'PM1.0 (µg/m³)',
-      data: formatChartData(data, 'pm3'),
+      data: formatChartData(data, 'pm_4'),
       borderColor: '#d35400',
       backgroundColor: '#d3540020',
       tension: 0.1
     },
     {
       label: 'PM2.5 (µg/m³)',
-      data: formatChartData(data, 'pm4'),
+      data: formatChartData(data, 'pm_5'),
       borderColor: '#8e44ad',
       backgroundColor: '#8e44ad20',
       tension: 0.1
     },
     {
       label: 'PM5.0 (µg/m³)',
-      data: formatChartData(data, 'pm5'),
+      data: formatChartData(data, 'pm_6'),
       borderColor: '#2c3e50',
       backgroundColor: '#2c3e5020',
       tension: 0.1
     },
     {
       label: 'PM10 (µg/m³)',
-      data: formatChartData(data, 'pm6'),
+      data: formatChartData(data, 'pm_7'),
       borderColor: '#34495e',
       backgroundColor: '#34495e20',
       tension: 0.1
@@ -581,49 +589,49 @@ function createIPSCharts(data) {
   charts.ipsPc = createChart('ips-pc-chart', 'Liczba Cząstek IPS', [
     {
       label: 'PC0.1 (#/cm³)',
-      data: formatChartData(data, 'pc0'),
+      data: formatChartData(data, 'pc_1'),
       borderColor: '#3498db',
       backgroundColor: '#3498db20',
       tension: 0.1
     },
     {
       label: 'PC0.3 (#/cm³)',
-      data: formatChartData(data, 'pc1'),
+      data: formatChartData(data, 'pc_2'),
       borderColor: '#2980b9',
       backgroundColor: '#2980b920',
       tension: 0.1
     },
     {
       label: 'PC0.5 (#/cm³)',
-      data: formatChartData(data, 'pc2'),
+      data: formatChartData(data, 'pc_3'),
       borderColor: '#1abc9c',
       backgroundColor: '#1abc9c20',
       tension: 0.1
     },
     {
       label: 'PC1.0 (#/cm³)',
-      data: formatChartData(data, 'pc3'),
+      data: formatChartData(data, 'pc_4'),
       borderColor: '#16a085',
       backgroundColor: '#16a08520',
       tension: 0.1
     },
     {
       label: 'PC2.5 (#/cm³)',
-      data: formatChartData(data, 'pc4'),
+      data: formatChartData(data, 'pc_5'),
       borderColor: '#27ae60',
       backgroundColor: '#27ae6020',
       tension: 0.1
     },
     {
       label: 'PC5.0 (#/cm³)',
-      data: formatChartData(data, 'pc5'),
+      data: formatChartData(data, 'pc_6'),
       borderColor: '#2ecc71',
       backgroundColor: '#2ecc7120',
       tension: 0.1
     },
     {
       label: 'PC10 (#/cm³)',
-      data: formatChartData(data, 'pc6'),
+      data: formatChartData(data, 'pc_7'),
       borderColor: '#55a3ff',
       backgroundColor: '#55a3ff20',
       tension: 0.1
@@ -668,19 +676,19 @@ function createSHT40Charts(data) {
   ]);
 }
 
-function createSCD41Charts(data) {
+function createCO2Charts(data) {
   const container = document.getElementById('charts-container');
   
-  const scd41Card = document.createElement('div');
-  scd41Card.className = 'chart-card';
-  scd41Card.innerHTML = `
-    <div class="chart-title">🌬️ SCD41 (CO2)</div>
-    <div class="chart-container" id="scd41-chart"></div>
+  const co2Card = document.createElement('div');
+  co2Card.className = 'chart-card';
+  co2Card.innerHTML = `
+    <div class="chart-title">🌬️ CO2 (SCD41)</div>
+    <div class="chart-container" id="co2-chart"></div>
     <div class="chart-info">Stężenie CO2 (ppm)</div>
   `;
-  container.appendChild(scd41Card);
+  container.appendChild(co2Card);
   
-  charts.scd41 = createChart('scd41-chart', 'SCD41 - Stężenie CO2', [
+  charts.co2 = createChart('co2-chart', 'CO2 - Stężenie CO2', [
     {
       label: 'CO2 (ppm)',
       data: formatChartData(data, 'co2'),
@@ -840,26 +848,19 @@ function createHCHOCharts(data) {
   `;
   container.appendChild(hchoCard);
   
-  charts.hcho = createChart('hcho-chart', 'HCHO i VOC', [
+  charts.hcho = createChart('hcho-chart', 'HCHO', [
     {
       label: 'HCHO (mg/m³)',
-      data: formatChartData(data, 'hcho'),
+      data: formatChartData(data, 'hcho_mg'),
       borderColor: '#8e44ad',
       backgroundColor: '#8e44ad20',
       tension: 0.1
     },
     {
-      label: 'VOC (mg/m³)',
-      data: formatChartData(data, 'voc'),
+      label: 'HCHO (ppb)',
+      data: formatChartData(data, 'hcho_ppb'),
       borderColor: '#d35400',
       backgroundColor: '#d3540020',
-      tension: 0.1
-    },
-    {
-      label: 'TVOC (mg/m³)',
-      data: formatChartData(data, 'tvoc'),
-      borderColor: '#16a085',
-      backgroundColor: '#16a08520',
       tension: 0.1
     }
   ]);

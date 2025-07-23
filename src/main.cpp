@@ -12,6 +12,7 @@
 #include <web_server.h>
 #include <mean.h>
 #include <calib.h>
+#include <network_config.h>
 #include <history.h>
 #include <fan.h>
 
@@ -105,6 +106,17 @@ void setup() {
     
     // Initialize sensors
     initializeSensors();
+    
+    // Initialize MCP3424 mapping
+    safePrintln("Initializing MCP3424 mapping...");
+    if (!loadMCP3424Config(mcp3424Config)) {
+        safePrintln("No MCP3424 config found, creating default...");
+        initializeDefaultMCP3424Mapping();
+        saveMCP3424Config(mcp3424Config);
+        safePrintln("Default MCP3424 config saved");
+    } else {
+        safePrintln("MCP3424 config loaded: " + String(mcp3424Config.deviceCount) + " devices");
+    }
     
     // Initialize moving averages system
     initializeMovingAverages();

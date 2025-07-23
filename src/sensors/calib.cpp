@@ -4,6 +4,7 @@
 #include <math.h>
 #include "config.h"
 #include "i2c_sensors.h"
+#include "network_config.h"
 
 // Global kalibrowane dane czujnikow
 CalibratedSensorData calibratedData;
@@ -92,156 +93,218 @@ float Linear_advanced(float mul, float RAW, float add) {
 }
 
 // Funkcja do odczytu wartosci z konkretnego kanalu MCP3424
-float getMCP3424Value(uint8_t deviceIndex, uint8_t channel) {
-    if (deviceIndex >= mcp3424Data.deviceCount || channel >= 4) {
-        return 0.0f;
-    }
-    if (!mcp3424Data.valid[deviceIndex]) {
-        return 0.0f;
-    }
-    return mcp3424Data.channels[deviceIndex][channel];
-}
+// Teraz uzywa globalnej funkcji z network_config.h
 
 // Kalibracja temperatury dla czujników K1-K5 (B4)
 void calibrateB4Temperature() {
-    // K1 temperatura (device 0, channels 2,3)
-    float K1_3 = getMCP3424Value(0, 2); // RAW_T
-    float K1_4 = getMCP3424Value(0, 3); // RAW_V
-    calibratedData.K1_temp = B4_T(K1_3, K1_4);
+    // K1 temperatura (NO) - channel 2,3
+    int8_t deviceNO = getMCP3424DeviceByGasType("NO");
+    if (deviceNO >= 0) {
+        float K1_3 = getMCP3424Value(deviceNO, 2); // RAW_T
+        float K1_4 = getMCP3424Value(deviceNO, 3); // RAW_V
+        calibratedData.K1_temp = B4_T(K1_3, K1_4);
+    }
     
-    // K2 temperatura (device 1, channels 2,3)
-    float K2_3 = getMCP3424Value(1, 2);
-    float K2_4 = getMCP3424Value(1, 3);
-    calibratedData.K2_temp = B4_T(K2_3, K2_4);
+    // K2 temperatura (O3) - channel 2,3
+    int8_t deviceO3 = getMCP3424DeviceByGasType("O3");
+    if (deviceO3 >= 0) {
+        float K2_3 = getMCP3424Value(deviceO3, 2);
+        float K2_4 = getMCP3424Value(deviceO3, 3);
+        calibratedData.K2_temp = B4_T(K2_3, K2_4);
+    }
     
-    // K3 temperatura (device 2, channels 2,3)
-    float K3_3 = getMCP3424Value(2, 2);
-    float K3_4 = getMCP3424Value(2, 3);
-    calibratedData.K3_temp = B4_T(K3_3, K3_4);
+    // K3 temperatura (NO2) - channel 2,3
+    int8_t deviceNO2 = getMCP3424DeviceByGasType("NO2");
+    if (deviceNO2 >= 0) {
+        float K3_3 = getMCP3424Value(deviceNO2, 2);
+        float K3_4 = getMCP3424Value(deviceNO2, 3);
+        calibratedData.K3_temp = B4_T(K3_3, K3_4);
+    }
     
-    // K4 temperatura (device 3, channels 2,3)
-    float K4_3 = getMCP3424Value(3, 2);
-    float K4_4 = getMCP3424Value(3, 3);
-    calibratedData.K4_temp = B4_T(K4_3, K4_4);
+    // K4 temperatura (CO) - channel 2,3
+    int8_t deviceCO = getMCP3424DeviceByGasType("CO");
+    if (deviceCO >= 0) {
+        float K4_3 = getMCP3424Value(deviceCO, 2);
+        float K4_4 = getMCP3424Value(deviceCO, 3);
+        calibratedData.K4_temp = B4_T(K4_3, K4_4);
+    }
     
-    // K5 temperatura (device 4, channels 2,3)
-    float K5_3 = getMCP3424Value(4, 2);
-    float K5_4 = getMCP3424Value(4, 3);
-    calibratedData.K5_temp = B4_T(K5_3, K5_4);
+    // K5 temperatura (SO2) - channel 2,3
+    int8_t deviceSO2 = getMCP3424DeviceByGasType("SO2");
+    if (deviceSO2 >= 0) {
+        float K5_3 = getMCP3424Value(deviceSO2, 2);
+        float K5_4 = getMCP3424Value(deviceSO2, 3);
+        calibratedData.K5_temp = B4_T(K5_3, K5_4);
+    }
 }
 
 // Kalibracja napiec dla czujników B4
 void calibrateB4Voltage() {
-    calibratedData.K1_voltage = B4_mV(getMCP3424Value(0, 3));
-    calibratedData.K2_voltage = B4_mV(getMCP3424Value(1, 3));
-    calibratedData.K3_voltage = B4_mV(getMCP3424Value(2, 3));
-    calibratedData.K4_voltage = B4_mV(getMCP3424Value(3, 3));
-    calibratedData.K5_voltage = B4_mV(getMCP3424Value(4, 3));
+    int8_t deviceNO = getMCP3424DeviceByGasType("NO");
+    if (deviceNO >= 0) calibratedData.K1_voltage = B4_mV(getMCP3424Value(deviceNO, 3));
+    
+    int8_t deviceO3 = getMCP3424DeviceByGasType("O3");
+    if (deviceO3 >= 0) calibratedData.K2_voltage = B4_mV(getMCP3424Value(deviceO3, 3));
+    
+    int8_t deviceNO2 = getMCP3424DeviceByGasType("NO2");
+    if (deviceNO2 >= 0) calibratedData.K3_voltage = B4_mV(getMCP3424Value(deviceNO2, 3));
+    
+    int8_t deviceCO = getMCP3424DeviceByGasType("CO");
+    if (deviceCO >= 0) calibratedData.K4_voltage = B4_mV(getMCP3424Value(deviceCO, 3));
+    
+    int8_t deviceSO2 = getMCP3424DeviceByGasType("SO2");
+    if (deviceSO2 >= 0) calibratedData.K5_voltage = B4_mV(getMCP3424Value(deviceSO2, 3));
 }
 
 // Kalibracja temperatur czujnikow TGS (K6-K12)
 void calibrateTGSTemperature() {
-    // K6 temperatura (device 5, channels 0,1)
-    float K6_1 = getMCP3424Value(0, 0); // C1
-    float K6_2 = getMCP3424Value(0, 1); // C2
-    calibratedData.K6_temp = TGS_T(K6_1, K6_2);
+    // K6 temperatura - TGS1 (channel 0,1)
+    int8_t deviceTGS1 = getMCP3424DeviceByGasType("TGS1");
+    if (deviceTGS1 >= 0) {
+        float K6_1 = getMCP3424Value(deviceTGS1, 0); // C1
+        float K6_2 = getMCP3424Value(deviceTGS1, 1); // C2
+        calibratedData.K6_temp = TGS_T(K6_1, K6_2);
+    }
     
-    // K7 temperatura (device 6, channels 0,1) 
-    float K7_1 = getMCP3424Value(6, 0);
-    float K7_2 = getMCP3424Value(6, 1);
-    calibratedData.K7_temp = TGS_T(K7_1, K7_2);
+    // K7 temperatura - TGS2 (channel 0,1)
+    int8_t deviceTGS2 = getMCP3424DeviceByGasType("TGS2");
+    if (deviceTGS2 >= 0) {
+        float K7_1 = getMCP3424Value(deviceTGS2, 0);
+        float K7_2 = getMCP3424Value(deviceTGS2, 1);
+        calibratedData.K7_temp = TGS_T(K7_1, K7_2);
+    }
     
-    // K8 temperatura (device 7, channels 0,1)
-    float K8_1 = getMCP3424Value(7, 0);
-    float K8_2 = getMCP3424Value(7, 1);
-    calibratedData.K8_temp = TGS_T(K8_1, K8_2);
+    // K8 temperatura - TGS3 (channel 0,1)
+    int8_t deviceTGS3 = getMCP3424DeviceByGasType("TGS3");
+    if (deviceTGS3 >= 0) {
+        float K8_1 = getMCP3424Value(deviceTGS3, 0);
+        float K8_2 = getMCP3424Value(deviceTGS3, 1);
+        calibratedData.K8_temp = TGS_T(K8_1, K8_2);
+    }
     
-    // Dla K9 i K12 uzywamy tych samych wzorów
-    calibratedData.K9_temp = TGS_T(getMCP3424Value(0, 0), getMCP3424Value(0, 1));
-    calibratedData.K12_temp = TGS_T(getMCP3424Value(1, 0), getMCP3424Value(1, 1));
+    // K9 i K12 - używamy TGS1 i TGS2
+    if (deviceTGS1 >= 0) {
+        calibratedData.K9_temp = TGS_T(getMCP3424Value(deviceTGS1, 0), getMCP3424Value(deviceTGS1, 1));
+    }
+    if (deviceTGS2 >= 0) {
+        calibratedData.K12_temp = TGS_T(getMCP3424Value(deviceTGS2, 0), getMCP3424Value(deviceTGS2, 1));
+    }
 }
 
 // Kalibracja napiec czujnikow TGS
 void calibrateTGSVoltage() {
-    calibratedData.K6_voltage = TGSv4_mV(getMCP3424Value(0, 3));
-    calibratedData.K7_voltage = TGSv4_mV(getMCP3424Value(6, 3));
-    calibratedData.K8_voltage = TGSv4_mV(getMCP3424Value(7, 3));
-    calibratedData.K9_voltage = TGSv4_mV(getMCP3424Value(3, 3));
-    calibratedData.K12_voltage = TGSv4_mV(getMCP3424Value(1, 3));
+    int8_t deviceTGS1 = getMCP3424DeviceByGasType("TGS1");
+    if (deviceTGS1 >= 0) calibratedData.K6_voltage = TGSv4_mV(getMCP3424Value(deviceTGS1, 3));
+    
+    int8_t deviceTGS2 = getMCP3424DeviceByGasType("TGS2");
+    if (deviceTGS2 >= 0) calibratedData.K7_voltage = TGSv4_mV(getMCP3424Value(deviceTGS2, 3));
+    
+    int8_t deviceTGS3 = getMCP3424DeviceByGasType("TGS3");
+    if (deviceTGS3 >= 0) calibratedData.K8_voltage = TGSv4_mV(getMCP3424Value(deviceTGS3, 3));
+    
+    // K9 i K12 - używamy CO i O3
+    int8_t deviceCO = getMCP3424DeviceByGasType("CO");
+    if (deviceCO >= 0) calibratedData.K9_voltage = TGSv4_mV(getMCP3424Value(deviceCO, 3));
+    
+    int8_t deviceO3 = getMCP3424DeviceByGasType("O3");
+    if (deviceO3 >= 0) calibratedData.K12_voltage = TGSv4_mV(getMCP3424Value(deviceO3, 3));
 }
 
 // Kalibracja czujnikow TGS
 void calibrateTGSSensors() {
-    // TGS03 (K6) - zgodnie z calib.tcl
-    float K6_3 = getMCP3424Value(0, 2);
-    float K6_4 = getMCP3424Value(0, 3);
-    calibratedData.TGS03 = TGSv4_ppm(K6_3, K6_4, RL_TGS03, RL_TGS03, 0, 0, TGS03_B1, TGS03_A);
-    calibratedData.TGS03_ohm = TGSv4_ohm(K6_3, K6_4, RL_TGS03);
+    // TGS03 (K6) - TGS1 (channel 2,3)
+    int8_t deviceTGS1 = getMCP3424DeviceByGasType("TGS1");
+    if (deviceTGS1 >= 0) {
+        float K6_3 = getMCP3424Value(deviceTGS1, 2);
+        float K6_4 = getMCP3424Value(deviceTGS1, 3);
+        calibratedData.TGS03 = TGSv4_ppm(K6_3, K6_4, RL_TGS03, RL_TGS03, 0, 0, TGS03_B1, TGS03_A);
+        calibratedData.TGS03_ohm = TGSv4_ohm(K6_3, K6_4, RL_TGS03);
+    }
     
-    // TGS02 (K7) - FIX version zgodnie z calib.tcl
-    float K7_3 = getMCP3424Value(6, 2);
-    float K7_4 = getMCP3424Value(6, 3);
-    // TGSv4_ppm_FIX implementation
-    float R_02 = RL_TGS02 * (2.0f * K7_3 + K7_4) / K7_4;
-    float Sr_02 = RL_TGS02 / (R_02 + 0) + 0;
-    calibratedData.TGS02 = TGS02_B1 * Sr_02 + TGS02_A;
-    calibratedData.TGS02_ohm = R_02;
+    // TGS02 (K7) - TGS2 (channel 2,3)
+    int8_t deviceTGS2 = getMCP3424DeviceByGasType("TGS2");
+    if (deviceTGS2 >= 0) {
+        float K7_3 = getMCP3424Value(deviceTGS2, 2);
+        float K7_4 = getMCP3424Value(deviceTGS2, 3);
+        // TGSv4_ppm_FIX implementation
+        float R_02 = RL_TGS02 * (2.0f * K7_3 + K7_4) / K7_4;
+        float Sr_02 = RL_TGS02 / (R_02 + 0) + 0;
+        calibratedData.TGS02 = TGS02_B1 * Sr_02 + TGS02_A;
+        calibratedData.TGS02_ohm = R_02;
+    }
     
-    // TGS12 - przykładowa implementacja
-    float Kx_3 = getMCP3424Value(1, 2);
-    float Kx_4 = getMCP3424Value(1, 3);
-    calibratedData.TGS12 = TGSv4_ppm(Kx_3, Kx_4, RL_TGS12, RL_TGS12, 0, 0, TGS12_B1, TGS12_A);
-    calibratedData.TGS12_ohm = TGSv4_ohm(Kx_3, Kx_4, RL_TGS12);
+    // TGS12 - TGS3 (channel 2,3)
+    int8_t deviceTGS3 = getMCP3424DeviceByGasType("TGS3");
+    if (deviceTGS3 >= 0) {
+        float Kx_3 = getMCP3424Value(deviceTGS3, 2);
+        float Kx_4 = getMCP3424Value(deviceTGS3, 3);
+        calibratedData.TGS12 = TGSv4_ppm(Kx_3, Kx_4, RL_TGS12, RL_TGS12, 0, 0, TGS12_B1, TGS12_A);
+        calibratedData.TGS12_ohm = TGSv4_ohm(Kx_3, Kx_4, RL_TGS12);
+    }
 }
 
 // Kalibracja gazow elektrochemicznych w ug/m3
 void calibrateGases() {
-    // CO (K4) - zgodnie z calib.tcl
-    float K4_1 = getMCP3424Value(3, 0); // WRK
-    float K4_2 = getMCP3424Value(3, 1); // AUX  
-    float K4_3 = getMCP3424Value(3, 2); // TRM
-    float K4_4 = getMCP3424Value(3, 3); // VCC
-    float T_CO = B4_T(K4_3, K4_4);
-    calibratedData.CO = CO_B0 + CO_B1 * K4_1 + CO_B2 * K4_2 + CO_B3 * T_CO;
-    calibratedData.CO = fmax(GAS_MIN, fmin(calibratedData.CO, GAS_MAX));
+    // CO (K4) - channel 0,1,2,3
+    int8_t deviceCO = getMCP3424DeviceByGasType("CO");
+    if (deviceCO >= 0) {
+        float K4_1 = getMCP3424Value(deviceCO, 0); // WRK
+        float K4_2 = getMCP3424Value(deviceCO, 1); // AUX  
+        float K4_3 = getMCP3424Value(deviceCO, 2); // TRM
+        float K4_4 = getMCP3424Value(deviceCO, 3); // VCC
+        float T_CO = B4_T(K4_3, K4_4);
+        calibratedData.CO = CO_B0 + CO_B1 * K4_1 + CO_B2 * K4_2 + CO_B3 * T_CO;
+        calibratedData.CO = fmax(GAS_MIN, fmin(calibratedData.CO, GAS_MAX));
+    }
     
-    // NO (K1)
-    float K1_1 = getMCP3424Value(0, 0); // WRK
-    float K1_2 = getMCP3424Value(0, 1); // AUX
-    float T_NO = calibratedData.K1_temp;
-    calibratedData.NO = NO_B0 + NO_B1 * K1_1 + NO_B2 * K1_2 + NO_B3 * T_NO;
-    calibratedData.NO = fmax(GAS_MIN, fmin(calibratedData.NO, GAS_MAX));
+    // NO (K1) - channel 0,1
+    int8_t deviceNO = getMCP3424DeviceByGasType("NO");
+    if (deviceNO >= 0) {
+        float K1_1 = getMCP3424Value(deviceNO, 0); // WRK
+        float K1_2 = getMCP3424Value(deviceNO, 1); // AUX
+        float T_NO = calibratedData.K1_temp;
+        calibratedData.NO = NO_B0 + NO_B1 * K1_1 + NO_B2 * K1_2 + NO_B3 * T_NO;
+        calibratedData.NO = fmax(GAS_MIN, fmin(calibratedData.NO, GAS_MAX));
+    }
     
-    // NO2 (K3)
-    float K3_1 = getMCP3424Value(2, 0); // WRK
-    float K3_2 = getMCP3424Value(2, 1); // AUX
-    float T_NO2 = calibratedData.K3_temp;
-    calibratedData.NO2 = NO2_B0 + NO2_B1 * K3_1 + NO2_B2 * K3_2 + NO2_B3 * T_NO2;
-    calibratedData.NO2 = fmax(GAS_MIN, fmin(calibratedData.NO2, GAS_MAX));
+    // NO2 (K3) - channel 0,1
+    int8_t deviceNO2 = getMCP3424DeviceByGasType("NO2");
+    if (deviceNO2 >= 0) {
+        float K3_1 = getMCP3424Value(deviceNO2, 0); // WRK
+        float K3_2 = getMCP3424Value(deviceNO2, 1); // AUX
+        float T_NO2 = calibratedData.K3_temp;
+        calibratedData.NO2 = NO2_B0 + NO2_B1 * K3_1 + NO2_B2 * K3_2 + NO2_B3 * T_NO2;
+        calibratedData.NO2 = fmax(GAS_MIN, fmin(calibratedData.NO2, GAS_MAX));
+    }
     
-    // O3 (K2) z kompensacja NO2
-    float K2_1 = getMCP3424Value(1, 0); // WRK
-    float K2_2 = getMCP3424Value(1, 1); // AUX
-    float T_O3 = calibratedData.K2_temp;
-    calibratedData.O3 = O3_B0 + O3_B1 * K2_1 + O3_B2 * K2_2 + O3_B3 * T_O3 + O3_D * calibratedData.NO2;
-    calibratedData.O3 = fmax(GAS_MIN, fmin(calibratedData.O3, GAS_MAX));
+    // O3 (K2) z kompensacja NO2 - channel 0,1
+    int8_t deviceO3 = getMCP3424DeviceByGasType("O3");
+    if (deviceO3 >= 0) {
+        float K2_1 = getMCP3424Value(deviceO3, 0); // WRK
+        float K2_2 = getMCP3424Value(deviceO3, 1); // AUX
+        float T_O3 = calibratedData.K2_temp;
+        calibratedData.O3 = O3_B0 + O3_B1 * K2_1 + O3_B2 * K2_2 + O3_B3 * T_O3 + O3_D * calibratedData.NO2;
+        calibratedData.O3 = fmax(GAS_MIN, fmin(calibratedData.O3, GAS_MAX));
+    }
     
-    // SO2 - przykładowa implementacja z Kx (device do określenia)
-    float Kx_1 = getMCP3424Value(4, 0); // WRK
-    float Kx_2 = getMCP3424Value(4, 1); // AUX
-    float Kx_3 = getMCP3424Value(4, 2); // TRM  
-    float Kx_4 = getMCP3424Value(4, 3); // VCC
-    float T_SO2 = B4_T(Kx_3, Kx_4);
-    calibratedData.SO2 = SO2_B0 + SO2_B1 * Kx_1 + SO2_B2 * Kx_2 + SO2_B3 * T_SO2;
-    calibratedData.SO2 = fmax(GAS_MIN, fmin(calibratedData.SO2, GAS_MAX));
-    
-    // NH3 - przykładowa implementacja
-    calibratedData.NH3 = NH3_B0 + NH3_B1 * Kx_1 + NH3_B3 * T_SO2;
-    calibratedData.NH3 = fmax(GAS_MIN, fmin(calibratedData.NH3, GAS_MAX));
-    
-    // H2S - przykładowa implementacja
-    calibratedData.H2S = H2S_B0 + H2S_B1 * Kx_1 + H2S_B2 * Kx_2 + H2S_B3 * T_SO2;
-    calibratedData.H2S = fmax(GAS_MIN, fmin(calibratedData.H2S, GAS_MAX));
+    // SO2 (K5) - channel 0,1,2,3
+    int8_t deviceSO2 = getMCP3424DeviceByGasType("SO2");
+    if (deviceSO2 >= 0) {
+        float K5_1 = getMCP3424Value(deviceSO2, 0); // WRK
+        float K5_2 = getMCP3424Value(deviceSO2, 1); // AUX
+        float K5_3 = getMCP3424Value(deviceSO2, 2); // TRM  
+        float K5_4 = getMCP3424Value(deviceSO2, 3); // VCC
+        float T_SO2 = B4_T(K5_3, K5_4);
+        calibratedData.SO2 = SO2_B0 + SO2_B1 * K5_1 + SO2_B2 * K5_2 + SO2_B3 * T_SO2;
+        calibratedData.SO2 = fmax(GAS_MIN, fmin(calibratedData.SO2, GAS_MAX));
+        
+        // NH3 i H2S - używamy danych z SO2
+        calibratedData.NH3 = NH3_B0 + NH3_B1 * K5_1 + NH3_B3 * T_SO2;
+        calibratedData.NH3 = fmax(GAS_MIN, fmin(calibratedData.NH3, GAS_MAX));
+        
+        calibratedData.H2S = H2S_B0 + H2S_B1 * K5_1 + H2S_B2 * K5_2 + H2S_B3 * T_SO2;
+        calibratedData.H2S = fmax(GAS_MIN, fmin(calibratedData.H2S, GAS_MAX));
+    }
     
     // VOC (Volatile Organic Compounds) - suma NH3 + H2S + SO2
     calibratedData.VOC = calibratedData.NH3 + calibratedData.H2S + calibratedData.SO2;
@@ -283,14 +346,17 @@ void calibrateSpecialSensors() {
         calibratedData.HCHO = 0.0f;
     }
     
-    // PID-AH v8 - wykorzystujemy Kx kanaly 
-    float WRK = getMCP3424Value(5, 2); // Kx_3 - przykładowe przypisanie
-    float OFS = getMCP3424Value(5, 3); // Kx_4 - przykładowe przypisanie
-    float mv = (WRK + OFS) / 256.0f;
-    
-    calibratedData.PID = ((mv - PID_OFFSET) * PID_A + PID_B) / PID_CF;
-    calibratedData.PID = fmax(PID_MIN, fmin(calibratedData.PID, PID_MAX));
-    calibratedData.PID_mV = mv;
+    // PID-AH v8 - wykorzystujemy TGS1
+    int8_t deviceTGS1 = getMCP3424DeviceByGasType("TGS1");
+    if (deviceTGS1 >= 0) {
+        float WRK = getMCP3424Value(deviceTGS1, 2); // WRK
+        float OFS = getMCP3424Value(deviceTGS1, 3); // OFS
+        float mv = (WRK + OFS) / 256.0f;
+        
+        calibratedData.PID = ((mv - PID_OFFSET) * PID_A + PID_B) / PID_CF;
+        calibratedData.PID = fmax(PID_MIN, fmin(calibratedData.PID, PID_MAX));
+        calibratedData.PID_mV = mv;
+    }
 }
 
 // Dodatkowe funkcje kompensacji temperaturowej

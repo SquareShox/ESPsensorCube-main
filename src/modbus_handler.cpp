@@ -20,7 +20,7 @@ unsigned long lastModbusActivity = 0;
 bool hasHadModbusActivity = false;
 
 // Moving average control (enum defined in header)
-DataType currentDataType = DATA_CURRENT;
+DataType currentDataType = DATA_FAST_AVG;
 
 // External sensor data and status
 extern HCHOData hchoData;

@@ -155,6 +155,7 @@ ws.onmessage = function(event) {
 | `getHistory` | Historia danych | `{"cmd": "getHistory", "sensor": "sht40", "timeRange": "1h", "sampleType": "fast"}` |
 | `getHistoryInfo` | Informacje o historii | `{"cmd": "getHistoryInfo"}` |
 | `getAverages` | Średnie uśrednione | `{"cmd": "getAverages", "sensor": "sht40", "type": "fast"}` |
+| `getSensorKeys` | Struktura JSON z kluczami | `{"cmd": "getSensorKeys"}` |
 
 ### Komendy systemowe
 
@@ -189,7 +190,7 @@ ws.onmessage = function(event) {
         "i2c": true,
         "sps30": true,
         "sht40": true,
-        "scd41": true,
+        "co2": true,
         "mcp3424": true,
         "ads1110": true,
         "ina219": true,
@@ -227,9 +228,11 @@ ws.onmessage = function(event) {
 - `solar` - dane solarne
 - `sht40` - temperatura, wilgotność, ciśnienie
 - `sps30` - cząsteczki PM1.0, PM2.5, PM4.0, PM10
-- `scd41` - dwutlenek węgla (CO2)
+- `co2` - dwutlenek węgla (CO2)
 - `power` - napięcie, prąd, moc (INA219)
-- `hcho` - formaldehyd
+- `hcho` - formaldehyd (mg/m³, ppb)
+- `ips` - cząsteczki IPS (PC, PM, NP, PW arrays)
+- `mcp3424` - napięcia MCP3424 (K1_1_mV, K1_1_V, etc.)
 - `fan` - sterowanie wentylatorem (PWM, RPM, GLine)
 - `calibration` - dane skalibrowane (temperatury, napięcia, gazy, TGS, specjalne)
 - `all` - wszystkie dostępne sensory
@@ -383,10 +386,141 @@ const thirtyMinutesAgo = now - (30 * 60 * 1000); // 30 minut wstecz
 ```
 
 **Opcje:**
-- `sensor`: `solar`, `i2c`, `sps30`, `power`, `hcho`, `all`
+- `sensor`: `solar`, `i2c`, `sps30`, `power`, `hcho`, `ips`, `mcp3424`, `all`
 - `type`: `fast` (10s) lub `slow` (5min)
 
-### 6. Konfiguracja systemu
+### 6. Struktura JSON z kluczami
+
+#### Pobieranie struktury kluczy:
+```json
+{
+    "cmd": "getSensorKeys"
+}
+```
+
+**Odpowiedź:**
+```json
+{
+    "cmd": "sensorKeys",
+    "success": true,
+    "t": 1700000000000,
+    "time": "14:30:25",
+    "date": "15/12/2024",
+    "data": {
+        "sht40": {
+            "valid": "SHT40_VALID",
+            "temperature": "SHT40_TEMPERATURE",
+            "humidity": "SHT40_HUMIDITY",
+            "pressure": "SHT40_PRESSURE"
+        },
+        "sps30": {
+            "valid": "SPS30_VALID",
+            "PM1": "SPS30_PM1",
+            "PM25": "SPS30_PM25",
+            "PM4": "SPS30_PM4",
+            "PM10": "SPS30_PM10",
+            "NC05": "SPS30_NC05",
+            "NC1": "SPS30_NC1",
+            "NC25": "SPS30_NC25",
+            "NC4": "SPS30_NC4",
+            "NC10": "SPS30_NC10",
+            "TPS": "SPS30_TPS"
+        },
+        "co2": {
+            "valid": "CO2_VALID",
+            "co2": "CO2_VALUE"
+        },
+        "power": {
+            "valid": "POWER_VALID",
+            "busVoltage": "POWER_BUS_VOLTAGE",
+            "shuntVoltage": "POWER_SHUNT_VOLTAGE",
+            "current": "POWER_CURRENT",
+            "power": "POWER_POWER"
+        },
+        "hcho": {
+            "valid": "HCHO_VALID",
+            "hcho_mg": "HCHO_MG",
+            "hcho_ppb": "HCHO_PPB"
+        },
+        "ips": {
+            "valid": "IPS_VALID",
+            "debugMode": "IPS_DEBUG_MODE",
+            "won": "IPS_WON",
+            "pc": ["IPS_PC_1", "IPS_PC_2", "IPS_PC_3", "IPS_PC_4", "IPS_PC_5", "IPS_PC_6", "IPS_PC_7"],
+            "pm": ["IPS_PM_1", "IPS_PM_2", "IPS_PM_3", "IPS_PM_4", "IPS_PM_5", "IPS_PM_6", "IPS_PM_7"],
+            "np": ["IPS_NP_1", "IPS_NP_2", "IPS_NP_3", "IPS_NP_4", "IPS_NP_5", "IPS_NP_6", "IPS_NP_7"],
+            "pw": ["IPS_PW_1", "IPS_PW_2", "IPS_PW_3", "IPS_PW_4", "IPS_PW_5", "IPS_PW_6", "IPS_PW_7"]
+        },
+        "mcp3424": {
+            "enabled": "MCP3424_ENABLED",
+            "deviceCount": "MCP3424_DEVICE_COUNT",
+            "valid": "MCP3424_VALID",
+            "devices": [
+                {
+                    "address": "MCP3424_DEVICE_1_ADDRESS",
+                    "valid": "MCP3424_DEVICE_1_VALID",
+                    "resolution": "MCP3424_DEVICE_1_RESOLUTION",
+                    "gain": "MCP3424_DEVICE_1_GAIN",
+                    "channels": {
+                        "K1_1_mV": "K1_1_mV",
+                        "K1_1_V": "K1_1_V",
+                        "K1_2_mV": "K1_2_mV",
+                        "K1_2_V": "K1_2_V",
+                        "K1_3_mV": "K1_3_mV",
+                        "K1_3_V": "K1_3_V",
+                        "K1_4_mV": "K1_4_mV",
+                        "K1_4_V": "K1_4_V"
+                    }
+                },
+                {
+                    "address": "MCP3424_DEVICE_2_ADDRESS",
+                    "valid": "MCP3424_DEVICE_2_VALID",
+                    "resolution": "MCP3424_DEVICE_2_RESOLUTION",
+                    "gain": "MCP3424_DEVICE_2_GAIN",
+                    "channels": {
+                        "K2_1_mV": "K2_1_mV",
+                        "K2_1_V": "K2_1_V",
+                        "K2_2_mV": "K2_2_mV",
+                        "K2_2_V": "K2_2_V",
+                        "K2_3_mV": "K2_3_mV",
+                        "K2_3_V": "K2_3_V",
+                        "K2_4_mV": "K2_4_mV",
+                        "K2_4_V": "K2_4_V"
+                    }
+                }
+            ]
+        },
+        "fan": {
+            "enabled": "FAN_ENABLED",
+            "dutyCycle": "FAN_DUTY_CYCLE",
+            "rpm": "FAN_RPM",
+            "glineEnabled": "FAN_GLINE_ENABLED",
+            "pwmValue": "FAN_PWM_VALUE",
+            "valid": "FAN_VALID"
+        }
+    }
+}
+```
+
+**Zastosowanie:**
+- **Mapowanie kluczy** - identyfikacja dostępnych pól w JSON
+- **Generowanie szablonów** - tworzenie struktur danych
+- **Walidacja** - sprawdzanie poprawności kluczy
+- **Dokumentacja** - opis struktury danych sensorów
+
+**Klucze MCP3424:**
+- **Format**: `K{device}_{channel}_{unit}`
+- **Device**: 1-8 (numer urządzenia)
+- **Channel**: 1-4 (numer kanału)
+- **Unit**: `mV` (miliwolty) lub `V` (wolty)
+
+**Przykłady kluczy MCP3424:**
+- `K1_1_mV` - Device 1, Channel 1, miliwolty
+- `K1_1_V` - Device 1, Channel 1, wolty
+- `K2_3_mV` - Device 2, Channel 3, miliwolty
+- `K8_4_V` - Device 8, Channel 4, wolty
+
+### 7. Konfiguracja systemu
 
 #### Pobieranie konfiguracji:
 ```json
@@ -587,6 +721,217 @@ const thirtyMinutesAgo = now - (30 * 60 * 1000); // 30 minut wstecz
 }
 ```
 
+### 11. Przełączanie między danymi aktualnymi a uśrednionymi
+
+#### Włączenie uśrednionych danych (fast averages):
+```json
+{
+    "cmd": "setConfig",
+    "useAveragedData": true
+}
+```
+
+#### Wyłączenie uśrednionych danych (live data):
+```json
+{
+    "cmd": "setConfig",
+    "useAveragedData": false
+}
+```
+
+**Efekt:**
+- `useAveragedData: true` - dashboard pokazuje uśrednione dane (10-sekundowe średnie)
+- `useAveragedData: false` - dashboard pokazuje aktualne dane z sensorów
+
+**Dotyczy sensorów:**
+- Solar (V, I, VPV, PPV)
+- SHT40 (temperatura, wilgotność, ciśnienie)
+- SPS30 (PM1.0, PM2.5, PM4.0, PM10, NC0.5-NC10, TPS)
+- HCHO (formaldehyd)
+- Power (napięcie, prąd, moc)
+- Calibration (dane skalibrowane)
+
+### 12. Konfiguracja Sieci (LittleFS)
+
+#### Pobranie aktualnej konfiguracji sieci:
+```json
+{
+    "cmd": "system",
+    "command": "getNetworkConfig"
+}
+```
+
+#### Zapisanie konfiguracji WiFi:
+```json
+{
+    "cmd": "setConfig",
+    "setWiFiConfig": true,
+    "ssid": "MojaSiećWiFi",
+    "password": "mojehasło123"
+}
+```
+
+#### Zapisanie konfiguracji sieci:
+```json
+{
+    "cmd": "setConfig",
+    "setNetworkConfig": true,
+    "useDHCP": false,
+    "staticIP": "192.168.1.100",
+    "gateway": "192.168.1.1",
+    "subnet": "255.255.255.0",
+    "dns1": "8.8.8.8",
+    "dns2": "8.8.4.4"
+}
+```
+
+#### Testowanie połączenia WiFi:
+```json
+{
+    "cmd": "system",
+    "command": "testWiFi"
+}
+```
+
+#### Zastosowanie konfiguracji sieci:
+```json
+{
+    "cmd": "system",
+    "command": "applyNetworkConfig"
+}
+```
+
+#### Resetowanie konfiguracji sieci:
+```json
+{
+    "cmd": "system",
+    "command": "resetNetworkConfig"
+}
+```
+
+**Odpowiedź dla getNetworkConfig:**
+```json
+{
+    "cmd": "networkConfig",
+    "success": true,
+    "useDHCP": true,
+    "staticIP": "192.168.1.100",
+    "gateway": "192.168.1.1",
+    "subnet": "255.255.255.0",
+    "dns1": "8.8.8.8",
+    "dns2": "8.8.4.4",
+    "configValid": true,
+    "currentIP": "192.168.1.50",
+    "currentSSID": "MojaSiećWiFi",
+    "wifiConnected": true,
+    "wifiSignal": -45,
+    "wifiSSID": "MojaSiećWiFi",
+    "wifiPassword": "mojehasło123"
+}
+```
+
+**Funkcje:**
+- **DHCP/Statyczny IP** - automatyczne lub ręczne ustawienie adresu IP
+- **Zapisywanie w LittleFS** - konfiguracja zachowana po restarcie
+- **Testowanie połączenia** - sprawdzenie statusu WiFi
+- **Reset konfiguracji** - usunięcie wszystkich ustawień
+- **Interfejs webowy** - dostęp przez `/network`
+
+### 13. Konfiguracja MCP3424 (Mapowanie Urządzeń)
+
+#### Pobranie aktualnej konfiguracji MCP3424:
+```json
+{
+    "cmd": "system",
+    "command": "getMCP3424Config"
+}
+```
+
+#### Zapisanie konfiguracji MCP3424:
+```json
+{
+    "cmd": "setConfig",
+    "setMCP3424Config": true,
+    "devices": [
+        {
+            "deviceIndex": 0,
+            "gasType": "NO",
+            "description": "NO Sensor (K1)",
+            "enabled": true
+        },
+        {
+            "deviceIndex": 1,
+            "gasType": "O3",
+            "description": "O3 Sensor (K2)",
+            "enabled": true
+        },
+        {
+            "deviceIndex": 2,
+            "gasType": "NO2",
+            "description": "NO2 Sensor (K3)",
+            "enabled": true
+        }
+    ]
+}
+```
+
+#### Resetowanie konfiguracji MCP3424:
+```json
+{
+    "cmd": "system",
+    "command": "resetMCP3424Config"
+}
+```
+
+**Odpowiedź dla getMCP3424Config:**
+```json
+{
+    "cmd": "mcp3424Config",
+    "success": true,
+    "config": {
+        "deviceCount": 8,
+        "configValid": true,
+        "devices": [
+            {
+                "deviceIndex": 0,
+                "gasType": "NO",
+                "description": "NO Sensor (K1)",
+                "enabled": true
+            },
+            {
+                "deviceIndex": 1,
+                "gasType": "O3",
+                "description": "O3 Sensor (K2)",
+                "enabled": true
+            }
+        ]
+    }
+}
+```
+
+**Domyślne przypisanie urządzeń:**
+- **Device 0**: NO (K1) - channel 0,1,2,3
+- **Device 1**: O3 (K2) - channel 0,1,2,3
+- **Device 2**: NO2 (K3) - channel 0,1,2,3
+- **Device 3**: CO (K4) - channel 0,1,2,3
+- **Device 4**: SO2 (K5) - channel 0,1,2,3
+- **Device 5**: TGS1 - channel 0,1,2,3
+- **Device 6**: TGS2 - channel 0,1,2,3
+- **Device 7**: TGS3 - channel 0,1,2,3
+
+**Kanały dla każdego urządzenia:**
+- **Channel 0**: Working Electrode (WRK)
+- **Channel 1**: Auxiliary Electrode (AUX)
+- **Channel 2**: Temperature (TEMP) / TGS C3
+- **Channel 3**: Supply Voltage (VCC) / TGS C4
+
+**Funkcje:**
+- **Przypisanie urządzeń** - prosty system przypisywania urządzeń do gazów
+- **Konfiguracja przez WebSocket** - dynamiczna zmiana przypisania
+- **Zapisywanie w LittleFS** - konfiguracja zachowana po restarcie
+- **Walidacja** - sprawdzanie poprawności przypisania
+- **Reset do domyślnych** - przywracanie standardowej konfiguracji
+
 ## Dostepne sensory
 
 ### SHT40 (Temperatura/Wilgotność/Ciśnienie)
@@ -619,7 +964,7 @@ const thirtyMinutesAgo = now - (30 * 60 * 1000); // 30 minut wstecz
 }
 ```
 
-### SCD41 (Dwutlenek węgla)
+### CO2 (Dwutlenek węgla)
 ```json
 {
     "cmd": "getSensorData",
@@ -631,7 +976,7 @@ const thirtyMinutesAgo = now - (30 * 60 * 1000); // 30 minut wstecz
 ```json
 {
     "cmd": "sensorData",
-    "sensor": "scd41",
+    "sensor": "co2",
     "data": {
         "co2": 450,
         "temperature": 23.5,
@@ -710,6 +1055,82 @@ const thirtyMinutesAgo = now - (30 * 60 * 1000); // 30 minut wstecz
     "sensor": "hcho"
 }
 ```
+
+### IPS (Cząsteczki)
+```json
+{
+    "cmd": "getSensorData",
+    "sensor": "ips"
+}
+```
+
+**Odpowiedź:**
+```json
+{
+    "cmd": "sensorData",
+    "sensor": "ips",
+    "data": {
+        "pc": [123, 456, 789, 234, 567, 890, 345],
+        "pm": [1.23, 4.56, 7.89, 2.34, 5.67, 8.90, 3.45],
+        "np": [100, 200, 300, 400, 500, 600, 700],
+        "pw": [10, 20, 30, 40, 50, 60, 70],
+        "debugMode": false,
+        "won": true,
+        "valid": true
+    }
+}
+```
+
+### MCP3424 (Napięcia ADC)
+```json
+{
+    "cmd": "getSensorData",
+    "sensor": "mcp3424"
+}
+```
+
+**Odpowiedź:**
+```json
+{
+    "cmd": "sensorData",
+    "sensor": "mcp3424",
+    "data": {
+        "enabled": true,
+        "deviceCount": 8,
+        "devices": [
+            {
+                "address": "0x68",
+                "valid": true,
+                "resolution": 18,
+                "gain": 1,
+                "channels": {
+                    "K1_1_mV": 1234.567,
+                    "K1_1_V": 1.234567,
+                    "K1_2_mV": 2345.678,
+                    "K1_2_V": 2.345678,
+                    "K1_3_mV": 3456.789,
+                    "K1_3_V": 3.456789,
+                    "K1_4_mV": 4567.890,
+                    "K1_4_V": 4.567890
+                }
+            }
+        ],
+        "valid": true
+    }
+}
+```
+
+**Klucze MCP3424:**
+- **Format**: `K{device}_{channel}_{unit}`
+- **Device**: 1-8 (numer urządzenia MCP3424)
+- **Channel**: 1-4 (numer kanału ADC)
+- **Unit**: `mV` (miliwolty) lub `V` (wolty)
+
+**Przykłady:**
+- `K1_1_mV` - Device 1, Channel 1, miliwolty
+- `K1_1_V` - Device 1, Channel 1, wolty
+- `K2_3_mV` - Device 2, Channel 3, miliwolty
+- `K8_4_V` - Device 8, Channel 4, wolty
 
 ### Kalibracja (Dane skalibrowane)
 ```json
@@ -855,6 +1276,34 @@ const thirtyMinutesAgo = now - (30 * 60 * 1000); // 30 minut wstecz
 - `PID_mV` - wartość PID (mV)
 
 ## Przykłady użycia w JavaScript
+
+### Pobieranie struktury kluczy:
+```javascript
+function getSensorKeys() {
+    ws.send(JSON.stringify({
+        cmd: 'getSensorKeys'
+    }));
+}
+
+// Użycie:
+getSensorKeys();
+
+// Przykład obsługi odpowiedzi:
+ws.onmessage = function(event) {
+    const data = JSON.parse(event.data);
+    
+    if (data.cmd === 'sensorKeys') {
+        console.log('Dostępne klucze SHT40:', Object.keys(data.data.sht40));
+        console.log('Dostępne klucze SPS30:', Object.keys(data.data.sps30));
+        console.log('Klucze MCP3424:', Object.keys(data.data.mcp3424.devices[0].channels));
+        
+        // Przykład mapowania kluczy
+        const mcp3424Keys = data.data.mcp3424.devices[0].channels;
+        console.log('MCP3424 Device 1 klucze:', mcp3424Keys);
+        // Wynik: {K1_1_mV: "K1_1_mV", K1_1_V: "K1_1_V", ...}
+    }
+};
+```
 
 ### Monitorowanie danych w czasie rzeczywistym:
 ```javascript
@@ -1007,8 +1456,36 @@ console.log('Konkretna data:', new Date(specificDate).toISOString());
 ws.onmessage = function(event) {
     const data = JSON.parse(event.data);
     
-    if (data.cmd === 'sensorData' && data.sensor === 'calibration') {
-        if (data.data.valid) {
+    if (data.cmd === 'sensorData') {
+        // IPS Sensor
+        if (data.sensor === 'ips' && data.data.valid) {
+            console.log('IPS PC values:', data.data.pc);
+            console.log('IPS PM values:', data.data.pm);
+            console.log('IPS NP values:', data.data.np);
+            console.log('IPS PW values:', data.data.pw);
+            console.log('IPS Debug Mode:', data.data.debugMode);
+            console.log('IPS WON:', data.data.won);
+        }
+        
+        // MCP3424 Sensor
+        if (data.sensor === 'mcp3424' && data.data.valid) {
+            console.log('MCP3424 Device Count:', data.data.deviceCount);
+            data.data.devices.forEach((device, index) => {
+                console.log(`Device ${index + 1} (${device.address}):`);
+                console.log('  Valid:', device.valid);
+                console.log('  Resolution:', device.resolution);
+                console.log('  Gain:', device.gain);
+                console.log('  Channels:', device.channels);
+                
+                // Przykład dostępu do konkretnych kanałów
+                const deviceNum = index + 1;
+                console.log(`  K${deviceNum}_1_mV:`, device.channels[`K${deviceNum}_1_mV`]);
+                console.log(`  K${deviceNum}_1_V:`, device.channels[`K${deviceNum}_1_V`]);
+            });
+        }
+        
+        // Calibration Data
+        if (data.sensor === 'calibration' && data.data.valid) {
             // Wyświetl temperatury
             console.log('Temperatura K1:', data.data.temperatures.K1 + '°C');
             console.log('Temperatura K2:', data.data.temperatures.K2 + '°C');

@@ -1539,6 +1539,7 @@ HCHOData CircularBuffer<HCHOData, FAST_BUFFER_SIZE>::addWeighted(const HCHOData&
     if (b.valid) {
         result.valid = true;
         result.hcho += b.hcho * weight;
+        result.hcho_ppb += b.hcho_ppb * weight;
     }
     return result;
 }
@@ -1549,6 +1550,7 @@ HCHOData CircularBuffer<HCHOData, FAST_BUFFER_SIZE>::addSimple(const HCHOData& a
     if (b.valid) {
         result.valid = true;
         result.hcho += b.hcho;
+        result.hcho_ppb += b.hcho_ppb;
     }
     return result;
 }
@@ -1558,6 +1560,7 @@ HCHOData CircularBuffer<HCHOData, FAST_BUFFER_SIZE>::divideByWeight(const HCHODa
     HCHOData result = sum;
     if (weight > 0) {
         result.hcho /= weight;
+        result.hcho_ppb /= weight;
     }
     return result;
 }
@@ -1567,6 +1570,7 @@ HCHOData CircularBuffer<HCHOData, FAST_BUFFER_SIZE>::divideByCount(const HCHODat
     HCHOData result = sum;
     if (count > 0) {
         result.hcho /= count;
+        result.hcho_ppb /= count;
     }
     return result;
 }
@@ -1578,6 +1582,7 @@ HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::addWeighted(const HCHOData&
     if (b.valid) {
         result.valid = true;
         result.hcho += b.hcho * weight;
+        result.hcho_ppb += b.hcho_ppb * weight;
     }
     return result;
 }
@@ -1588,6 +1593,7 @@ HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::addSimple(const HCHOData& a
     if (b.valid) {
         result.valid = true;
         result.hcho += b.hcho;
+        result.hcho_ppb += b.hcho_ppb;
     }
     return result;
 }
@@ -1597,6 +1603,7 @@ HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::divideByWeight(const HCHODa
     HCHOData result = sum;
     if (weight > 0) {
         result.hcho /= weight;
+        result.hcho_ppb /= weight;
     }
     return result;
 }
@@ -1604,6 +1611,10 @@ HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::divideByWeight(const HCHODa
 template<>
 HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::divideByCount(const HCHOData& sum, size_t count) {
     HCHOData result = sum;
+    if (count > 0) {
+        result.hcho /= count;
+        result.hcho_ppb /= count;
+    }
     return result;
 }
 

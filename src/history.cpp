@@ -685,6 +685,7 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
                         String& jsonResponse, unsigned long fromTime, unsigned long toTime,
                         const String& sampleType) {
     if (!config.enableHistory) {
+        safePrintln("[ERROR] getHistoricalData: History system is disabled in configuration.");
         DynamicJsonDocument doc(512);
         doc["error"] = "History disabled in configuration";
         doc["data"] = JsonArray();
@@ -693,6 +694,7 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
     }
     
     if (!historyManager.isInitialized()) {
+        safePrintln("[ERROR] getHistoricalData: History manager is not initialized.");
         DynamicJsonDocument doc(512);
         doc["error"] = "History not initialized";
         doc["data"] = JsonArray();
@@ -703,6 +705,7 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
     // Check available memory before starting
     size_t freeHeap = ESP.getFreeHeap();
     if (freeHeap < 30000) { // Need at least 30KB free
+        safePrintln("[ERROR] getHistoricalData: Low memory. Free heap: " + String(freeHeap));
         DynamicJsonDocument doc(512);
         doc["error"] = "Low memory";
         doc["data"] = JsonArray();
@@ -721,6 +724,7 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
     
     // Check memory again before creating JSON document
     if (ESP.getFreeHeap() < docSize + 10000) {
+        safePrintln("[ERROR] getHistoricalData: Insufficient memory for JSON document. Required: " + String(docSize) + ", Free: " + String(ESP.getFreeHeap()));
         DynamicJsonDocument doc(512);
         doc["error"] = "Insufficient memory for JSON document";
         doc["requiredSize"] = docSize;
@@ -735,7 +739,7 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
     JsonArray dataArray = doc.createNestedArray("data");
     
     // Buffer for samples (limited to avoid memory issues)
-    const size_t MAX_SAMPLES = 20; // Further reduced for single sensor requests
+    const size_t MAX_SAMPLES = 30; // Further reduced for single sensor requests
     size_t totalSamples = 0;
     // Uzyj sampleType przekazanego jako argument funkcji, nie deklaruj lokalnie
     if (sensor == "i2c") {
@@ -752,7 +756,7 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
             for (size_t i = 0; i < count; i++) {
                 // Check memory before adding more data
                 if (ESP.getFreeHeap() < 10000) {
-                    safePrintln("Low memory during JSON build, stopping");
+                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build, stopping at sample " + String(i));
                     break;
                 }
                 
@@ -779,7 +783,10 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
             }
             
             for (size_t i = 0; i < count; i++) {
-                if (ESP.getFreeHeap() < 10000) break;
+                if (ESP.getFreeHeap() < 10000) {
+                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (solar), stopping at sample " + String(i));
+                    break;
+                }
                 JsonObject sample = dataArray.createNestedObject();
                 sample["timestamp"] = buffer[i].timestamp;
                 sample["dateTime"] = buffer[i].dateTime;
@@ -802,14 +809,24 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
             }
             
             for (size_t i = 0; i < count; i++) {
-                if (ESP.getFreeHeap() < 10000) break;
+                if (ESP.getFreeHeap() < 10000) {
+                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (sps30), stopping at sample " + String(i));
+                    break;
+                }
                 JsonObject sample = dataArray.createNestedObject();
                 sample["timestamp"] = buffer[i].timestamp;
                 sample["dateTime"] = buffer[i].dateTime;
                 JsonObject data = sample.createNestedObject("data");
-                data["pm1_0"] = round(buffer[i].data.pm1_0 * 10) / 10.0;
-                data["pm2_5"] = round(buffer[i].data.pm2_5 * 10) / 10.0;
-                data["pm10"] = round(buffer[i].data.pm10 * 10) / 10.0;
+                data["PM1"] = round(buffer[i].data.pm1_0 * 10) / 10.0;
+                data["PM25"] = round(buffer[i].data.pm2_5 * 10) / 10.0;
+                data["PM4"] = round(buffer[i].data.pm4_0 * 10) / 10.0;
+                data["PM10"] = round(buffer[i].data.pm10 * 10) / 10.0;
+                data["NC05"] = round(buffer[i].data.nc0_5 * 10) / 10.0;
+                data["NC1"] = round(buffer[i].data.nc1_0 * 10) / 10.0;
+                data["NC25"] = round(buffer[i].data.nc2_5 * 10) / 10.0;
+                data["NC4"] = round(buffer[i].data.nc4_0 * 10) / 10.0;
+                data["NC10"] = round(buffer[i].data.nc10 * 10) / 10.0;
+                data["TPS"] = round(buffer[i].data.typical_particle_size * 10) / 10.0;
                 totalSamples++;
             }
         }
@@ -825,7 +842,10 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
             }
             
             for (size_t i = 0; i < count; i++) {
-                if (ESP.getFreeHeap() < 10000) break;
+                if (ESP.getFreeHeap() < 10000) {
+                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (power), stopping at sample " + String(i));
+                    break;
+                }
                 JsonObject sample = dataArray.createNestedObject();
                 sample["timestamp"] = buffer[i].timestamp;
                 sample["dateTime"] = buffer[i].dateTime;
@@ -848,7 +868,10 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
             }
             
             for (size_t i = 0; i < count; i++) {
-                if (ESP.getFreeHeap() < 10000) break;
+                if (ESP.getFreeHeap() < 10000) {
+                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (sht40), stopping at sample " + String(i));
+                    break;
+                }
                 JsonObject sample = dataArray.createNestedObject();
                 sample["timestamp"] = buffer[i].timestamp;
                 sample["dateTime"] = buffer[i].dateTime;
@@ -859,7 +882,7 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
                 totalSamples++;
             }
         }
-    } else if (sensor == "scd41") {
+    } else if (sensor == "co2") {
         auto* i2cHist = historyManager.getI2CHistory();
         if (i2cHist && i2cHist->isInitialized()) {
             HistoryEntry<I2CSensorData> buffer[MAX_SAMPLES];
@@ -871,7 +894,10 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
             }
             
             for (size_t i = 0; i < count; i++) {
-                if (ESP.getFreeHeap() < 10000) break;
+                if (ESP.getFreeHeap() < 10000) {
+                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (co2), stopping at sample " + String(i));
+                    break;
+                }
                 // Sprawdź czy to SCD41 data
                 if (buffer[i].data.type == SENSOR_SCD41) {
                     JsonObject sample = dataArray.createNestedObject();
@@ -897,12 +923,16 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
             }
             
             for (size_t i = 0; i < count; i++) {
-                if (ESP.getFreeHeap() < 10000) break;
+                if (ESP.getFreeHeap() < 10000) {
+                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (hcho), stopping at sample " + String(i));
+                    break;
+                }
                 JsonObject sample = dataArray.createNestedObject();
                 sample["timestamp"] = buffer[i].timestamp;
                 sample["dateTime"] = buffer[i].dateTime;
                 JsonObject data = sample.createNestedObject("data");
-                data["hcho"] = round(buffer[i].data.hcho * 1000) / 1000.0;
+                data["hcho_mg"] = buffer[i].data.hcho;
+                data["hcho_ppb"] = buffer[i].data.hcho_ppb;
                 totalSamples++;
             }
         }
@@ -918,7 +948,10 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
             }
             
             for (size_t i = 0; i < count; i++) {
-                if (ESP.getFreeHeap() < 10000) break;
+                if (ESP.getFreeHeap() < 10000) {
+                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (fan), stopping at sample " + String(i));
+                    break;
+                }
                 JsonObject sample = dataArray.createNestedObject();
                 sample["timestamp"] = buffer[i].timestamp;
                 sample["dateTime"] = buffer[i].dateTime;
@@ -943,7 +976,10 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
             }
             
             for (size_t i = 0; i < count; i++) {
-                if (ESP.getFreeHeap() < 10000) break;
+                if (ESP.getFreeHeap() < 10000) {
+                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (calibration/" + sensor + "), stopping at sample " + String(i));
+                    break;
+                }
                 
                 JsonObject sample = dataArray.createNestedObject();
                 sample["timestamp"] = buffer[i].timestamp;
@@ -1001,6 +1037,7 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
         }
     } else {
         // Unknown sensor type
+        safePrintln("[ERROR] getHistoricalData: Unknown sensor type: " + sensor);
         doc["error"] = "Unknown sensor type: " + sensor;
         doc["totalSamples"] = 0;
         doc["freeHeap"] = ESP.getFreeHeap();

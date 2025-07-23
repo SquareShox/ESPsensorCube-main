@@ -29,5 +29,5 @@ bool sps30SensorStatus = false;
 bool mcp3424SensorStatus = false;
 bool ads1110SensorStatus = false;
 bool ina219SensorStatus = false;
-bool ipsSensorStatus = false;
+bool ipsSensorStatus = false; 
 bool hchoSensorStatus = false;  // Global HCHO sensor status 

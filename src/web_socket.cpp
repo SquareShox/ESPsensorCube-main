@@ -4,8 +4,10 @@
 #include <calib.h>
 #include <config.h>
 #include <fan.h>
+#include <network_config.h>
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
+#include <network_config.h>
 
 // Forward declarations for safe printing functions
 void safePrint(const String& message);
@@ -109,14 +111,14 @@ void handleGetSensorData(AsyncWebSocketClient* client, JsonDocument& doc) {
         JsonObject data = response.createNestedObject("data");
         
         // Solar
-        if (solarSensorStatus && solarData.valid) {
-            JsonObject solar = data.createNestedObject("solar");
-            solar["V"] = solarData.V;
-            solar["I"] = solarData.I;
-            solar["VPV"] = solarData.VPV;
-            solar["PPV"] = solarData.PPV;
-            solar["valid"] = true;
-        }
+        // if (solarSensorStatus && solarData.valid) {
+        //     JsonObject solar = data.createNestedObject("solar");
+        //     solar["V"] = solarData.V;
+        //     solar["I"] = solarData.I;
+        //     solar["VPV"] = solarData.VPV;
+        //     solar["PPV"] = solarData.PPV;
+        //     solar["valid"] = true;
+        // }
         
         // SHT40
         if (sht40SensorStatus && sht40Data.valid) {
@@ -193,7 +195,8 @@ void handleGetSensorData(AsyncWebSocketClient* client, JsonDocument& doc) {
         // HCHO
         if (hchoSensorStatus && hchoData.valid) {
             JsonObject hcho = data.createNestedObject("hcho");
-            hcho["hcho"] = hchoData.hcho;
+            hcho["hcho_mg"] = hchoData.hcho;
+            hcho["hcho_ppb"] = hchoData.hcho_ppb;
             hcho["valid"] = true;
         }
         
@@ -242,16 +245,16 @@ void handleGetSensorData(AsyncWebSocketClient* client, JsonDocument& doc) {
             data["pressure"] = sht40Data.pressure;
             data["valid"] = true;
         } else if (sensorType == "sps30" && sps30SensorStatus && sps30Data.valid) {
-            data["pm1_0"] = sps30Data.pm1_0;
-            data["pm2_5"] = sps30Data.pm2_5;
-            data["pm4_0"] = sps30Data.pm4_0;
-            data["pm10"] = sps30Data.pm10;
-            data["nc0_5"] = sps30Data.nc0_5;
-            data["nc1_0"] = sps30Data.nc1_0;
-            data["nc2_5"] = sps30Data.nc2_5;
-            data["nc4_0"] = sps30Data.nc4_0;
-            data["nc10"] = sps30Data.nc10;
-            data["typical_particle_size"] = sps30Data.typical_particle_size;
+            data["PM1"] = sps30Data.pm1_0;
+            data["PM25"] = sps30Data.pm2_5;
+            data["PM4"] = sps30Data.pm4_0;
+            data["PM10"] = sps30Data.pm10;
+            data["NC05"] = sps30Data.nc0_5;
+            data["NC1"] = sps30Data.nc1_0;
+            data["NC25"] = sps30Data.nc2_5;
+            data["NC4"] = sps30Data.nc4_0;
+            data["NC10"] = sps30Data.nc10;
+            data["TPS"] = sps30Data.typical_particle_size;
             data["valid"] = true;
         } else if (sensorType == "co2" && scd41SensorStatus && i2cSensorData.valid && i2cSensorData.type == SENSOR_SCD41) {
             data["co2"] = i2cSensorData.co2;
@@ -265,7 +268,8 @@ void handleGetSensorData(AsyncWebSocketClient* client, JsonDocument& doc) {
             data["power"] = ina219Data.power;
             data["valid"] = true;
         } else if (sensorType == "hcho" && hchoSensorStatus && hchoData.valid) {
-            data["hcho"] = hchoData.hcho;
+            data["hcho_mg"] = hchoData.hcho;
+            data["hcho_ppb"] = hchoData.hcho_ppb;
             data["valid"] = true;
         } else {
             response["error"] = "Sensor not available or invalid: " + sensorType;
@@ -408,10 +412,26 @@ void handleGetAverages(AsyncWebSocketClient* client, JsonDocument& doc) {
     String sensorType = doc["sensor"] | "";
     String avgType = doc["type"] | "fast"; // fast lub slow
     
-    DynamicJsonDocument response(2048);
+    DynamicJsonDocument response(4096); // Zwiększamy rozmiar dla więcej danych
     response["cmd"] = "averages";
     response["sensor"] = sensorType;
     response["type"] = avgType;
+    response["t"] = millis(); // Timestamp w ms
+    
+    // Dodaj date i time
+    struct tm timeinfo;
+    if (getLocalTime(&timeinfo)) {
+        char timeStr[20];
+        strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
+        response["time"] = String(timeStr);
+        
+        char dateStr[20];
+        strftime(dateStr, sizeof(dateStr), "%d/%m/%Y", &timeinfo);
+        response["date"] = String(dateStr);
+    } else {
+        response["time"] = "00:00:00";
+        response["date"] = "01/01/2024";
+    }
     
     JsonObject data = response.createNestedObject("data");
     
@@ -439,45 +459,66 @@ void handleGetAverages(AsyncWebSocketClient* client, JsonDocument& doc) {
         }
     }
     
-    if (sensorType == "i2c" || sensorType == "all") {
+  
+
+    // SHT40 (temperatura, wilgotność, ciśnienie)
+    if (sensorType == "sht40" || sensorType == "all") {
+        if (avgType == "fast") {
+            SHT40Data avg = getSHT40FastAverage();
+            if (avg.valid) {
+                JsonObject sht40 = data.createNestedObject("sht40");
+                sht40["temperature"] = avg.temperature;
+                sht40["humidity"] = avg.humidity;
+                sht40["pressure"] = avg.pressure;
+                sht40["valid"] = true;
+            }
+        } else {
+            SHT40Data avg = getSHT40SlowAverage();
+            if (avg.valid) {
+                JsonObject sht40 = data.createNestedObject("sht40");
+                sht40["temperature"] = avg.temperature;
+                sht40["humidity"] = avg.humidity;
+                sht40["pressure"] = avg.pressure;
+                sht40["valid"] = true;
+            }
+        }
+    }
+
+    // CO2 (osobna sekcja)
+    if (sensorType == "scd41" || sensorType == "all") {
         if (avgType == "fast") {
             I2CSensorData avg = getI2CFastAverage();
             if (avg.valid) {
-                JsonObject i2c = data.createNestedObject("i2c");
-                i2c["temperature"] = avg.temperature;
-                i2c["humidity"] = avg.humidity;
-                i2c["pressure"] = avg.pressure;
-                i2c["co2"] = avg.co2;
-                i2c["valid"] = true;
+                JsonObject scd41 = data.createNestedObject("scd41");
+                scd41["co2"] = avg.co2;
+                scd41["valid"] = true;
             }
         } else {
             I2CSensorData avg = getI2CSlowAverage();
             if (avg.valid) {
-                JsonObject i2c = data.createNestedObject("i2c");
-                i2c["temperature"] = avg.temperature;
-                i2c["humidity"] = avg.humidity;
-                i2c["pressure"] = avg.pressure;
-                i2c["co2"] = avg.co2;
-                i2c["valid"] = true;
+                JsonObject scd41 = data.createNestedObject("scd41");
+                scd41["co2"] = avg.co2;
+                scd41["valid"] = true;
             }
         }
     }
+
     
     if (sensorType == "sps30" || sensorType == "all") {
         if (avgType == "fast") {
             SPS30Data avg = getSPS30FastAverage();
             if (avg.valid) {
                 JsonObject sps30 = data.createNestedObject("sps30");
-                sps30["pm1_0"] = avg.pm1_0;
-                sps30["pm2_5"] = avg.pm2_5;
-                sps30["pm4_0"] = avg.pm4_0;
-                sps30["pm10"] = avg.pm10;
-                sps30["nc0_5"] = avg.nc0_5;
-                sps30["nc1_0"] = avg.nc1_0;
-                sps30["nc2_5"] = avg.nc2_5;
-                sps30["nc4_0"] = avg.nc4_0;
-                sps30["nc10"] = avg.nc10;
-                sps30["typical_particle_size"] = avg.typical_particle_size;
+                sps30["PM1"] = avg.pm1_0;
+                sps30["PM25"] = avg.pm2_5;
+                sps30["PM4"] = avg.pm4_0;
+                sps30["PM10"] = avg.pm10;
+                sps30["NC05"] = avg.nc0_5;
+                sps30["NC1"] = avg.nc1_0;
+                sps30["NC25"] = avg.nc2_5;
+                sps30["NC4"] = avg.nc4_0;
+                sps30["NC10"] = avg.nc10;
+                sps30["TPS"] = avg.typical_particle_size;
                 sps30["valid"] = true;
             }
         } else {
@@ -528,15 +569,138 @@ void handleGetAverages(AsyncWebSocketClient* client, JsonDocument& doc) {
             HCHOData avg = getHCHOFastAverage();
             if (avg.valid) {
                 JsonObject hcho = data.createNestedObject("hcho");
-                hcho["hcho"] = avg.hcho;
+                hcho["hcho_mg"] = avg.hcho;
+                hcho["hcho_ppb"] = avg.hcho_ppb;
                 hcho["valid"] = true;
             }
         } else {
             HCHOData avg = getHCHOSlowAverage();
             if (avg.valid) {
                 JsonObject hcho = data.createNestedObject("hcho");
-                hcho["hcho"] = avg.hcho;
+                hcho["hcho_mg"] = avg.hcho;
+                hcho["hcho_ppb"] = avg.hcho_ppb;
                 hcho["valid"] = true;
+            }
+        }
+    }
+    
+    if (sensorType == "ips" || sensorType == "all") {
+        if (avgType == "fast") {
+            IPSSensorData avg = getIPSFastAverage();
+            if (avg.valid) {
+                JsonObject ips = data.createNestedObject("ips");
+                for (int i = 0; i < 7; i++) {
+                    ips["pc_" + String(i+1)] = avg.pc_values[i];
+                    ips["pm_" + String(i+1)] = avg.pm_values[i];
+                    ips["np_" + String(i+1)] = avg.np_values[i];
+                    ips["pw_" + String(i+1)] = avg.pw_values[i];
+                }
+                ips["debugMode"] = avg.debugMode;
+                ips["won"] = avg.won;
+                ips["valid"] = true;
+            }
+        } else {
+            IPSSensorData avg = getIPSSlowAverage();
+            if (avg.valid) {
+                JsonObject ips = data.createNestedObject("ips");
+                for (int i = 0; i < 7; i++) {
+                    ips["pc_" + String(i+1)] = avg.pc_values[i];
+                    ips["pm_" + String(i+1)] = avg.pm_values[i];
+                    ips["np_" + String(i+1)] = avg.np_values[i];
+                    ips["pw_" + String(i+1)] = avg.pw_values[i];
+                }
+                ips["debugMode"] = avg.debugMode;
+                ips["won"] = avg.won;
+                ips["valid"] = true;
+            }
+        }
+    }
+    
+    // if (sensorType == "mcp3424" || sensorType == "all") {
+    //     if (avgType == "fast") {
+    //         MCP3424Data avg = getMCP3424FastAverage();
+    //         if (avg.valid) {
+    //             JsonObject mcp3424 = data.createNestedObject("mcp3424");
+    //             mcp3424["enabled"] = true;
+    //             mcp3424["deviceCount"] = avg.deviceCount;
+                
+    //             JsonArray devices = mcp3424.createNestedArray("devices");
+    //             for (uint8_t device = 0; device < avg.deviceCount; device++) {
+    //                 JsonObject deviceObj = devices.createNestedObject();
+    //                 deviceObj["address"] = "0x" + String(avg.addresses[device], HEX);
+    //                 deviceObj["valid"] = avg.valid[device];
+    //                 deviceObj["resolution"] = avg.resolution;
+    //                 deviceObj["gain"] = avg.gain;
+                    
+    //                 JsonObject channels = deviceObj.createNestedObject("channels");
+    //                 // Klucze w formacie K%d_%d (numer urządzenia, numer kanału)
+    //                 for (uint8_t ch = 0; ch < 4; ch++) {
+    //                     String key_mV = "K" + String(device+1) + "_" + String(ch+1) ;
+    //                   //  String key_V = "K" + String(device+1) + "_" + String(ch+1) + "_V";
+    //                     channels[key_mV] = round(avg.channels[device][ch] * 1000 * 1000) / 1000.0;
+    //                   //  channels[key_V] = round(avg.channels[device][ch] * 1000000) / 1000000.0;
+    //                 }
+    //             }
+    //             mcp3424["valid"] = true;
+    //         }
+    //     } else {
+    //         MCP3424Data avg = getMCP3424SlowAverage();
+    //         if (avg.valid) {
+    //             JsonObject mcp3424 = data.createNestedObject("mcp3424");
+    //             mcp3424["enabled"] = true;
+    //             mcp3424["deviceCount"] = avg.deviceCount;
+                
+    //             JsonArray devices = mcp3424.createNestedArray("devices");
+    //             for (uint8_t device = 0; device < avg.deviceCount; device++) {
+    //                 JsonObject deviceObj = devices.createNestedObject();
+    //                 deviceObj["address"] = "0x" + String(avg.addresses[device], HEX);
+    //                 deviceObj["valid"] = avg.valid[device];
+    //                 deviceObj["resolution"] = avg.resolution;
+    //                 deviceObj["gain"] = avg.gain;
+                    
+    //                 JsonObject channels = deviceObj.createNestedObject("channels");
+    //                 // Klucze w formacie K%d_%d (numer urzadzenia, numer kanalu)
+    //                 for (uint8_t ch = 0; ch < 4; ch++) {
+    //                     String key_mV = "K" + String(device+1) + "_" + String(ch+1);
+    //                   //  String key_V = "K" + String(device+1) + "_" + String(ch+1) ;
+    //                     channels[key_mV] = round(avg.channels[device][ch] * 1000 * 1000) / 1000.0;
+    //                   //  channels[key_V] = round(avg.channels[device][ch] * 1000000) / 1000000.0;
+    //                 }
+    //             }
+    //             mcp3424["valid"] = true;
+    //         }
+    //     }
+    // }
+    
+    // K_channels - wszystkie kanały K jako osobne klucze
+    if (sensorType == "mcp3424" || sensorType == "all") {
+        if (avgType == "fast") {
+            MCP3424Data avg = getMCP3424FastAverage();
+            if (avg.valid) {
+                JsonObject k_channels = data.createNestedObject("K_channels");
+                for (uint8_t device = 0; device < avg.deviceCount; device++) {
+                    if (avg.valid[device]) {
+                        for (uint8_t ch = 0; ch < 4; ch++) {
+                            String key = "K" + String(device+1) + "_" + String(ch+1);
+                            k_channels[key] = round(avg.channels[device][ch] * 1000 * 1000) / 1000.0;
+                        }
+                    }
+                }
+                k_channels["valid"] = true;
+            }
+        } else {
+            MCP3424Data avg = getMCP3424SlowAverage();
+            if (avg.valid) {
+                JsonObject k_channels = data.createNestedObject("K_channels");
+                for (uint8_t device = 0; device < avg.deviceCount; device++) {
+                    if (avg.valid[device]) {
+                        for (uint8_t ch = 0; ch < 4; ch++) {
+                            String key = "K" + String(device+1) + "_" + String(ch+1);
+                            k_channels[key] = round(avg.channels[device][ch] * 1000 * 1000) / 1000.0;
+                        }
+                    }
+                }
+                k_channels["valid"] = true;
             }
         }
     }
@@ -560,6 +724,46 @@ void handleSetConfig(AsyncWebSocketClient* client, JsonDocument& doc) {
     if (doc.containsKey("enableHistory")) {
         config.enableHistory = doc["enableHistory"];
         response["enableHistory"] = config.enableHistory;
+    }
+    if (doc.containsKey("useAveragedData")) {
+        config.useAveragedData = doc["useAveragedData"];
+        response["useAveragedData"] = config.useAveragedData;
+    }
+    
+    // Network configuration commands
+    if (doc.containsKey("setWiFiConfig")) {
+        String ssid = doc["ssid"] | "";
+        String password = doc["password"] | "";
+        
+        if (ssid.length() > 0) {
+            if (saveWiFiConfig(ssid.c_str(), password.c_str())) {
+                response["success"] = true;
+                response["message"] = "WiFi configuration saved";
+            } else {
+                response["success"] = false;
+                response["error"] = "Failed to save WiFi config";
+            }
+        } else {
+            response["success"] = false;
+            response["error"] = "SSID cannot be empty";
+        }
+    }
+    
+    if (doc.containsKey("setNetworkConfig")) {
+        networkConfig.useDHCP = doc["useDHCP"] | true;
+        strlcpy(networkConfig.staticIP, doc["staticIP"] | "192.168.1.100", sizeof(networkConfig.staticIP));
+        strlcpy(networkConfig.gateway, doc["gateway"] | "192.168.1.1", sizeof(networkConfig.gateway));
+        strlcpy(networkConfig.subnet, doc["subnet"] | "255.255.255.0", sizeof(networkConfig.subnet));
+        strlcpy(networkConfig.dns1, doc["dns1"] | "8.8.8.8", sizeof(networkConfig.dns1));
+        strlcpy(networkConfig.dns2, doc["dns2"] | "8.8.4.4", sizeof(networkConfig.dns2));
+        
+        if (saveNetworkConfig(networkConfig)) {
+            response["success"] = true;
+            response["message"] = "Network configuration saved";
+        } else {
+            response["success"] = false;
+            response["error"] = "Failed to save network config";
+        }
     }
     
     if (doc.containsKey("enableModbus")) {
@@ -608,6 +812,7 @@ void handleGetConfig(AsyncWebSocketClient* client, JsonDocument& doc) {
     configObj["enableWiFi"] = config.enableWiFi;
     configObj["enableWebServer"] = config.enableWebServer;
     configObj["enableHistory"] = config.enableHistory;
+    configObj["useAveragedData"] = config.useAveragedData;
     configObj["enableModbus"] = config.enableModbus;
     configObj["enableSolarSensor"] = config.enableSolarSensor;
     configObj["enableOPCN3Sensor"] = config.enableOPCN3Sensor;
@@ -665,6 +870,137 @@ void handleSystemCommand(AsyncWebSocketClient* client, JsonDocument& doc) {
         response["freePsram"] = ESP.getFreePsram();
         response["psramSize"] = ESP.getPsramSize();
         response["uptime"] = millis() / 1000;
+        
+    } else if (command == "getNetworkConfig") {
+        response["success"] = true;
+        response["cmd"] = "networkConfig";
+        
+        // Add network configuration data
+        response["useDHCP"] = networkConfig.useDHCP;
+        response["staticIP"] = networkConfig.staticIP;
+        response["gateway"] = networkConfig.gateway;
+        response["subnet"] = networkConfig.subnet;
+        response["dns1"] = networkConfig.dns1;
+        response["dns2"] = networkConfig.dns2;
+        response["configValid"] = networkConfig.configValid;
+        
+        // Add current WiFi status
+        response["currentIP"] = WiFi.localIP().toString();
+        response["currentSSID"] = WiFi.SSID();
+        response["wifiConnected"] = WiFi.status() == WL_CONNECTED;
+        response["wifiSignal"] = WiFi.RSSI();
+        
+        // Add WiFi credentials (if available)
+        char ssid[32], password[64];
+        if (loadWiFiConfig(ssid, password, sizeof(ssid), sizeof(password))) {
+            response["wifiSSID"] = ssid;
+            response["wifiPassword"] = password;
+        }
+        
+    } else if (command == "testWiFi") {
+        response["success"] = true;
+        response["wifiConnected"] = WiFi.status() == WL_CONNECTED;
+        response["ssid"] = WiFi.SSID();
+        response["rssi"] = WiFi.RSSI();
+        response["localIP"] = WiFi.localIP().toString();
+    } else if (command == "getMCP3424Config") {
+        // Get current MCP3424 configuration
+        response["success"] = true;
+        response["cmd"] = "mcp3424Config";
+        
+        // Manually serialize MCP3424Config to JSON
+        JsonObject configObj = response.createNestedObject("config");
+        configObj["deviceCount"] = mcp3424Config.deviceCount;
+        configObj["configValid"] = mcp3424Config.configValid;
+        
+        JsonArray devices = configObj.createNestedArray("devices");
+        for (uint8_t i = 0; i < mcp3424Config.deviceCount; i++) {
+            JsonObject device = devices.createNestedObject();
+            device["deviceIndex"] = mcp3424Config.devices[i].deviceIndex;
+            device["gasType"] = mcp3424Config.devices[i].gasType;
+            device["description"] = mcp3424Config.devices[i].description;
+            device["enabled"] = mcp3424Config.devices[i].enabled;
+        }
+        
+    } else if (command == "applyNetworkConfig") {
+        if (applyNetworkConfig()) {
+            response["success"] = true;
+            response["message"] = "Network configuration applied successfully";
+        } else {
+            response["success"] = false;
+            response["error"] = "Failed to apply network configuration";
+        }
+        
+    } else if (command == "resetNetworkConfig") {
+        if (deleteAllConfig()) {
+            response["success"] = true;
+            response["message"] = "All network configuration reset";
+        } else {
+            response["success"] = false;
+            response["error"] = "Failed to reset network configuration";
+        }
+        
+    } else if (command == "getMCP3424Config") {
+        response["success"] = true;
+        response["cmd"] = "mcp3424Config";
+        response["config"] = getMCP3424ConfigJson();
+        
+    } else if (command == "setMCP3424Config") {
+        // Parse MCP3424 configuration from JSON
+        if (doc.containsKey("devices")) {
+            JsonArray devices = doc["devices"];
+            mcp3424Config.deviceCount = 0;
+            
+            for (JsonObject device : devices) {
+                if (mcp3424Config.deviceCount < 8) {
+                    MCP3424DeviceAssignment& newDevice = mcp3424Config.devices[mcp3424Config.deviceCount];
+                    newDevice.deviceIndex = device["deviceIndex"] | 0;
+                    strlcpy(newDevice.gasType, device["gasType"] | "", sizeof(newDevice.gasType));
+                    strlcpy(newDevice.description, device["description"] | "", sizeof(newDevice.description));
+                    newDevice.enabled = device["enabled"] | true;
+                    mcp3424Config.deviceCount++;
+                }
+            }
+            
+            if (saveMCP3424Config(mcp3424Config)) {
+                response["success"] = true;
+                response["message"] = "MCP3424 configuration saved";
+            } else {
+                response["success"] = false;
+                response["error"] = "Failed to save MCP3424 configuration";
+            }
+        } else {
+            response["success"] = false;
+            response["error"] = "No devices provided";
+        }
+        
+    } else if (command == "resetMCP3424Config") {
+        initializeDefaultMCP3424Mapping();
+        if (saveMCP3424Config(mcp3424Config)) {
+            response["success"] = true;
+            response["message"] = "MCP3424 configuration reset to defaults";
+        } else {
+            response["success"] = false;
+            response["error"] = "Failed to save default MCP3424 configuration";
+        }
+    } else if (command == "getMCP3424Config") {
+        // Get current MCP3424 configuration
+        response["cmd"] = "mcp3424Config";
+        response["success"] = true;
+        
+        // Manually serialize MCP3424Config to JSON
+        JsonObject configObj = response.createNestedObject("config");
+        configObj["deviceCount"] = mcp3424Config.deviceCount;
+        configObj["configValid"] = mcp3424Config.configValid;
+        
+        JsonArray devices = configObj.createNestedArray("devices");
+        for (uint8_t i = 0; i < mcp3424Config.deviceCount; i++) {
+            JsonObject device = devices.createNestedObject();
+            device["deviceIndex"] = mcp3424Config.devices[i].deviceIndex;
+            device["gasType"] = mcp3424Config.devices[i].gasType;
+            device["description"] = mcp3424Config.devices[i].description;
+            device["enabled"] = mcp3424Config.devices[i].enabled;
+        }
         
     } else if (command == "wifi") {
         response["success"] = true;
@@ -851,6 +1187,158 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, void* arg, uint8_t* da
         handleSystemCommand(client, doc);
     } else if (cmd == "calibration") {
         handleCalibrationCommand(client, doc);
+    } else if (cmd == "getSensorKeys") {
+        // Handle sensor keys request - returns JSON structure with keys instead of values
+        safePrintln("WebSocket: getSensorKeys requested");
+        DynamicJsonDocument response(4096);
+        response["cmd"] = "sensorKeys";
+        response["success"] = true;
+        response["t"] = millis(); // Timestamp w ms
+        
+        // Dodaj date i time
+        struct tm timeinfo;
+        if (getLocalTime(&timeinfo)) {
+            char timeStr[20];
+            strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
+            response["time"] = String(timeStr);
+            
+            char dateStr[20];
+            strftime(dateStr, sizeof(dateStr), "%d/%m/%Y", &timeinfo);
+            response["date"] = String(dateStr);
+        } else {
+            response["time"] = "00:00:00";
+            response["date"] = "01/01/2024";
+        }
+        
+        JsonObject data = response.createNestedObject("data");
+        
+        // SHT40
+        JsonObject sht40 = data.createNestedObject("sht40");
+        sht40["valid"] = "SHT40_VALID";
+        sht40["temperature"] = "I2C11_TEMP";
+        sht40["humidity"] = "I2C11_HUMID";
+        sht40["pressure"] = "I2C11_PRESS";
+        
+        // SPS30
+        JsonObject sps30 = data.createNestedObject("sps30");
+        sps30["valid"] = "SPS30_VALID";
+        sps30["PM1"] = "US3_SPS30_PM1";
+        sps30["PM25"] = "US3_SPS30_PM25";
+        sps30["PM4"] = "US3_SPS30_PM4";
+        sps30["PM10"] = "US3_SPS30_PM10";
+        sps30["NC05"] = "US3_SPS30_NC05";
+        sps30["NC1"] = "US3_SPS30_NC1";
+        sps30["NC25"] = "US3_SPS30_NC25";
+        sps30["NC4"] = "US3_SPS30_NC4";
+        sps30["NC10"] = "US3_SPS30_NC10";
+        sps30["TPS"] = "US3_SPS30_TPS";
+        sps30["valid"] = "SPS30_VALID";
+        
+        // CO2
+        JsonObject scd41 = data.createNestedObject("scd41");
+        scd41["valid"] = "CO2_VALID";
+        scd41["co2"] = "I2C5_PRESS";
+        
+        // Power
+        JsonObject power = data.createNestedObject("power");
+        power["valid"] = "POWER_VALID";
+        power["busVoltage"] = "POWER_BUS_VOLTAGE";
+        power["shuntVoltage"] = "POWER_SHUNT_VOLTAGE";
+        power["current"] = "POWER_CURRENT";
+        power["power"] = "POWER_POWER";
+        
+        // HCHO
+        JsonObject hcho = data.createNestedObject("hcho");
+        hcho["valid"] = "HCHO_VALID";
+        hcho["hcho"] = "US0_PMS5003ST_HCHO_UG";
+        hcho["hcho_ppb"] = "HCHO_PPB";
+        
+        // IPS Sensor
+        JsonObject ips = data.createNestedObject("ips");
+        ips["valid"] = "IPS_VALID";
+        ips["debugMode"] = "IPS_DEBUG_MODE";
+        ips["won"] = "IPS_WON";
+        for (int i = 0; i < 7; i++) {
+            ips["pc_" + String(i+1)] = "IPS_PC_" + String(i+1);
+            ips["pm_" + String(i+1)] = "IPS_PM_" + String(i+1);
+            ips["np_" + String(i+1)] = "IPS_NP_" + String(i+1);
+            ips["pw_" + String(i+1)] = "IPS_PW_" + String(i+1);
+        }
+        
+        // MCP3424 - wszystkie urządzenia z kluczami K1_1, K1_2, etc.
+        JsonObject mcp3424 = data.createNestedObject("mcp3424");
+        mcp3424["enabled"] = "MCP3424_ENABLED";
+        mcp3424["deviceCount"] = "MCP3424_DEVICE_COUNT";
+        mcp3424["valid"] = "MCP3424_VALID";
+        
+        // JsonArray devices = mcp3424.createNestedArray("devices");
+        // for (uint8_t device = 0; device < 8; device++) { // Wszystkie możliwe urządzenia
+        //     JsonObject deviceObj = devices.createNestedObject();
+        //     deviceObj["address"] = "MCP3424_DEVICE_" + String(device+1) + "_ADDRESS";
+        //     deviceObj["valid"] = "MCP3424_DEVICE_" + String(device+1) + "_VALID";
+        //     deviceObj["resolution"] = "MCP3424_DEVICE_" + String(device+1) + "_RESOLUTION";
+        //     deviceObj["gain"] = "MCP3424_DEVICE_" + String(device+1) + "_GAIN";
+            
+        //     JsonObject channels = deviceObj.createNestedObject("channels");
+        //     // Klucze w formacie K%d_%d (numer urządzenia, numer kanału)
+        //     for (uint8_t ch = 0; ch < 4; ch++) {
+        //         String key_mV = "K" + String(device+1) + "_" + String(ch+1) ;
+        //         String key_V = "K" + String(device+1) + "_" + String(ch+1) ;
+        //         channels[key_mV] = key_mV;
+        //         channels[key_V] = key_V;
+        //     }
+        // }
+        
+        // K_channels - wszystkie kanały K jako osobne klucze
+        JsonObject k_channels = data.createNestedObject("K_channels");
+        k_channels["valid"] = "K_CHANNELS_VALID";
+        for (uint8_t device = 0; device < 8; device++) {
+            for (uint8_t ch = 0; ch < 4; ch++) {
+                String key = "K" + String(device+1) + "_" + String(ch+1);
+                k_channels[key] = key;
+            }
+        }
+        
+        // Fan control system
+        JsonObject fan = data.createNestedObject("fan");
+        fan["enabled"] = "FAN_ENABLED";
+        fan["dutyCycle"] = "FAN_DUTY_CYCLE";
+        fan["rpm"] = "FAN_RPM";
+        fan["glineEnabled"] = "FAN_GLINE_ENABLED";
+        fan["pwmValue"] = "FAN_PWM_VALUE";
+        fan["valid"] = "FAN_VALID";
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+        
+    } else if (cmd == "getMCP3424Config") {
+        // Handle MCP3424 config request directly
+        safePrintln("WebSocket: getMCP3424Config requested");
+        DynamicJsonDocument response(2048);
+        response["cmd"] = "mcp3424Config";
+        response["success"] = true;
+        
+        // Manually serialize MCP3424Config to JSON
+        JsonObject configObj = response.createNestedObject("config");
+        configObj["deviceCount"] = mcp3424Config.deviceCount;
+        configObj["configValid"] = mcp3424Config.configValid;
+        
+        JsonArray devices = configObj.createNestedArray("devices");
+        safePrintln("MCP3424 config: deviceCount = " + String(mcp3424Config.deviceCount));
+        for (uint8_t i = 0; i < mcp3424Config.deviceCount; i++) {
+            JsonObject device = devices.createNestedObject();
+            device["deviceIndex"] = mcp3424Config.devices[i].deviceIndex;
+            device["gasType"] = mcp3424Config.devices[i].gasType;
+            device["description"] = mcp3424Config.devices[i].description;
+            device["enabled"] = mcp3424Config.devices[i].enabled;
+            safePrintln("Device " + String(i) + ": " + mcp3424Config.devices[i].gasType);
+        }
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        safePrintln("Sending MCP3424 config response: " + responseStr);
+        client->text(responseStr);
     } else {
         DynamicJsonDocument errorResponse(1024);
         errorResponse["error"] = "Unknown command: " + cmd;
@@ -915,9 +1403,16 @@ void broadcastSensorData(AsyncWebSocket& ws) {
     // SPS30
     if (sps30SensorStatus && sps30Data.valid) {
         JsonObject sps30 = sensors.createNestedObject("sps30");
-        sps30["pm1_0"] = sps30Data.pm1_0;
-        sps30["pm2_5"] = sps30Data.pm2_5;
-        sps30["pm10"] = sps30Data.pm10;
+        sps30["PM1"] = sps30Data.pm1_0;
+        sps30["PM25"] = sps30Data.pm2_5;
+        sps30["PM4"] = sps30Data.pm4_0;
+        sps30["PM10"] = sps30Data.pm10;
+        sps30["NC05"] = sps30Data.nc0_5;
+        sps30["NC1"] = sps30Data.nc1_0;
+        sps30["NC25"] = sps30Data.nc2_5;
+        sps30["NC4"] = sps30Data.nc4_0;
+        sps30["NC10"] = sps30Data.nc10;
+        sps30["TPS"] = sps30Data.typical_particle_size;
         sps30["valid"] = true;
     }
     
@@ -940,7 +1435,8 @@ void broadcastSensorData(AsyncWebSocket& ws) {
     // HCHO
     if (hchoSensorStatus && hchoData.valid) {
         JsonObject hcho = sensors.createNestedObject("hcho");
-        hcho["hcho"] = hchoData.hcho;
+        hcho["hcho_mg"] = hchoData.hcho;
+        hcho["hcho_ppb"] = hchoData.hcho_ppb;
         hcho["valid"] = true;
     }
     

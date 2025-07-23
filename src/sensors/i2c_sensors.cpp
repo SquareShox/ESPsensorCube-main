@@ -859,8 +859,11 @@ bool readMCP3424Results(MCP3424Data& data) {
             
             if (err == 0) {
                 // Convert to voltage (2.048V reference, 18-bit, gain=1)
-                data.channels[device][mcp3424_current_channel] = (adcValue * 2.048) / (131072.0 * data.gain);
-                overallSuccess = true;
+                data.channels[device][mcp3424_current_channel] = (adcValue*4) / (data.gain);
+
+              //raw adc /gain / 131072.0
+             // data.channels[device][mcp3424_current_channel] = adcValue / (data.gain );
+              overallSuccess = true;
                 
                 // Show raw ADC value and voltage
                 safePrint("Dev");
@@ -894,7 +897,7 @@ bool readMCP3424Results(MCP3424Data& data) {
             uint8_t err = mcp3424_devices[device]->read(adcValue, status);
             
             if (err == 0) {
-                data.channels[device][mcp3424_current_channel] = (adcValue * 2.048) / (131072.0 * data.gain);
+                data.channels[device][mcp3424_current_channel] = (adcValue*4) / (data.gain);
                 overallSuccess = true;
             } else {
                 data.channels[device][mcp3424_current_channel] = 0.0;

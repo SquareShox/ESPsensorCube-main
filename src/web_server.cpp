@@ -3,6 +3,7 @@
 #include <chart.h>
 #include <sensors.h>
 #include <calib.h>
+#include <network_config.h>
 #include <config.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
@@ -11,6 +12,7 @@
 #include <web_socket.h>
 #include <ArduinoJson.h>
 #include <fan.h>
+#include <mean.h>
 
 // Forward declarations for safe printing functions
 void safePrint(const String& message);
@@ -142,12 +144,23 @@ String getAllSensorJson() {
     
     // Solar
     JsonObject solar = doc.createNestedObject("solar");
-    solar["valid"] = solarSensorStatus && solarData.valid;
-    if (solarSensorStatus && solarData.valid) {
-        solar["V"] = solarData.V;
-        solar["I"] = solarData.I;
-        solar["VPV"] = solarData.VPV;
-        solar["PPV"] = solarData.PPV;
+    if (config.useAveragedData) {
+        SolarData avgData = getSolarFastAverage();
+        solar["valid"] = solarSensorStatus && avgData.valid;
+        if (solarSensorStatus && avgData.valid) {
+            solar["V"] = avgData.V;
+            solar["I"] = avgData.I;
+            solar["VPV"] = avgData.VPV;
+            solar["PPV"] = avgData.PPV;
+        }
+    } else {
+        solar["valid"] = solarSensorStatus && solarData.valid;
+        if (solarSensorStatus && solarData.valid) {
+            solar["V"] = solarData.V;
+            solar["I"] = solarData.I;
+            solar["VPV"] = solarData.VPV;
+            solar["PPV"] = solarData.PPV;
+        }
     }
     
     // OPCN3
@@ -163,34 +176,61 @@ String getAllSensorJson() {
     
     // SPS30
     JsonObject sps30 = doc.createNestedObject("sps30");
-    sps30["valid"] = sps30SensorStatus && sps30Data.valid;
-    if (sps30SensorStatus && sps30Data.valid) {
-        sps30["PM1"] = round(sps30Data.pm1_0 * 10) / 10.0;
-        sps30["PM25"] = round(sps30Data.pm2_5 * 10) / 10.0;
-        sps30["PM4"] = round(sps30Data.pm4_0 * 10) / 10.0;
-        sps30["PM10"] = round(sps30Data.pm10 * 10) / 10.0;
-        sps30["NC05"] = round(sps30Data.nc0_5 * 10) / 10.0;
-        sps30["NC1"] = round(sps30Data.nc1_0 * 10) / 10.0;
-        sps30["NC25"] = round(sps30Data.nc2_5 * 10) / 10.0;
-        sps30["NC4"] = round(sps30Data.nc4_0 * 10) / 10.0;
-        sps30["NC10"] = round(sps30Data.nc10 * 10) / 10.0;
-        sps30["TPS"] = round(sps30Data.typical_particle_size * 10) / 10.0;
+    if (config.useAveragedData) {
+        SPS30Data avgData = getSPS30FastAverage();
+        sps30["valid"] = sps30SensorStatus && avgData.valid;
+        if (sps30SensorStatus && avgData.valid) {
+            sps30["PM1"] = round(avgData.pm1_0 * 10) / 10.0;
+            sps30["PM25"] = round(avgData.pm2_5 * 10) / 10.0;
+            sps30["PM4"] = round(avgData.pm4_0 * 10) / 10.0;
+            sps30["PM10"] = round(avgData.pm10 * 10) / 10.0;
+            sps30["NC05"] = round(avgData.nc0_5 * 10) / 10.0;
+            sps30["NC1"] = round(avgData.nc1_0 * 10) / 10.0;
+            sps30["NC25"] = round(avgData.nc2_5 * 10) / 10.0;
+            sps30["NC4"] = round(avgData.nc4_0 * 10) / 10.0;
+            sps30["NC10"] = round(avgData.nc10 * 10) / 10.0;
+            sps30["TPS"] = round(avgData.typical_particle_size * 10) / 10.0;
+        }
+    } else {
+        sps30["valid"] = sps30SensorStatus && sps30Data.valid;
+        if (sps30SensorStatus && sps30Data.valid) {
+            sps30["PM1"] = round(sps30Data.pm1_0 * 10) / 10.0;
+            sps30["PM25"] = round(sps30Data.pm2_5 * 10) / 10.0;
+            sps30["PM4"] = round(sps30Data.pm4_0 * 10) / 10.0;
+            sps30["PM10"] = round(sps30Data.pm10 * 10) / 10.0;
+            sps30["NC05"] = round(sps30Data.nc0_5 * 10) / 10.0;
+            sps30["NC1"] = round(sps30Data.nc1_0 * 10) / 10.0;
+            sps30["NC25"] = round(sps30Data.nc2_5 * 10) / 10.0;
+            sps30["NC4"] = round(sps30Data.nc4_0 * 10) / 10.0;
+            sps30["NC10"] = round(sps30Data.nc10 * 10) / 10.0;
+            sps30["TPS"] = round(sps30Data.typical_particle_size * 10) / 10.0;
+        }
     }
     
     // SHT40 (temperature, humidity, pressure)
     JsonObject sht40 = doc.createNestedObject("sht40");
-    sht40["valid"] = sht40SensorStatus && sht40Data.valid;
-    if (sht40SensorStatus && sht40Data.valid) {
-        sht40["temperature"] = round(sht40Data.temperature * 100) / 100.0;
-        sht40["humidity"] = round(sht40Data.humidity * 100) / 100.0;
-        sht40["pressure"] = round(sht40Data.pressure * 100) / 100.0;
+    if (config.useAveragedData) {
+        SHT40Data avgData = getSHT40FastAverage();
+        sht40["valid"] = sht40SensorStatus && avgData.valid;
+        if (sht40SensorStatus && avgData.valid) {
+            sht40["temperature"] = round(avgData.temperature * 100) / 100.0;
+            sht40["humidity"] = round(avgData.humidity * 100) / 100.0;
+            sht40["pressure"] = round(avgData.pressure * 100) / 100.0;
+        }
+    } else {
+        sht40["valid"] = sht40SensorStatus && sht40Data.valid;
+        if (sht40SensorStatus && sht40Data.valid) {
+            sht40["temperature"] = round(sht40Data.temperature * 100) / 100.0;
+            sht40["humidity"] = round(sht40Data.humidity * 100) / 100.0;
+            sht40["pressure"] = round(sht40Data.pressure * 100) / 100.0;
+        }
     }
     
-    // SCD41 (CO2)
-    JsonObject scd41 = doc.createNestedObject("scd41");
-    scd41["valid"] = scd41SensorStatus ;
-    if (scd41SensorStatus ) {
-        scd41["CO2"] = i2cSensorData.co2;
+    // CO2 (SCD41)
+    JsonObject co2 = doc.createNestedObject("co2");
+    co2["valid"] = scd41SensorStatus;
+    if (scd41SensorStatus) {
+        co2["co2"] = i2cSensorData.co2;
     }
     
     // MCP3424 (all devices)
@@ -223,21 +263,43 @@ String getAllSensorJson() {
     
     // Power
     JsonObject power = doc.createNestedObject("power");
-    power["valid"] = ina219SensorStatus && ina219Data.valid;
-    if (ina219SensorStatus && ina219Data.valid) {
-        power["busVoltage"] = round(ina219Data.busVoltage * 1000) / 1000.0;
-        power["shuntVoltage"] = round(ina219Data.shuntVoltage * 100) / 100.0;
-        power["current"] = round(ina219Data.current * 100) / 100.0;
-        power["power"] = round(ina219Data.power * 100) / 100.0;
+    if (config.useAveragedData) {
+        INA219Data avgData = getINA219FastAverage();
+        power["valid"] = ina219SensorStatus && avgData.valid;
+        if (ina219SensorStatus && avgData.valid) {
+            power["busVoltage"] = round(avgData.busVoltage * 1000) / 1000.0;
+            power["shuntVoltage"] = round(avgData.shuntVoltage * 100) / 100.0;
+            power["current"] = round(avgData.current * 100) / 100.0;
+            power["power"] = round(avgData.power * 100) / 100.0;
+        }
+    } else {
+        power["valid"] = ina219SensorStatus && ina219Data.valid;
+        if (ina219SensorStatus && ina219Data.valid) {
+            power["busVoltage"] = round(ina219Data.busVoltage * 1000) / 1000.0;
+            power["shuntVoltage"] = round(ina219Data.shuntVoltage * 100) / 100.0;
+            power["current"] = round(ina219Data.current * 100) / 100.0;
+            power["power"] = round(ina219Data.power * 100) / 100.0;
+        }
     }
     
     // HCHO (formaldehyde sensor)
     JsonObject hcho = doc.createNestedObject("hcho");
     hcho["enabled"] = hchoSensorStatus;
-    hcho["valid"] = hchoSensorStatus && hchoData.valid;
-    if (hchoSensorStatus && hchoData.valid) {
-        hcho["HCHO"] = round(hchoData.hcho * 1000) / 1000.0;
-        hcho["age"] = (millis() - hchoData.lastUpdate) / 1000;
+    if (config.useAveragedData) {
+        HCHOData avgData = getHCHOFastAverage();
+        hcho["valid"] = hchoSensorStatus && avgData.valid;
+        if (hchoSensorStatus && avgData.valid) {
+            hcho["hcho_mg"] = avgData.hcho;
+            hcho["hcho_ppb"] = avgData.hcho_ppb;
+            hcho["age"] = (millis() - avgData.lastUpdate) / 1000;
+        }
+    } else {
+        hcho["valid"] = hchoSensorStatus && hchoData.valid;
+        if (hchoSensorStatus && hchoData.valid) {
+            hcho["hcho_mg"] = hchoData.hcho;
+            hcho["hcho_ppb"] = hchoData.hcho_ppb;
+            hcho["age"] = (millis() - hchoData.lastUpdate) / 1000;
+        }
     }
     
     // IPS (all particle data)
@@ -272,7 +334,12 @@ String getAllSensorJson() {
     // Calibration data (all sensors if enabled)
     JsonObject calibration = doc.createNestedObject("calibration");
     calibration["enabled"] = calibConfig.enableCalibration;
-    calibration["valid"] = calibratedData.valid;
+    if (config.useAveragedData) {
+        CalibratedSensorData avgData = getCalibratedFastAverage();
+        calibration["valid"] = calibratedData.valid && avgData.valid;
+    } else {
+        calibration["valid"] = calibratedData.valid;
+    }
     if (calibConfig.enableCalibration && calibratedData.valid) {
         // Configuration
         JsonObject configObj = calibration.createNestedObject("config");
@@ -348,7 +415,7 @@ String getAllSensorJson() {
         // Special sensors - if special sensors enabled
         if (calibConfig.enableSpecialSensors) {
             JsonObject special = calibration.createNestedObject("special");
-            if (!isnan(calibratedData.HCHO)) special["HCHO_ppb"] = round(calibratedData.HCHO * 10) / 10.0;
+            if (!isnan(calibratedData.HCHO)) special["HCHO_ppb"] = calibratedData.HCHO;
             if (!isnan(calibratedData.PID)) special["PID"] = round(calibratedData.PID * 1000) / 1000.0;
             if (!isnan(calibratedData.PID_mV)) special["PID_mV"] = round(calibratedData.PID_mV * 100) / 100.0;
         }
@@ -427,7 +494,35 @@ void WiFiReconnectTask(void *parameter) {
 
 void initializeWiFi() {
     if (!config.enableWiFi) return;
+    
+    // Initialize LittleFS
+    if (!initLittleFS()) {
+        safePrintln("Failed to initialize LittleFS, using default WiFi config");
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    } else {
+        // Load network configuration
+        if (loadNetworkConfig(networkConfig)) {
+            safePrintln("Network config loaded from LittleFS");
+            
+            // Apply network configuration
+            if (!applyNetworkConfig()) {
+                safePrintln("Failed to apply network config, using defaults");
+            }
+        } else {
+            safePrintln("No network config found, using defaults");
+        }
+        
+        // Load WiFi credentials
+        char ssid[32], password[64];
+        if (loadWiFiConfig(ssid, password, sizeof(ssid), sizeof(password))) {
+            safePrintln("WiFi config loaded from LittleFS");
+            WiFi.begin(ssid, password);
+        } else {
+            safePrintln("No WiFi config found, using defaults");
+            WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+        }
+    }
+    
     int retryCount = 0;
     while (WiFi.status() != WL_CONNECTED && retryCount < 10) {
         retryCount++;
@@ -458,6 +553,12 @@ void initializeWebServer() {
     });
     server.on("/charts", HTTP_GET, [](AsyncWebServerRequest *request) {
         request->send(200, "text/html", charts_html);
+    });
+    server.on("/network", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/html", network_config_html);
+    });
+    server.on("/mcp3424", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/html", mcp3424_config_html);
     });
     server.on("/test", HTTP_GET, [](AsyncWebServerRequest *request) {
         request->send(200, "text/plain", "WebSocket test: " + String(ws.count()) + " clients connected");
@@ -496,7 +597,16 @@ void initializeWebServer() {
         if (fromTime == 0 || fromTime > currentTime) {
             fromTime = 0; // Get all data from system start
         }
-        
+        //debug print fromTime and currentTime and info about request
+        safePrintln("History request:");
+        safePrint("sensor: ");
+        safePrintln(sensor);
+        safePrint("fromTime: ");
+        safePrintln(String(fromTime));
+        safePrint("currentTime: ");
+        safePrintln(String(currentTime));
+        safePrint("timeRange: ");
+        safePrintln(timeRange);
         String jsonResponse;
         size_t dataCount = getHistoricalData(sensor, timeRange, jsonResponse, fromTime, currentTime, sampleType);
         

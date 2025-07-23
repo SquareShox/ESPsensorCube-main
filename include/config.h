@@ -21,13 +21,14 @@
 #define I2C_SCL_PIN 8
 #define OPCN3_SS_PIN 11
 #define IPS_POWER_PIN 1
-#define IPS_RX_PIN 11         // Serial1 RX for IPS
-#define IPS_TX_PIN 12         // Serial1 TX for IPS
+#define IPS_RX_PIN 2         // Serial1 RX for IPS
+#define IPS_TX_PIN 4         // Serial1 TX for IPS
 #define HCHO_RX_PIN 9       // HCHO sensor UART RX pin
 #define HCHO_TX_PIN 10        // HCHO sensor UART TX pin
-#define TACHO_PIN 13
+#define TACHO_PIN 12
 #define PWM_PIN 1 
-#define GLine_PIN 2
+#define GLine_PIN 11
+#define OFF_PIN 13
 
 // Serial Configuration
 #define SERIAL_BAUD 115200
@@ -72,17 +73,46 @@ struct FeatureConfig {
     bool enableBME280 = false;     // Osobna kontrola BME280
     bool enableSCD41 = true;      // Osobna kontrola SCD41
     bool enableSHT40 = true;       // Osobna kontrola SHT40
-    bool enableSPS30 = true;       // Sensirion SPS30 particle sensor
+    bool enableSPS30 = false;       // Sensirion SPS30 particle sensor
     bool enableMCP3424 = true;     // 18-bit ADC converter
     bool enableADS1110 = true;     // 16-bit ADC converter
     bool enableINA219 = true;      // Current/voltage sensor
-    bool enableIPS = false;         // Kontrola czujnika IPS (UART)
-    bool enableIPSDebug = false;    // Kontrola IPS debug mode
+    bool enableIPS = true;         // Kontrola czujnika IPS (UART)
+    bool enableIPSDebug = true;    // Kontrola IPS debug mode
     bool enableHCHO = true;        // CB-HCHO-V4 formaldehyde sensor
     bool enableFan = true;         // Fan control system (PWM, Tacho, GLine)
     bool enableHistory = true;    // PSRAM-based sensor history system (temporarily disabled due to memory issues)
     bool enableModbus = true;
     bool autoReset = false;
+    bool useAveragedData = true;  // Use fast averages instead of live data in dashboard
+};
+
+// Network Configuration Structure
+struct NetworkConfig {
+    bool useDHCP = true;           // Use DHCP (true) or static IP (false)
+    char staticIP[16] = "192.168.1.100";
+    char gateway[16] = "192.168.1.1";
+    char subnet[16] = "255.255.255.0";
+    char dns1[16] = "8.8.8.8";
+    char dns2[16] = "8.8.4.4";
+    char wifiSSID[32] = "";
+    char wifiPassword[64] = "";
+    bool configValid = false;      // Flag to check if config was loaded
+};
+
+// MCP3424 Device Assignment Structure
+struct MCP3424DeviceAssignment {
+    uint8_t deviceIndex;           // Index of MCP3424 device (0-7)
+    char gasType[16];              // Gas type (e.g., "NO", "O3", "NO2", "CO", "SO2", "TGS1", "TGS2", "TGS3")
+    char description[32];          // Human readable description
+    bool enabled;                  // Whether this device is active
+};
+
+// MCP3424 Device Configuration
+struct MCP3424Config {
+    MCP3424DeviceAssignment devices[8];  // Up to 8 devices
+    uint8_t deviceCount;           // Number of active devices
+    bool configValid;              // Flag to check if config was loaded
 };
 
 // I2C Sensor Types
@@ -206,6 +236,7 @@ struct SPS30Data {
 // HCHO Sensor Data Structure - CB-HCHO-V4 formaldehyde sensor
 struct HCHOData {
     float hcho = 0.0;              // Formaldehyde concentration [mg/m³]
+    float hcho_ppb = 0.0;          // Formaldehyde concentration [ppb]
     bool valid = false;
     unsigned long lastUpdate = 0;
 };

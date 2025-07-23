@@ -68,7 +68,7 @@ void initializeIPS() {
 }
 
 void readIPSSensor() {
-    if (!config.enableIPS || !ipsSensorStatus) return;
+    if (!config.enableIPS ) return;
     
     static unsigned long lastReadTime = 0;
     static int consecutiveErrors = 0;
