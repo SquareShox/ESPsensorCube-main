@@ -109,7 +109,7 @@ String getAllSensorJson() {
     // Create JSON document with appropriate size for all sensor data
     DynamicJsonDocument doc(8192); // 8KB - zmniejszone dla stabilności
     
-    doc["t"] = millis() / 1000;
+    doc["t"] = millis();
     doc["uptime"] = millis() / 1000;
     doc["freeHeap"] = ESP.getFreeHeap();
     doc["wifiSignal"] = WiFi.RSSI();
@@ -128,6 +128,8 @@ String getAllSensorJson() {
     
     doc["psramSize"] = ESP.getPsramSize();
     doc["freePsram"] = ESP.getFreePsram();
+    doc["lowPowerMode"] = config.lowPowerMode;
+    doc["enablePushbullet"] = config.enablePushbullet;
     
     JsonObject sensorsEnabled = doc.createNestedObject("sensorsEnabled");
     sensorsEnabled["solar"] = solarSensorStatus;
@@ -227,10 +229,10 @@ String getAllSensorJson() {
     }
     
     // CO2 (SCD41)
-    JsonObject co2 = doc.createNestedObject("co2");
-    co2["valid"] = scd41SensorStatus;
+    JsonObject scd41 = doc.createNestedObject("scd41");
+    scd41["valid"] = scd41SensorStatus;
     if (scd41SensorStatus) {
-        co2["co2"] = i2cSensorData.co2;
+        scd41["co2"] = i2cSensorData.co2;
     }
     
     // MCP3424 (all devices)
@@ -245,10 +247,10 @@ String getAllSensorJson() {
         deviceObj["resolution"] = mcp3424Data.resolution;
         deviceObj["gain"] = mcp3424Data.gain;
         JsonObject channels = deviceObj.createNestedObject("channels");
-        channels["ch1"] = round(mcp3424Data.channels[device][0] * 1000000) / 1000000.0;
-        channels["ch2"] = round(mcp3424Data.channels[device][1] * 1000000) / 1000000.0;
-        channels["ch3"] = round(mcp3424Data.channels[device][2] * 1000000) / 1000000.0;
-        channels["ch4"] = round(mcp3424Data.channels[device][3] * 1000000) / 1000000.0;
+        channels["ch1"] = mcp3424Data.channels[device][0];
+        channels["ch2"] = mcp3424Data.channels[device][1];
+        channels["ch3"] = mcp3424Data.channels[device][2];
+        channels["ch4"] = mcp3424Data.channels[device][3];
     }
     
     // ADS1110
@@ -330,6 +332,22 @@ String getAllSensorJson() {
     fan["pwmValue"] = config.enableFan ? map(getFanDutyCycle(), 0, 100, 0, 255) : 0;
     fan["pwmFreq"] = 25000; // 25kHz
     fan["valid"] = config.enableFan;
+    
+    // Battery monitoring
+    extern BatteryData batteryData;
+    JsonObject battery = doc.createNestedObject("battery");
+    battery["valid"] = batteryData.valid;
+    if (batteryData.valid) {
+        battery["voltage"] = round(batteryData.voltage * 1000) / 1000.0;
+        battery["current"] = round(batteryData.current * 100) / 100.0;
+        battery["power"] = round(batteryData.power * 100) / 100.0;
+        battery["chargePercent"] = batteryData.chargePercent;
+        battery["isBatteryPowered"] = batteryData.isBatteryPowered;
+        battery["lowBattery"] = batteryData.lowBattery;
+        battery["criticalBattery"] = batteryData.criticalBattery;
+        battery["offPinState"] = digitalRead(OFF_PIN);
+        battery["age"] = (millis() - batteryData.lastUpdate) / 1000;
+    }
     
     // Calibration data (all sensors if enabled)
     JsonObject calibration = doc.createNestedObject("calibration");
@@ -421,6 +439,8 @@ String getAllSensorJson() {
         }
     }
     
+    doc["success"] = true;
+    
     String json;
     serializeJson(doc, json);
     return json;
@@ -453,6 +473,11 @@ void timeCheckTask(void *parameter) {
             if (now > 8 * 3600 * 2) { // > year 1970
                 timeInitialized = true;
                 safePrintln("Time synchronized: " + getFormattedTime() + " " + getFormattedDate());
+                if (config.enablePushbullet && strlen(config.pushbulletToken) > 0) {
+                    // Wait a bit for WiFi to stabilize
+                    //delay(5000);
+                    
+                }
             }
         }
         vTaskDelay(10000 / portTICK_PERIOD_MS); // Check every 10 seconds

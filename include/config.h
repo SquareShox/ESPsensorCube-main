@@ -9,6 +9,8 @@
 #define WIFI_TIMEOUT 20000
 #define CONNECTION_TIMEOUT (20 * 60 * 1000) // 20 minutes
 
+#define FIRMWARE_VERSION "1.0.0"
+
 // Pin Definitions
 #define WS2812_PIN 21
 // #define SOLAR_RX_PIN 7
@@ -25,8 +27,8 @@
 #define IPS_TX_PIN 4         // Serial1 TX for IPS
 #define HCHO_RX_PIN 9       // HCHO sensor UART RX pin
 #define HCHO_TX_PIN 10        // HCHO sensor UART TX pin
-#define TACHO_PIN 12
-#define PWM_PIN 1 
+#define TACHO_PIN 1
+#define PWM_PIN 12 
 #define GLine_PIN 11
 #define OFF_PIN 13
 
@@ -73,7 +75,7 @@ struct FeatureConfig {
     bool enableBME280 = false;     // Osobna kontrola BME280
     bool enableSCD41 = true;      // Osobna kontrola SCD41
     bool enableSHT40 = true;       // Osobna kontrola SHT40
-    bool enableSPS30 = false;       // Sensirion SPS30 particle sensor
+    bool enableSPS30 = true;       // Sensirion SPS30 particle sensor
     bool enableMCP3424 = true;     // 18-bit ADC converter
     bool enableADS1110 = true;     // 16-bit ADC converter
     bool enableINA219 = true;      // Current/voltage sensor
@@ -85,6 +87,9 @@ struct FeatureConfig {
     bool enableModbus = true;
     bool autoReset = false;
     bool useAveragedData = true;  // Use fast averages instead of live data in dashboard
+    bool lowPowerMode = false;    // Low power mode - disable LED and other power-consuming features
+    bool enablePushbullet = true; // Enable Pushbullet notifications
+    char pushbulletToken[64] = "o.vLzQdigI51uIXuohHUyxBfocSk5fYCPP"; // Pushbullet access token
 };
 
 // Network Configuration Structure
@@ -250,5 +255,44 @@ struct FanData {
     bool valid = false;
     unsigned long lastUpdate = 0;
 };
+
+// Battery monitoring structure
+struct BatteryData {
+    float voltage = 0.0;           // Battery voltage (V)
+    float current = 0.0;           // Current (mA) - negative = charging, positive = discharging
+    float power = 0.0;             // Power (mW)
+    uint8_t chargePercent = 0;     // Battery charge percentage (0-100%)
+    bool isBatteryPowered = false; // true = battery, false = external power
+    bool lowBattery = false;       // true when battery < 7.2V
+    bool criticalBattery = false;  // true when battery < 7.0V
+    bool valid = false;
+    unsigned long lastUpdate = 0;
+    
+    // Moving average for voltage (to avoid fluctuations)
+    static const int VOLTAGE_AVERAGE_SIZE = 10;
+    float voltageHistory[VOLTAGE_AVERAGE_SIZE];
+    int voltageIndex = 0;
+    bool voltageHistoryFull = false;
+};
+
+// Battery monitoring functions
+void initializeBatteryMonitoring();
+void updateBatteryStatus();
+float calculateBatteryPercentage(float voltage);
+bool isBatteryPowered(float current);
+void checkBatteryShutdown();
+void setOffPin(bool state);
+
+// Pushbullet notification function declarations
+void sendPushbulletNotification(const String& title, const String& message);
+void sendBatteryCriticalNotification();
+void sendSystemStartupNotification();
+String getUptimeString();
+
+// Time helper function declarations
+String getFormattedTime();
+String getFormattedDate();
+time_t getEpochTime();
+bool isTimeSet();
 
 #endif 

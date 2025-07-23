@@ -68,14 +68,33 @@ extern HCHOData getHCHOSlowAverage();
 void handleGetStatus(AsyncWebSocketClient* client, JsonDocument& doc) {
     DynamicJsonDocument response(2048);
     response["cmd"] = "status";
+    response["t"] = millis();
     response["uptime"] = millis() / 1000;
     response["freeHeap"] = ESP.getFreeHeap();
     response["freePsram"] = ESP.getFreePsram();
     response["wifiRSSI"] = WiFi.RSSI();
     response["wifiConnected"] = WiFi.status() == WL_CONNECTED;
     
+    // Add date and time
+    struct tm timeinfo;
+    if (getLocalTime(&timeinfo)) {
+        char timeStr[20];
+        strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
+        response["time"] = String(timeStr);
+        
+        char dateStr[20];
+        strftime(dateStr, sizeof(dateStr), "%d/%m/%Y", &timeinfo);
+        response["date"] = String(dateStr);
+    } else {
+        response["time"] = "00:00:00";
+        response["date"] = "01/01/2024";
+    }
+    
+    // System data
+    JsonObject data = response.createNestedObject("data");
+    
     // Sensor status
-    JsonObject sensors = response.createNestedObject("sensors");
+    JsonObject sensors = data.createNestedObject("sensors");
     sensors["solar"] = solarSensorStatus;
     sensors["opcn3"] = opcn3SensorStatus;
     sensors["i2c"] = i2cSensorStatus;
@@ -89,11 +108,14 @@ void handleGetStatus(AsyncWebSocketClient* client, JsonDocument& doc) {
     sensors["ips"] = ipsSensorStatus;
     
     // Configuration
-    JsonObject configObj = response.createNestedObject("config");
+    JsonObject configObj = data.createNestedObject("config");
     configObj["enableWiFi"] = config.enableWiFi;
     configObj["enableWebServer"] = config.enableWebServer;
     configObj["enableHistory"] = config.enableHistory;
     configObj["enableModbus"] = config.enableModbus;
+    configObj["lowPowerMode"] = config.lowPowerMode;
+    
+    response["success"] = true;
     
     String responseStr;
     serializeJson(response, responseStr);
@@ -105,6 +127,22 @@ void handleGetSensorData(AsyncWebSocketClient* client, JsonDocument& doc) {
     DynamicJsonDocument response(4096);
     response["cmd"] = "sensorData";
     response["sensor"] = sensorType;
+    response["t"] = millis();
+    
+    // Add date and time
+    struct tm timeinfo;
+    if (getLocalTime(&timeinfo)) {
+        char timeStr[20];
+        strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
+        response["time"] = String(timeStr);
+        
+        char dateStr[20];
+        strftime(dateStr, sizeof(dateStr), "%d/%m/%Y", &timeinfo);
+        response["date"] = String(dateStr);
+    } else {
+        response["time"] = "00:00:00";
+        response["date"] = "01/01/2024";
+    }
     
     if (sensorType == "all") {
         // Wszystkie dane sensorów
@@ -132,16 +170,16 @@ void handleGetSensorData(AsyncWebSocketClient* client, JsonDocument& doc) {
         // SPS30
         if (sps30SensorStatus && sps30Data.valid) {
             JsonObject sps30 = data.createNestedObject("sps30");
-            sps30["pm1_0"] = sps30Data.pm1_0;
-            sps30["pm2_5"] = sps30Data.pm2_5;
-            sps30["pm4_0"] = sps30Data.pm4_0;
-            sps30["pm10"] = sps30Data.pm10;
-            sps30["nc0_5"] = sps30Data.nc0_5;
-            sps30["nc1_0"] = sps30Data.nc1_0;
-            sps30["nc2_5"] = sps30Data.nc2_5;
-            sps30["nc4_0"] = sps30Data.nc4_0;
-            sps30["nc10"] = sps30Data.nc10;
-            sps30["typical_particle_size"] = sps30Data.typical_particle_size;
+            sps30["PM1"] = sps30Data.pm1_0;
+            sps30["PM25"] = sps30Data.pm2_5;
+            sps30["PM4"] = sps30Data.pm4_0;
+            sps30["PM10"] = sps30Data.pm10;
+            sps30["NC05"] = sps30Data.nc0_5;
+            sps30["NC1"] = sps30Data.nc1_0;
+            sps30["NC25"] = sps30Data.nc2_5;
+            sps30["NC4"] = sps30Data.nc4_0;
+            sps30["NC10"] = sps30Data.nc10;
+            sps30["TPS"] = sps30Data.typical_particle_size;
             sps30["valid"] = true;
         }
         
@@ -273,7 +311,12 @@ void handleGetSensorData(AsyncWebSocketClient* client, JsonDocument& doc) {
             data["valid"] = true;
         } else {
             response["error"] = "Sensor not available or invalid: " + sensorType;
+            response["success"] = false;
         }
+    }
+    
+    if (!response.containsKey("success")) {
+        response["success"] = true;
     }
     
     String responseStr;
@@ -312,24 +355,75 @@ void handleGetHistory(AsyncWebSocketClient* client, JsonDocument& doc) {
     String jsonResponse;
     size_t samples = getHistoricalData(sensorType, timeRange, jsonResponse, fromTime, toTime, sampleType);
     
+    safePrintln("History request: " + sensorType + " " + timeRange + " " + sampleType + " samples: " + String(samples));
+    safePrintln("JSON response length: " + String(jsonResponse.length()));
+    safePrintln("History enabled: " + String(config.enableHistory));
+    safePrintln("History initialized: " + String(historyManager.isInitialized()));
+    safePrintln("Free heap: " + String(ESP.getFreeHeap()));
+    
     DynamicJsonDocument response(2048);
     response["cmd"] = "history";
     response["sensor"] = sensorType;
     response["timeRange"] = timeRange;
-    response["sampleType"] = sampleType; // Dodaj informację o typie próbek
+    response["sampleType"] = sampleType;
     response["fromTime"] = fromTime;
     response["toTime"] = toTime;
     response["samples"] = samples;
+    response["t"] = millis();
+    
+    // Add date and time
+    struct tm timeinfo;
+    if (getLocalTime(&timeinfo)) {
+        char timeStr[20];
+        strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
+        response["time"] = String(timeStr);
+        
+        char dateStr[20];
+        strftime(dateStr, sizeof(dateStr), "%d/%m/%Y", &timeinfo);
+        response["date"] = String(dateStr);
+    } else {
+        response["time"] = "00:00:00";
+        response["date"] = "01/01/2024";
+    }
     
 
     
-    if (samples > 0) {
-        // Parse existing JSON response
-        DynamicJsonDocument dataDoc(2048);
-        deserializeJson(dataDoc, jsonResponse);
-        response["data"] = dataDoc["data"];
+    // Parse existing JSON response to check if data exists
+    DynamicJsonDocument dataDoc(4096);
+    DeserializationError parseError = deserializeJson(dataDoc, jsonResponse);
+    
+    safePrintln("JSON parse error: " + String(parseError.c_str()));
+    safePrintln("JSON response preview: " + jsonResponse.substring(0, 200) + "...");
+    
+    if (!parseError) {
+        if (dataDoc.containsKey("error")) {
+            // getHistoricalData returned an error
+            response["data"] = JsonArray();
+            response["success"] = false;
+            response["error"] = dataDoc["error"].as<String>();
+            safePrintln("History error from getHistoricalData: " + dataDoc["error"].as<String>());
+        } else if (dataDoc.containsKey("data") && dataDoc["data"].is<JsonArray>()) {
+            JsonArray dataArray = dataDoc["data"];
+            response["data"] = dataArray;
+            if (dataArray.size() > 0) {
+                response["success"] = true;
+                safePrintln("History success: " + String(dataArray.size()) + " samples from JSON");
+            } else {
+                response["success"] = false;
+                response["error"] = "No data in response array";
+                safePrintln("History error: Empty data array");
+            }
+        } else {
+            response["data"] = JsonArray();
+            response["success"] = false;
+            response["error"] = "No data field in JSON response";
+            safePrintln("History error: No data field in response");
+        }
     } else {
-        response["error"] = "No data available";
+        response["data"] = JsonArray();
+        response["success"] = false;
+        response["error"] = "JSON parse error: " + String(parseError.c_str());
+        safePrintln("History error: JSON parse failed - " + String(parseError.c_str()));
     }
     
     String responseStr;
@@ -340,11 +434,28 @@ void handleGetHistory(AsyncWebSocketClient* client, JsonDocument& doc) {
 void handleGetHistoryInfo(AsyncWebSocketClient* client, JsonDocument& doc) {
     DynamicJsonDocument response(2048);
     response["cmd"] = "historyInfo";
+    response["t"] = millis();
+    
+    // Add date and time
+    struct tm timeinfo;
+    if (getLocalTime(&timeinfo)) {
+        char timeStr[20];
+        strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
+        response["time"] = String(timeStr);
+        
+        char dateStr[20];
+        strftime(dateStr, sizeof(dateStr), "%d/%m/%Y", &timeinfo);
+        response["date"] = String(dateStr);
+    } else {
+        response["time"] = "00:00:00";
+        response["date"] = "01/01/2024";
+    }
     
     // Sprawdź czy historia jest włączona
     if (!config.enableHistory) {
         response["enabled"] = false;
         response["error"] = "History system is disabled";
+        response["success"] = false;
     } else {
         response["enabled"] = true;
         response["initialized"] = historyManager.isInitialized();
@@ -393,6 +504,12 @@ void handleGetHistoryInfo(AsyncWebSocketClient* client, JsonDocument& doc) {
                 power["slowSamples"] = historyManager.getINA219History()->getSlowCount();
             }
             
+            if (config.enableINA219 && historyManager.getBatteryHistory()) {
+                JsonObject battery = sensors.createNestedObject("battery");
+                battery["fastSamples"] = historyManager.getBatteryHistory()->getFastCount();
+                battery["slowSamples"] = historyManager.getBatteryHistory()->getSlowCount();
+            }
+            
             if (config.enableFan && historyManager.getFanHistory()) {
                 JsonObject fan = sensors.createNestedObject("fan");
                 fan["fastSamples"] = historyManager.getFanHistory()->getFastCount();
@@ -400,7 +517,12 @@ void handleGetHistoryInfo(AsyncWebSocketClient* client, JsonDocument& doc) {
             }
         } else {
             response["error"] = "History system not initialized";
+            response["success"] = false;
         }
+    }
+    
+    if (!response.containsKey("success")) {
+        response["success"] = true;
     }
     
     String responseStr;
@@ -525,16 +647,16 @@ void handleGetAverages(AsyncWebSocketClient* client, JsonDocument& doc) {
             SPS30Data avg = getSPS30SlowAverage();
             if (avg.valid) {
                 JsonObject sps30 = data.createNestedObject("sps30");
-                sps30["pm1_0"] = avg.pm1_0;
-                sps30["pm2_5"] = avg.pm2_5;
-                sps30["pm4_0"] = avg.pm4_0;
-                sps30["pm10"] = avg.pm10;
-                sps30["nc0_5"] = avg.nc0_5;
-                sps30["nc1_0"] = avg.nc1_0;
-                sps30["nc2_5"] = avg.nc2_5;
-                sps30["nc4_0"] = avg.nc4_0;
-                sps30["nc10"] = avg.nc10;
-                sps30["typical_particle_size"] = avg.typical_particle_size;
+                sps30["PM1"] = avg.pm1_0;
+                sps30["PM25"] = avg.pm2_5;
+                sps30["PM4"] = avg.pm4_0;
+                sps30["PM10"] = avg.pm10;
+                sps30["NC05"] = avg.nc0_5;
+                sps30["NC1"] = avg.nc1_0;
+                sps30["NC25"] = avg.nc2_5;
+                sps30["NC4"] = avg.nc4_0;
+                sps30["NC10"] = avg.nc10;
+                sps30["TPS"] = avg.typical_particle_size;
                 sps30["valid"] = true;
             }
         }
@@ -705,6 +827,23 @@ void handleGetAverages(AsyncWebSocketClient* client, JsonDocument& doc) {
         }
     }
     
+    // Battery monitoring
+    if (sensorType == "battery" || sensorType == "all") {
+        extern BatteryData batteryData;
+        if (batteryData.valid) {
+            JsonObject battery = data.createNestedObject("battery");
+            battery["voltage"] = round(batteryData.voltage * 1000) / 1000.0;
+            battery["current"] = round(batteryData.current * 100) / 100.0;
+            battery["power"] = round(batteryData.power * 100) / 100.0;
+            battery["chargePercent"] = batteryData.chargePercent;
+            battery["isBatteryPowered"] = batteryData.isBatteryPowered;
+            battery["lowBattery"] = batteryData.lowBattery;
+            battery["criticalBattery"] = batteryData.criticalBattery;
+            battery["offPinState"] = digitalRead(OFF_PIN);
+            battery["valid"] = true;
+        }
+    }
+    
     String responseStr;
     serializeJson(response, responseStr);
     client->text(responseStr);
@@ -739,13 +878,16 @@ void handleSetConfig(AsyncWebSocketClient* client, JsonDocument& doc) {
             if (saveWiFiConfig(ssid.c_str(), password.c_str())) {
                 response["success"] = true;
                 response["message"] = "WiFi configuration saved";
+                response["cmd"] = "setWiFiConfig";
             } else {
                 response["success"] = false;
                 response["error"] = "Failed to save WiFi config";
+                response["cmd"] = "setWiFiConfig";
             }
         } else {
             response["success"] = false;
             response["error"] = "SSID cannot be empty";
+            response["cmd"] = "setWiFiConfig";
         }
     }
     
@@ -760,9 +902,11 @@ void handleSetConfig(AsyncWebSocketClient* client, JsonDocument& doc) {
         if (saveNetworkConfig(networkConfig)) {
             response["success"] = true;
             response["message"] = "Network configuration saved";
+            response["cmd"] = "setNetworkConfig";
         } else {
             response["success"] = false;
             response["error"] = "Failed to save network config";
+            response["cmd"] = "setNetworkConfig";
         }
     }
     
@@ -796,6 +940,100 @@ void handleSetConfig(AsyncWebSocketClient* client, JsonDocument& doc) {
         response["enableINA219"] = config.enableINA219;
     }
     
+    if (doc.containsKey("enableSHT30")) {
+        config.enableSHT30 = doc["enableSHT30"];
+        response["enableSHT30"] = config.enableSHT30;
+    }
+    
+    if (doc.containsKey("enableBME280")) {
+        config.enableBME280 = doc["enableBME280"];
+        response["enableBME280"] = config.enableBME280;
+    }
+    
+    if (doc.containsKey("enableSCD41")) {
+        config.enableSCD41 = doc["enableSCD41"];
+        response["enableSCD41"] = config.enableSCD41;
+    }
+    
+    if (doc.containsKey("enableI2CSensors")) {
+        config.enableI2CSensors = doc["enableI2CSensors"];
+        response["enableI2CSensors"] = config.enableI2CSensors;
+    }
+    
+    if (doc.containsKey("enableMCP3424")) {
+        config.enableMCP3424 = doc["enableMCP3424"];
+        response["enableMCP3424"] = config.enableMCP3424;
+    }
+    
+    if (doc.containsKey("enableADS1110")) {
+        config.enableADS1110 = doc["enableADS1110"];
+        response["enableADS1110"] = config.enableADS1110;
+    }
+    
+    if (doc.containsKey("enableOPCN3Sensor")) {
+        config.enableOPCN3Sensor = doc["enableOPCN3Sensor"];
+        response["enableOPCN3Sensor"] = config.enableOPCN3Sensor;
+    }
+    
+    if (doc.containsKey("enableIPS")) {
+        config.enableIPS = doc["enableIPS"];
+        response["enableIPS"] = config.enableIPS;
+    }
+    
+    if (doc.containsKey("enableIPSDebug")) {
+        config.enableIPSDebug = doc["enableIPSDebug"];
+        response["enableIPSDebug"] = config.enableIPSDebug;
+    }
+    
+    if (doc.containsKey("enableWebServer")) {
+        config.enableWebServer = doc["enableWebServer"];
+        response["enableWebServer"] = config.enableWebServer;
+    }
+    
+    if (doc.containsKey("enableFan")) {
+        config.enableFan = doc["enableFan"];
+        response["enableFan"] = config.enableFan;
+    }
+    
+    if (doc.containsKey("autoReset")) {
+        config.autoReset = doc["autoReset"];
+        response["autoReset"] = config.autoReset;
+    }
+    
+    if (doc.containsKey("lowPowerMode")) {
+        config.lowPowerMode = doc["lowPowerMode"];
+        response["lowPowerMode"] = config.lowPowerMode;
+    }
+    
+    if (doc.containsKey("enablePushbullet")) {
+        config.enablePushbullet = doc["enablePushbullet"];
+        response["enablePushbullet"] = config.enablePushbullet;
+        
+        // Save configuration to file
+        if (saveSystemConfig(config)) {
+            response["success"] = true;
+            response["message"] = "Pushbullet setting saved";
+        } else {
+            response["success"] = false;
+            response["error"] = "Failed to save configuration";
+        }
+    }
+    
+    if (doc.containsKey("pushbulletToken")) {
+        strncpy(config.pushbulletToken, doc["pushbulletToken"] | "", sizeof(config.pushbulletToken) - 1);
+        config.pushbulletToken[sizeof(config.pushbulletToken) - 1] = '\0';
+        response["pushbulletToken"] = config.pushbulletToken;
+        
+        // Save configuration to file
+        if (saveSystemConfig(config)) {
+            response["success"] = true;
+            response["message"] = "Pushbullet token saved";
+        } else {
+            response["success"] = false;
+            response["error"] = "Failed to save configuration";
+        }
+    }
+    
     response["success"] = true;
     response["message"] = "Configuration updated";
     
@@ -807,6 +1045,22 @@ void handleSetConfig(AsyncWebSocketClient* client, JsonDocument& doc) {
 void handleGetConfig(AsyncWebSocketClient* client, JsonDocument& doc) {
     DynamicJsonDocument response(2048);
     response["cmd"] = "getConfig";
+    response["t"] = millis();
+    
+    // Add date and time
+    struct tm timeinfo;
+    if (getLocalTime(&timeinfo)) {
+        char timeStr[20];
+        strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
+        response["time"] = String(timeStr);
+        
+        char dateStr[20];
+        strftime(dateStr, sizeof(dateStr), "%d/%m/%Y", &timeinfo);
+        response["date"] = String(dateStr);
+    } else {
+        response["time"] = "00:00:00";
+        response["date"] = "01/01/2024";
+    }
     
     JsonObject configObj = response.createNestedObject("config");
     configObj["enableWiFi"] = config.enableWiFi;
@@ -828,7 +1082,13 @@ void handleGetConfig(AsyncWebSocketClient* client, JsonDocument& doc) {
     configObj["enableIPS"] = config.enableIPS;
     configObj["enableIPSDebug"] = config.enableIPSDebug;
     configObj["enableHCHO"] = config.enableHCHO;
+    configObj["enableFan"] = config.enableFan;
     configObj["autoReset"] = config.autoReset;
+    configObj["lowPowerMode"] = config.lowPowerMode;
+    configObj["enablePushbullet"] = config.enablePushbullet;
+    configObj["pushbulletToken"] = config.pushbulletToken;
+    
+    response["success"] = true;
     
     String responseStr;
     serializeJson(response, responseStr);
@@ -841,6 +1101,22 @@ void handleSystemCommand(AsyncWebSocketClient* client, JsonDocument& doc) {
     DynamicJsonDocument response(1024);
     response["cmd"] = "system";
     response["command"] = command;
+    response["t"] = millis();
+    
+    // Add date and time
+    struct tm timeinfo;
+    if (getLocalTime(&timeinfo)) {
+        char timeStr[20];
+        strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
+        response["time"] = String(timeStr);
+        
+        char dateStr[20];
+        strftime(dateStr, sizeof(dateStr), "%d/%m/%Y", &timeinfo);
+        response["date"] = String(dateStr);
+    } else {
+        response["time"] = "00:00:00";
+        response["date"] = "01/01/2024";
+    }
     
     if (command == "restart") {
         response["success"] = true;
@@ -871,6 +1147,42 @@ void handleSystemCommand(AsyncWebSocketClient* client, JsonDocument& doc) {
         response["psramSize"] = ESP.getPsramSize();
         response["uptime"] = millis() / 1000;
         
+    } else if (command == "lowPowerOn") {
+        config.lowPowerMode = true;
+        response["success"] = true;
+        response["message"] = "Low power mode enabled";
+        response["lowPowerMode"] = true;
+        
+    } else if (command == "lowPowerOff") {
+        config.lowPowerMode = false;
+        response["success"] = true;
+        response["message"] = "Low power mode disabled";
+        response["lowPowerMode"] = false;
+        
+    } else if (command == "pushbulletTest") {
+        if (config.enablePushbullet && strlen(config.pushbulletToken) > 0) {
+            // Send test notification
+            sendPushbulletNotification("🧪 Test Notification", "This is a test notification from ESP32 Sensor Cube\nTime: " + getFormattedTime() + "\nUptime: " + getUptimeString());
+            
+            response["success"] = true;
+            response["message"] = "Test notification sent";
+        } else {
+            response["success"] = false;
+            response["message"] = "Pushbullet not configured";
+        }
+        
+    } else if (command == "pushbulletBatteryTest") {
+        if (config.enablePushbullet && strlen(config.pushbulletToken) > 0) {
+            // Send battery critical test notification
+            sendBatteryCriticalNotification();
+            
+            response["success"] = true;
+            response["message"] = "Battery critical test notification sent";
+        } else {
+            response["success"] = false;
+            response["message"] = "Pushbullet not configured";
+        }
+        
     } else if (command == "getNetworkConfig") {
         response["success"] = true;
         response["cmd"] = "networkConfig";
@@ -899,6 +1211,7 @@ void handleSystemCommand(AsyncWebSocketClient* client, JsonDocument& doc) {
         
     } else if (command == "testWiFi") {
         response["success"] = true;
+        response["cmd"] = "testWiFi";
         response["wifiConnected"] = WiFi.status() == WL_CONNECTED;
         response["ssid"] = WiFi.SSID();
         response["rssi"] = WiFi.RSSI();
@@ -926,18 +1239,22 @@ void handleSystemCommand(AsyncWebSocketClient* client, JsonDocument& doc) {
         if (applyNetworkConfig()) {
             response["success"] = true;
             response["message"] = "Network configuration applied successfully";
+            response["cmd"] = "applyNetworkConfig";
         } else {
             response["success"] = false;
             response["error"] = "Failed to apply network configuration";
+            response["cmd"] = "applyNetworkConfig";
         }
         
     } else if (command == "resetNetworkConfig") {
         if (deleteAllConfig()) {
             response["success"] = true;
             response["message"] = "All network configuration reset";
+            response["cmd"] = "resetNetworkConfig";
         } else {
             response["success"] = false;
             response["error"] = "Failed to reset network configuration";
+            response["cmd"] = "resetNetworkConfig";
         }
         
     } else if (command == "getMCP3424Config") {
@@ -1187,6 +1504,135 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, void* arg, uint8_t* da
         handleSystemCommand(client, doc);
     } else if (cmd == "calibration") {
         handleCalibrationCommand(client, doc);
+    } else if (cmd == "getNetworkConfig") {
+        // Handle network config request
+        DynamicJsonDocument response(2048);
+        response["success"] = true;
+        response["cmd"] = "networkConfig";
+        
+        // Add network configuration data
+        response["useDHCP"] = networkConfig.useDHCP;
+        response["staticIP"] = networkConfig.staticIP;
+        response["gateway"] = networkConfig.gateway;
+        response["subnet"] = networkConfig.subnet;
+        response["dns1"] = networkConfig.dns1;
+        response["dns2"] = networkConfig.dns2;
+        response["configValid"] = networkConfig.configValid;
+        
+        // Add current WiFi status
+        response["currentIP"] = WiFi.localIP().toString();
+        response["currentSSID"] = WiFi.SSID();
+        response["wifiConnected"] = WiFi.status() == WL_CONNECTED;
+        response["wifiSignal"] = WiFi.RSSI();
+        
+        // Add WiFi credentials (if available)
+        char ssid[32], password[64];
+        if (loadWiFiConfig(ssid, password, sizeof(ssid), sizeof(password))) {
+            response["wifiSSID"] = ssid;
+            response["wifiPassword"] = password;
+        }
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+        
+    } else if (cmd == "setWiFiConfig") {
+        // Handle WiFi config save
+        String ssid = doc["ssid"] | "";
+        String password = doc["password"] | "";
+        
+        DynamicJsonDocument response(1024);
+        response["cmd"] = "setWiFiConfig";
+        
+        if (ssid.length() > 0) {
+            if (saveWiFiConfig(ssid.c_str(), password.c_str())) {
+                response["success"] = true;
+                response["message"] = "WiFi configuration saved";
+            } else {
+                response["success"] = false;
+                response["error"] = "Failed to save WiFi config";
+            }
+        } else {
+            response["success"] = false;
+            response["error"] = "SSID cannot be empty";
+        }
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+        
+    } else if (cmd == "setNetworkConfig") {
+        // Handle network config save
+        DynamicJsonDocument response(1024);
+        response["cmd"] = "setNetworkConfig";
+        
+        networkConfig.useDHCP = doc["useDHCP"] | true;
+        strlcpy(networkConfig.staticIP, doc["staticIP"] | "192.168.1.100", sizeof(networkConfig.staticIP));
+        strlcpy(networkConfig.gateway, doc["gateway"] | "192.168.1.1", sizeof(networkConfig.gateway));
+        strlcpy(networkConfig.subnet, doc["subnet"] | "255.255.255.0", sizeof(networkConfig.subnet));
+        strlcpy(networkConfig.dns1, doc["dns1"] | "8.8.8.8", sizeof(networkConfig.dns1));
+        strlcpy(networkConfig.dns2, doc["dns2"] | "8.8.4.4", sizeof(networkConfig.dns2));
+        
+        if (saveNetworkConfig(networkConfig)) {
+            response["success"] = true;
+            response["message"] = "Network configuration saved";
+        } else {
+            response["success"] = false;
+            response["error"] = "Failed to save network config";
+        }
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+        
+    } else if (cmd == "testWiFi") {
+        // Handle WiFi test
+        DynamicJsonDocument response(1024);
+        response["success"] = true;
+        response["cmd"] = "testWiFi";
+        response["wifiConnected"] = WiFi.status() == WL_CONNECTED;
+        response["ssid"] = WiFi.SSID();
+        response["rssi"] = WiFi.RSSI();
+        response["localIP"] = WiFi.localIP().toString();
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+        
+    } else if (cmd == "applyNetworkConfig") {
+        // Handle network config apply
+        DynamicJsonDocument response(1024);
+        response["cmd"] = "applyNetworkConfig";
+        
+        if (applyNetworkConfig()) {
+            response["success"] = true;
+            response["message"] = "Network configuration applied successfully";
+        } else {
+            response["success"] = false;
+            response["error"] = "Failed to apply network configuration";
+        }
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+        
+    } else if (cmd == "resetNetworkConfig") {
+        // Handle network config reset
+        DynamicJsonDocument response(1024);
+        response["cmd"] = "resetNetworkConfig";
+        
+        if (deleteAllConfig()) {
+            response["success"] = true;
+            response["message"] = "All network configuration reset";
+        } else {
+            response["success"] = false;
+            response["error"] = "Failed to reset network configuration";
+        }
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+        
     } else if (cmd == "getSensorKeys") {
         // Handle sensor keys request - returns JSON structure with keys instead of values
         safePrintln("WebSocket: getSensorKeys requested");
@@ -1307,6 +1753,18 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, void* arg, uint8_t* da
         fan["glineEnabled"] = "FAN_GLINE_ENABLED";
         fan["pwmValue"] = "FAN_PWM_VALUE";
         fan["valid"] = "FAN_VALID";
+        
+        // Battery monitoring
+        JsonObject battery = data.createNestedObject("battery");
+        battery["valid"] = "BATTERY_VALID";
+        battery["voltage"] = "BATTERY_VOLTAGE";
+        battery["current"] = "BATTERY_CURRENT";
+        battery["power"] = "BATTERY_POWER";
+        battery["chargePercent"] = "BATTERY_CHARGE_PERCENT";
+        battery["isBatteryPowered"] = "BATTERY_IS_BATTERY_POWERED";
+        battery["lowBattery"] = "BATTERY_LOW_BATTERY";
+        battery["criticalBattery"] = "BATTERY_CRITICAL_BATTERY";
+        battery["offPinState"] = "BATTERY_OFF_PIN_STATE";
         
         String responseStr;
         serializeJson(response, responseStr);

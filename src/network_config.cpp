@@ -14,10 +14,115 @@ MCP3424Config mcp3424Config;
 const char* NETWORK_CONFIG_FILE = "/network.json";
 const char* WIFI_CONFIG_FILE = "/wifi.json";
 const char* MCP3424_CONFIG_FILE = "/mcp3424.json";
+const char* SYSTEM_CONFIG_FILE = "/system.json";
 
 // Forward declarations
 void safePrint(const String& message);
 void safePrintln(const String& message);
+
+// Check and repair LittleFS if needed
+bool checkAndRepairLittleFS() {
+    safePrintln("Checking LittleFS status...");
+    
+    // Try to mount
+    if (!LittleFS.begin()) {
+        safePrintln("LittleFS not mounted, attempting to mount...");
+        if (!LittleFS.begin(true)) {
+            safePrintln("Failed to mount LittleFS - filesystem may be corrupted");
+            return false;
+        }
+    }
+    
+    // Check space
+    size_t totalBytes = LittleFS.totalBytes();
+    size_t usedBytes = LittleFS.usedBytes();
+    size_t freeBytes = totalBytes - usedBytes;
+    
+    safePrintln("LittleFS status:");
+    safePrintln("- Total: " + String(totalBytes) + " bytes");
+    safePrintln("- Used: " + String(usedBytes) + " bytes");
+    safePrintln("- Free: " + String(freeBytes) + " bytes");
+    
+    if (freeBytes < 1024) {
+        safePrintln("WARNING: Less than 1KB free space!");
+        return false;
+    }
+    
+    // Test write
+    File testFile = LittleFS.open("/test_repair.txt", "w");
+    if (!testFile) {
+        safePrintln("ERROR: Cannot write to LittleFS");
+        return false;
+    }
+    testFile.println("Test");
+    testFile.close();
+    
+    // Test read
+    testFile = LittleFS.open("/test_repair.txt", "r");
+    if (!testFile) {
+        safePrintln("ERROR: Cannot read from LittleFS");
+        LittleFS.remove("/test_repair.txt");
+        return false;
+    }
+    testFile.close();
+    LittleFS.remove("/test_repair.txt");
+    
+    safePrintln("LittleFS check: PASSED");
+    return true;
+}
+
+// Clean and repair LittleFS
+bool cleanLittleFS() {
+    safePrintln("Starting LittleFS cleanup...");
+    
+    // List all files before cleanup
+    safePrintln("Files before cleanup:");
+    File root = LittleFS.open("/");
+    File file = root.openNextFile();
+    size_t totalFiles = 0;
+    size_t totalSize = 0;
+    while (file) {
+        safePrintln("  " + String(file.name()) + " (" + String(file.size()) + " bytes)");
+        totalSize += file.size();
+        totalFiles++;
+        file = root.openNextFile();
+    }
+    safePrintln("Total files: " + String(totalFiles) + ", Total size: " + String(totalSize) + " bytes");
+    
+    // Check for corrupted files and remove them
+    bool cleanupNeeded = false;
+    root = LittleFS.open("/");
+    file = root.openNextFile();
+    while (file) {
+        String fileName = file.name();
+        size_t fileSize = file.size();
+        file.close();
+        
+        // Try to read the file to check if it's corrupted
+        File testRead = LittleFS.open(fileName, "r");
+        if (!testRead) {
+            safePrintln("Corrupted file detected: " + fileName);
+            if (LittleFS.remove(fileName)) {
+                safePrintln("Removed corrupted file: " + fileName);
+                cleanupNeeded = true;
+            } else {
+                safePrintln("Failed to remove corrupted file: " + fileName);
+            }
+        } else {
+            testRead.close();
+        }
+        
+        file = root.openNextFile();
+    }
+    
+    if (cleanupNeeded) {
+        safePrintln("LittleFS cleanup completed");
+    } else {
+        safePrintln("No cleanup needed");
+    }
+    
+    return true;
+}
 
 // Initialize LittleFS
 bool initLittleFS() {
@@ -25,15 +130,48 @@ bool initLittleFS() {
         safePrintln("LittleFS mount failed");
         return false;
     }
+    
+    // Print LittleFS information
+    size_t totalBytes = LittleFS.totalBytes();
+    size_t usedBytes = LittleFS.usedBytes();
+    size_t freeBytes = totalBytes - usedBytes;
+    
     safePrintln("LittleFS mounted successfully");
+    safePrintln("LittleFS info:");
+    safePrintln("- Total space: " + String(totalBytes) + " bytes");
+    safePrintln("- Used space: " + String(usedBytes) + " bytes");
+    safePrintln("- Free space: " + String(freeBytes) + " bytes");
+    
+    // Test write capability
+    File testFile = LittleFS.open("/test_write.txt", "w");
+    if (testFile) {
+        testFile.println("Test write successful");
+        testFile.close();
+        LittleFS.remove("/test_write.txt");
+        safePrintln("LittleFS write test: PASSED");
+    } else {
+        safePrintln("LittleFS write test: FAILED");
+        return false;
+    }
+    
     return true;
 }
 
 // Save network configuration to LittleFS
 bool saveNetworkConfig(const NetworkConfig& config) {
+    // Check if LittleFS is mounted
+    if (!LittleFS.begin()) {
+        safePrintln("LittleFS not mounted, attempting to mount...");
+        if (!LittleFS.begin(true)) {
+            safePrintln("Failed to mount LittleFS for network config save");
+            return false;
+        }
+    }
+    
     File file = LittleFS.open(NETWORK_CONFIG_FILE, "w");
     if (!file) {
         safePrintln("Failed to open network config file for writing");
+        safePrintln("LittleFS status: " + String(LittleFS.usedBytes()) + "/" + String(LittleFS.totalBytes()) + " bytes");
         return false;
     }
     
@@ -94,9 +232,67 @@ bool loadNetworkConfig(NetworkConfig& config) {
 
 // Save WiFi configuration to LittleFS
 bool saveWiFiConfig(const char* ssid, const char* password) {
+    // Check if LittleFS is mounted
+    if (!LittleFS.begin()) {
+        safePrintln("LittleFS not mounted, attempting to mount...");
+        if (!LittleFS.begin(true)) {
+            safePrintln("Failed to mount LittleFS for WiFi config save");
+            return false;
+        }
+    }
+    
+    // Check if we can create/write files
+    File testFile = LittleFS.open("/test.txt", "w");
+    if (!testFile) {
+        safePrintln("Cannot create test file - LittleFS write permission issue");
+        safePrintln("Free space: " + String(LittleFS.totalBytes() - LittleFS.usedBytes()) + " bytes");
+        
+        // Try to format and remount
+        safePrintln("Attempting to format LittleFS...");
+        LittleFS.end();
+        if (LittleFS.begin(true)) {
+            safePrintln("LittleFS formatted and remounted successfully");
+        } else {
+            safePrintln("Failed to format LittleFS");
+            return false;
+        }
+    } else {
+        testFile.close();
+        LittleFS.remove("/test.txt");
+    }
+    
+    // Debug: Print file path being used
+    safePrintln("Attempting to create WiFi config file: " + String(WIFI_CONFIG_FILE));
+    safePrintln("LittleFS mounted: " + String(LittleFS.totalBytes() > 0 ? "YES" : "NO"));
+    
+    // Try to create WiFi config file with retry
     File file = LittleFS.open(WIFI_CONFIG_FILE, "w");
     if (!file) {
-        safePrintln("Failed to open WiFi config file for writing");
+        safePrintln("Failed to open WiFi config file for writing: " + String(WIFI_CONFIG_FILE));
+        safePrintln("LittleFS status: " + String(LittleFS.usedBytes()) + "/" + String(LittleFS.totalBytes()) + " bytes");
+        safePrintln("Free space: " + String(LittleFS.totalBytes() - LittleFS.usedBytes()) + " bytes");
+        
+        // List files to debug
+        safePrintln("LittleFS files:");
+        File root = LittleFS.open("/");
+        File fileItem = root.openNextFile();
+        while (fileItem) {
+            safePrintln("  " + String(fileItem.name()) + " (" + String(fileItem.size()) + " bytes)");
+            fileItem = root.openNextFile();
+        }
+        
+        // Try alternative path
+        safePrintln("Trying alternative file creation...");
+        File altFile = LittleFS.open("/wificonfig.txt", "w");
+        if (altFile) {
+            altFile.println("test");
+            altFile.close();
+            LittleFS.remove("/wificonfig.txt");
+            safePrintln("Alternative file creation successful");
+        } else {
+            safePrintln("Alternative file creation also failed");
+        }
+        
         return false;
     }
     
@@ -212,6 +408,13 @@ bool deleteAllConfig() {
         success &= LittleFS.remove(WIFI_CONFIG_FILE);
     }
     
+    if (LittleFS.exists(MCP3424_CONFIG_FILE)) {
+        success &= LittleFS.remove(MCP3424_CONFIG_FILE);
+    }
+    
+    if (LittleFS.exists(SYSTEM_CONFIG_FILE)) {
+        success &= LittleFS.remove(SYSTEM_CONFIG_FILE);
+    }
     if (success) {
         safePrintln("All configuration files deleted");
     } else {
@@ -393,4 +596,101 @@ float getMCP3424Value(uint8_t deviceIndex, uint8_t channel) {
         return 0.0f;
     }
     return mcp3424Data.channels[deviceIndex][channel];
+}
+
+// Save system configuration to LittleFS
+bool saveSystemConfig(const FeatureConfig& config) {
+    File file = LittleFS.open(SYSTEM_CONFIG_FILE, "w");
+    if (!file) {
+        safePrintln("Failed to open system config file for writing");
+        return false;
+    }
+    
+    DynamicJsonDocument doc(2048);
+    doc["enableWiFi"] = config.enableWiFi;
+    doc["enableWebServer"] = config.enableWebServer;
+    doc["enableHistory"] = config.enableHistory;
+    doc["useAveragedData"] = config.useAveragedData;
+    doc["enableModbus"] = config.enableModbus;
+    doc["enableSolarSensor"] = config.enableSolarSensor;
+    doc["enableOPCN3Sensor"] = config.enableOPCN3Sensor;
+    doc["enableI2CSensors"] = config.enableI2CSensors;
+    doc["enableSHT30"] = config.enableSHT30;
+    doc["enableBME280"] = config.enableBME280;
+    doc["enableSCD41"] = config.enableSCD41;
+    doc["enableSHT40"] = config.enableSHT40;
+    doc["enableSPS30"] = config.enableSPS30;
+    doc["enableMCP3424"] = config.enableMCP3424;
+    doc["enableADS1110"] = config.enableADS1110;
+    doc["enableINA219"] = config.enableINA219;
+    doc["enableIPS"] = config.enableIPS;
+    doc["enableIPSDebug"] = config.enableIPSDebug;
+    doc["enableHCHO"] = config.enableHCHO;
+    doc["enableFan"] = config.enableFan;
+    doc["autoReset"] = config.autoReset;
+    doc["lowPowerMode"] = config.lowPowerMode;
+    doc["enablePushbullet"] = config.enablePushbullet;
+    doc["pushbulletToken"] = config.pushbulletToken;
+    
+    size_t bytesWritten = serializeJson(doc, file);
+    file.close();
+    
+    if (bytesWritten == 0) {
+        safePrintln("Failed to write system config");
+        return false;
+    }
+    
+    safePrintln("System config saved successfully");
+    return true;
+}
+
+// Load system configuration from LittleFS
+bool loadSystemConfig(FeatureConfig& config) {
+    if (!LittleFS.exists(SYSTEM_CONFIG_FILE)) {
+        safePrintln("System config file not found, using defaults");
+        return false;
+    }
+    
+    File file = LittleFS.open(SYSTEM_CONFIG_FILE, "r");
+    if (!file) {
+        safePrintln("Failed to open system config file for reading");
+        return false;
+    }
+    
+    DynamicJsonDocument doc(2048);
+    DeserializationError error = deserializeJson(doc, file);
+    file.close();
+    
+    if (error) {
+        safePrintln("Failed to parse system config JSON");
+        return false;
+    }
+    
+    config.enableWiFi = doc["enableWiFi"] | true;
+    config.enableWebServer = doc["enableWebServer"] | true;
+    config.enableHistory = doc["enableHistory"] | true;
+    config.useAveragedData = doc["useAveragedData"] | false;
+    config.enableModbus = doc["enableModbus"] | false;
+    config.enableSolarSensor = doc["enableSolarSensor"] | false;
+    config.enableOPCN3Sensor = doc["enableOPCN3Sensor"] | false;
+    config.enableI2CSensors = doc["enableI2CSensors"] | false;
+    config.enableSHT30 = doc["enableSHT30"] | false;
+    config.enableBME280 = doc["enableBME280"] | false;
+    config.enableSCD41 = doc["enableSCD41"] | false;
+    config.enableSHT40 = doc["enableSHT40"] | false;
+    config.enableSPS30 = doc["enableSPS30"] | false;
+    config.enableMCP3424 = doc["enableMCP3424"] | false;
+    config.enableADS1110 = doc["enableADS1110"] | false;
+    config.enableINA219 = doc["enableINA219"] | false;
+    config.enableIPS = doc["enableIPS"] | false;
+    config.enableIPSDebug = doc["enableIPSDebug"] | false;
+    config.enableHCHO = doc["enableHCHO"] | false;
+    config.enableFan = doc["enableFan"] | false;
+    config.autoReset = doc["autoReset"] | false;
+    config.lowPowerMode = doc["lowPowerMode"] | false;
+    config.enablePushbullet = doc["enablePushbullet"] | true;
+    strlcpy(config.pushbulletToken, doc["pushbulletToken"] | "", sizeof(config.pushbulletToken));
+    
+    safePrintln("System config loaded successfully");
+    return true;
 } 

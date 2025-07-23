@@ -110,6 +110,7 @@ const char *update_html = R"rawliteral(
   .system-icon { background: linear-gradient(45deg, #2196f3, #03a9f4); }
   .dashboard-icon { background: linear-gradient(45deg, #4caf50, #8bc34a); }
   .charts-icon { background: linear-gradient(45deg, #9c27b0, #e91e63); }
+  .notification-icon { background: linear-gradient(45deg, #e91e63, #f06292); }
 
   .card-title {
     font-size: 1.4em;
@@ -343,6 +344,45 @@ const char *update_html = R"rawliteral(
       </div>
     </div>
 
+    <!-- Pushbullet Settings Card -->
+    <div class="control-card">
+      <div class="card-header">
+        <div class="card-icon notification-icon">📱</div>
+        <div class="card-title">Powiadomienia Pushbullet</div>
+      </div>
+      <div class="card-description">
+        Konfiguracja powiadomień push na telefon
+      </div>
+      
+      <div class="setting-group">
+        <label class="setting-label">
+          <input type="checkbox" id="enablePushbullet" class="setting-checkbox">
+          Włącz powiadomienia Pushbullet
+        </label>
+      </div>
+      
+      <div class="setting-group">
+        <label class="setting-label">Token Pushbullet:</label>
+        <input type="text" id="pushbulletToken" class="setting-input" placeholder="Wprowadź token Pushbullet">
+      </div>
+      
+      <button class="btn btn-primary" onclick="savePushbulletConfig()">
+        💾 Zapisz Ustawienia
+      </button>
+      
+      <button class="btn btn-info" onclick="testPushbullet()">
+        📤 Test Powiadomienia
+      </button>
+      
+      <button class="btn btn-warning" onclick="testBatteryNotification()">
+        🔋 Test Powiadomienia Baterii
+      </button>
+      
+      <div class="status-text" id="pushbulletStatus">
+        Status: Sprawdzanie...
+      </div>
+    </div>
+
     <!-- System Info Card -->
     <div class="control-card">
       <div class="card-header">
@@ -364,6 +404,127 @@ const char *update_html = R"rawliteral(
         🔄 Odśwież Info
       </button>
     </div>
+
+    <!-- System Configuration Card -->
+    <div class="control-card">
+      <div class="card-header">
+        <div class="card-icon charts-icon">⚙️</div>
+        <div class="card-title">Konfiguracja Systemu</div>
+      </div>
+      <div class="card-description">
+        Szybka konfiguracja głównych funkcji systemu
+      </div>
+      
+      <div class="config-sections">
+        <!-- Historia i Dane -->
+        <div class="config-section">
+          <h4>📊 Historia i Dane</h4>
+          <label class="config-checkbox">
+            <input type="checkbox" id="enableHistory" onchange="updateSystemConfig('enableHistory', this.checked)">
+            <span class="checkmark"></span>
+            Włącz zapis historii danych
+          </label>
+          <label class="config-checkbox">
+            <input type="checkbox" id="useAveragedData" onchange="updateSystemConfig('useAveragedData', this.checked)">
+            <span class="checkmark"></span>
+            Używaj uśrednionych danych
+          </label>
+        </div>
+        
+        <!-- Czujniki -->
+        <div class="config-section">
+          <h4>🔬 Czujniki</h4>
+          <label class="config-checkbox">
+            <input type="checkbox" id="enableSPS30" onchange="updateSystemConfig('enableSPS30', this.checked)">
+            <span class="checkmark"></span>
+            SPS30 (Pył)
+          </label>
+          <label class="config-checkbox">
+            <input type="checkbox" id="enableSHT40" onchange="updateSystemConfig('enableSHT40', this.checked)">
+            <span class="checkmark"></span>
+            SHT40 (Temperatura/Wilgotność)
+          </label>
+          <label class="config-checkbox">
+            <input type="checkbox" id="enableHCHO" onchange="updateSystemConfig('enableHCHO', this.checked)">
+            <span class="checkmark"></span>
+            HCHO (Formaldehyd)
+          </label>
+          <label class="config-checkbox">
+            <input type="checkbox" id="enableINA219" onchange="updateSystemConfig('enableINA219', this.checked)">
+            <span class="checkmark"></span>
+            INA219 (Monitoring zasilania)
+          </label>
+          <label class="config-checkbox">
+            <input type="checkbox" id="enableMCP3424" onchange="updateSystemConfig('enableMCP3424', this.checked)">
+            <span class="checkmark"></span>
+            MCP3424 (ADC)
+          </label>
+          <label class="config-checkbox">
+            <input type="checkbox" id="enableSolarSensor" onchange="updateSystemConfig('enableSolarSensor', this.checked)">
+            <span class="checkmark"></span>
+            Solar (Panel słoneczny)
+          </label>
+          <label class="config-checkbox">
+            <input type="checkbox" id="enableIPS" onchange="updateSystemConfig('enableIPS', this.checked)">
+            <span class="checkmark"></span>
+            IPS (Czujnik pyłu)
+          </label>
+          <label class="config-checkbox">
+            <input type="checkbox" id="enableI2CSensors" onchange="updateSystemConfig('enableI2CSensors', this.checked)">
+            <span class="checkmark"></span>
+            I2C Sensors (SCD41 CO2)
+          </label>
+        </div>
+        
+        <!-- Komunikacja -->
+        <div class="config-section">
+          <h4>📡 Komunikacja</h4>
+          <label class="config-checkbox">
+            <input type="checkbox" id="enableWiFi" onchange="updateSystemConfig('enableWiFi', this.checked)">
+            <span class="checkmark"></span>
+            WiFi
+          </label>
+          <label class="config-checkbox">
+            <input type="checkbox" id="enableWebServer" onchange="updateSystemConfig('enableWebServer', this.checked)">
+            <span class="checkmark"></span>
+            Serwer WWW
+          </label>
+          <label class="config-checkbox">
+            <input type="checkbox" id="enableModbus" onchange="updateSystemConfig('enableModbus', this.checked)">
+            <span class="checkmark"></span>
+            Modbus
+          </label>
+        </div>
+        
+
+        
+        <!-- Tryb Pracy -->
+        <div class="config-section">
+          <h4>⚡ Tryb Pracy</h4>
+          <label class="config-checkbox">
+            <input type="checkbox" id="lowPowerModeMain" onchange="updateSystemConfig('lowPowerMode', this.checked)">
+            <span class="checkmark"></span>
+            Tryb niskiego poboru energii
+          </label>
+        </div>
+        
+        <!-- Akcje -->
+        <div class="config-section">
+          <h4>🎛️ Akcje</h4>
+          <div class="config-buttons">
+            <button class="btn btn-primary" onclick="saveAllConfigMain()">
+              💾 Ustaw Konfigurację
+            </button>
+            <button class="btn btn-warning" onclick="loadSystemConfigMain()">
+              🔄 Odśwież Konfigurację
+            </button>
+            <button class="btn btn-danger" onclick="restartSystemMain()">
+              🔄 Restart Systemu
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
 <script>
@@ -374,6 +535,7 @@ function connectWebSocket() {
   ws.onopen = function() {
     console.log('WebSocket connected');
     updateSystemInfo();
+    loadSystemConfigMain(); // Load configuration on connect
   };
   ws.onclose = function() {
     console.log('WebSocket disconnected, reconnecting...');
@@ -382,7 +544,27 @@ function connectWebSocket() {
   ws.onmessage = function(event) {
     try {
       const data = JSON.parse(event.data);
-      updateSystemInfo(data);
+      console.log('WebSocket message received:', data.cmd, data);
+      
+      if (data.cmd === 'getConfig') {
+        // Handle config response
+        if (data.config) {
+          updatePushbulletConfig(data.config);
+          updateSystemConfigDisplay(data.config);
+        }
+      } else if (data.cmd === 'setConfig') {
+        // Handle config update response
+        if (data.success) {
+          showAlert('Konfiguracja zaktualizowana pomyślnie', 'success');
+          // Reload config to update display
+          loadSystemConfigMain();
+        } else {
+          showAlert('Błąd aktualizacji konfiguracji: ' + (data.error || 'Nieznany błąd'), 'error');
+        }
+      } else {
+        // Handle other messages
+        updateSystemInfo(data);
+      }
     } catch (error) {
       console.error('Error parsing WebSocket data:', error);
     }
@@ -391,10 +573,27 @@ function connectWebSocket() {
 
 function updateSystemInfo(data = null) {
   if (data) {
-    document.getElementById('uptime').textContent = formatUptime(data.uptime || 0);
-    document.getElementById('freeHeap').textContent = Math.round((data.freeHeap || 0) / 1024);
-    document.getElementById('wifiSignal').textContent = data.wifiSignal || 0;
+    // Handle both old and new format
+    const uptime = data.uptime || (data.data && data.data.uptime) || 0;
+    const freeHeap = data.freeHeap || (data.data && data.data.freeHeap) || 0;
+    const wifiSignal = data.wifiSignal || (data.data && data.data.wifiSignal) || 0;
+    
+    document.getElementById('uptime').textContent = formatUptime(uptime);
+    document.getElementById('freeHeap').textContent = Math.round(freeHeap / 1024);
+    document.getElementById('wifiSignal').textContent = wifiSignal;
     document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('pl-PL');
+    
+    // Update low power mode status if available
+    if (data.lowPowerMode !== undefined) {
+      updateLowPowerModeStatus(data.lowPowerMode);
+    } else if (data.data && data.data.config && data.data.config.lowPowerMode !== undefined) {
+      updateLowPowerModeStatus(data.data.config.lowPowerMode);
+    }
+    
+    // Update Pushbullet config if available
+    if (data.enablePushbullet !== undefined || data.pushbulletToken !== undefined) {
+      updatePushbulletConfig(data);
+    }
   }
 }
 
@@ -414,6 +613,13 @@ function updateAutoResetState(state) {
   element.innerHTML = `Auto Reset: <span style="color: ${isEnabled ? '#4caf50' : '#f44336'}">${isEnabled ? 'Włączony' : 'Wyłączony'}</span>`;
 }
 
+function updateLowPowerModeStatus(enabled) {
+  const element = document.getElementById("lowPowerModeState");
+  if (element) {
+    element.innerHTML = `Low Power Mode: <span style="color: ${enabled ? '#ff9800' : '#4caf50'}">${enabled ? 'Włączony' : 'Wyłączony'}</span>`;
+  }
+}
+
 function toggleAutoReset() {
   const xhr = new XMLHttpRequest();
   xhr.open("POST", "/toggleAutoReset", true);
@@ -423,6 +629,106 @@ function toggleAutoReset() {
     }
   }
   xhr.send();
+}
+
+function toggleLowPowerMode() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    // Get current status first
+    ws.send(JSON.stringify({cmd: "status"}));
+    
+    setTimeout(() => {
+      // Toggle based on current state
+      const command = document.getElementById("lowPowerModeState").textContent.includes("Włączony") ? 
+        "lowPowerOff" : "lowPowerOn";
+      
+      ws.send(JSON.stringify({
+        cmd: "system",
+        command: command
+      }));
+    }, 100);
+  }
+}
+
+function savePushbulletConfig() {
+  const enablePushbullet = document.getElementById('enablePushbullet').checked;
+  const pushbulletToken = document.getElementById('pushbulletToken').value;
+  const statusElement = document.getElementById('pushbulletStatus');
+  
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const command = {
+      cmd: "setConfig",
+      enablePushbullet: enablePushbullet,
+      pushbulletToken: pushbulletToken
+    };
+    
+    console.log('Saving Pushbullet config:', command);
+    ws.send(JSON.stringify(command));
+    
+    statusElement.innerHTML = 'Status: Zapisywanie...';
+    
+    // Listen for response
+    const originalOnMessage = ws.onmessage;
+    ws.onmessage = function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.cmd === 'setConfig') {
+          if (data.success) {
+            statusElement.innerHTML = 'Status: ✅ Ustawienia zapisane';
+            showAlert('Ustawienia Pushbullet zostały zapisane', 'success');
+          } else {
+            statusElement.innerHTML = 'Status: ❌ Błąd zapisu';
+            showAlert('Błąd zapisu ustawień: ' + (data.error || 'Nieznany błąd'), 'error');
+          }
+          ws.onmessage = originalOnMessage; // Restore original handler
+        }
+      } catch (error) {
+        console.error('Error parsing response:', error);
+        ws.onmessage = originalOnMessage; // Restore original handler
+      }
+    };
+  } else {
+    statusElement.innerHTML = 'Status: ❌ Brak połączenia WebSocket';
+  }
+}
+
+function loadPushbulletConfig() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({cmd: "getConfig"}));
+  }
+}
+
+function updatePushbulletConfig(data) {
+  if (data.enablePushbullet !== undefined) {
+    document.getElementById('enablePushbullet').checked = data.enablePushbullet;
+  }
+  if (data.pushbulletToken !== undefined) {
+    document.getElementById('pushbulletToken').value = data.pushbulletToken;
+  }
+  
+  const statusElement = document.getElementById('pushbulletStatus');
+  if (data.enablePushbullet) {
+    statusElement.innerHTML = 'Status: ✅ Powiadomienia włączone';
+  } else {
+    statusElement.innerHTML = 'Status: ⚠️ Powiadomienia wyłączone';
+  }
+}
+
+function testPushbullet() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      cmd: "system",
+      command: "pushbulletTest"
+    }));
+  }
+}
+
+function testBatteryNotification() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      cmd: "system",
+      command: "pushbulletBatteryTest"
+    }));
+  }
 }
 
 function restartSystem() {
@@ -437,6 +743,149 @@ function restartSystem() {
 function refreshSystemInfo() {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({cmd: "status"}));
+  }
+}
+
+// System Configuration Functions
+function updateSystemConfig(configKey, value) {
+  console.log('Updating system config:', configKey, '=', value);
+  
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const config = {};
+    config[configKey] = value;
+    
+    ws.send(JSON.stringify({
+      cmd: 'setConfig',
+      ...config
+    }));
+    
+    // Show loading feedback
+    showAlert(`Aktualizowanie ${configKey}...`, 'info');
+  } else {
+    showAlert('Brak połączenia WebSocket', 'error');
+  }
+}
+
+function loadSystemConfigMain() {
+  console.log('Loading system configuration...');
+  
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({cmd: 'getConfig'}));
+    showAlert('Ładowanie konfiguracji...', 'info');
+  } else {
+    showAlert('Brak połączenia WebSocket', 'error');
+  }
+}
+
+function updateSystemConfigDisplay(config) {
+  console.log('Updating system config display:', config);
+  
+  // Historia i Dane
+  if (config.enableHistory !== undefined) {
+    document.getElementById('enableHistory').checked = config.enableHistory;
+  }
+  if (config.useAveragedData !== undefined) {
+    document.getElementById('useAveragedData').checked = config.useAveragedData;
+  }
+  
+  // Czujniki
+  if (config.enableSPS30 !== undefined) {
+    document.getElementById('enableSPS30').checked = config.enableSPS30;
+  }
+  if (config.enableSHT40 !== undefined) {
+    document.getElementById('enableSHT40').checked = config.enableSHT40;
+  }
+  if (config.enableHCHO !== undefined) {
+    document.getElementById('enableHCHO').checked = config.enableHCHO;
+  }
+  if (config.enableINA219 !== undefined) {
+    document.getElementById('enableINA219').checked = config.enableINA219;
+  }
+  if (config.enableMCP3424 !== undefined) {
+    document.getElementById('enableMCP3424').checked = config.enableMCP3424;
+  }
+  if (config.enableSolarSensor !== undefined) {
+    document.getElementById('enableSolarSensor').checked = config.enableSolarSensor;
+  }
+  if (config.enableIPS !== undefined) {
+    document.getElementById('enableIPS').checked = config.enableIPS;
+  }
+  if (config.enableI2CSensors !== undefined) {
+    document.getElementById('enableI2CSensors').checked = config.enableI2CSensors;
+  }
+  
+  // Komunikacja
+  if (config.enableWiFi !== undefined) {
+    document.getElementById('enableWiFi').checked = config.enableWiFi;
+  }
+  if (config.enableWebServer !== undefined) {
+    document.getElementById('enableWebServer').checked = config.enableWebServer;
+  }
+  if (config.enableModbus !== undefined) {
+    document.getElementById('enableModbus').checked = config.enableModbus;
+  }
+  
+  // Tryb Pracy
+  if (config.lowPowerMode !== undefined) {
+    document.getElementById('lowPowerModeMain').checked = config.lowPowerMode;
+  }
+}
+
+function saveAllConfigMain() {
+  console.log('Saving all system configuration...');
+  
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    // Zbierz wszystkie ustawienia z formularza
+    const config = {
+      // Historia i Dane
+      enableHistory: document.getElementById('enableHistory').checked,
+      useAveragedData: document.getElementById('useAveragedData').checked,
+      
+      // Czujniki
+      enableSPS30: document.getElementById('enableSPS30').checked,
+      enableSHT40: document.getElementById('enableSHT40').checked,
+      enableHCHO: document.getElementById('enableHCHO').checked,
+      enableINA219: document.getElementById('enableINA219').checked,
+      enableMCP3424: document.getElementById('enableMCP3424').checked,
+      enableSolarSensor: document.getElementById('enableSolarSensor').checked,
+      enableIPS: document.getElementById('enableIPS').checked,
+      enableI2CSensors: document.getElementById('enableI2CSensors').checked,
+      
+      // Komunikacja
+      enableWiFi: document.getElementById('enableWiFi').checked,
+      enableWebServer: document.getElementById('enableWebServer').checked,
+      enableModbus: document.getElementById('enableModbus').checked,
+      
+      // Tryb Pracy
+      lowPowerMode: document.getElementById('lowPowerModeMain').checked
+    };
+    
+    ws.send(JSON.stringify({
+      cmd: 'setConfig',
+      ...config
+    }));
+    
+    showAlert('Zapisywanie konfiguracji...', 'info');
+  } else {
+    showAlert('Brak połączenia WebSocket', 'error');
+  }
+}
+
+
+
+function restartSystemMain() {
+  if (confirm('Czy na pewno chcesz zrestartować system?')) {
+    console.log('Restarting system...');
+    
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        cmd: 'system',
+        command: 'restart'
+      }));
+      showAlert('System zostanie zrestartowany...', 'warning');
+    } else {
+      showAlert('Brak połączenia WebSocket', 'error');
+    }
   }
 }
 
@@ -478,7 +927,10 @@ document.getElementById('updateForm').addEventListener('submit', function(e) {
 // Event listeners
 document.getElementById('toggleAutoReset').addEventListener('click', toggleAutoReset);
 document.getElementById('restartBtn').addEventListener('click', restartSystem);
-document.getElementById('refreshInfo').addEventListener('click', refreshSystemInfo);
+document.getElementById('refreshInfo').addEventListener('click', function() {
+  refreshSystemInfo();
+  loadSystemConfigMain(); // Also refresh configuration
+});
 
 // Initialize
 window.addEventListener('load', function() {
@@ -493,6 +945,11 @@ window.addEventListener('load', function() {
     }
   }
   xhr.send();
+  
+  // Load Pushbullet config after WebSocket connects
+  setTimeout(() => {
+    loadPushbulletConfig();
+  }, 2000);
 });
 
 window.addEventListener('beforeunload', function() {
@@ -708,6 +1165,119 @@ const char *network_config_html = R"rawliteral(
     background: #f8f9fa;
   }
 
+  /* Configuration Styles */
+  .config-sections {
+    display: grid;
+    gap: 15px;
+  }
+
+  .config-section {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 15px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .config-section h4 {
+    margin: 0 0 10px 0;
+    color: #3498db;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .config-checkbox {
+    display: flex;
+    align-items: center;
+    margin: 8px 0;
+    cursor: pointer;
+    font-size: 13px;
+    color: #ecf0f1;
+    position: relative;
+    padding-left: 25px;
+  }
+
+  .config-checkbox input[type="checkbox"] {
+    position: absolute;
+    opacity: 0;
+    cursor: pointer;
+    height: 0;
+    width: 0;
+  }
+
+  .config-checkbox .checkmark {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 18px;
+    width: 18px;
+    background-color: rgba(255, 255, 255, 0.1);
+    border: 2px solid #3498db;
+    border-radius: 3px;
+    transition: all 0.2s ease;
+  }
+
+  .config-checkbox:hover input ~ .checkmark {
+    background-color: rgba(52, 152, 219, 0.2);
+  }
+
+  .config-checkbox input:checked ~ .checkmark {
+    background-color: #3498db;
+    border-color: #3498db;
+  }
+
+  .config-checkbox .checkmark:after {
+    content: "";
+    position: absolute;
+    display: none;
+  }
+
+  .config-checkbox input:checked ~ .checkmark:after {
+    display: block;
+  }
+
+  .config-checkbox .checkmark:after {
+    left: 5px;
+    top: 2px;
+    width: 4px;
+    height: 8px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+
+  .config-input-group {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin: 10px 0;
+  }
+
+  .config-input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid #3498db;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    color: #ecf0f1;
+    font-size: 13px;
+  }
+
+  .config-input:focus {
+    outline: none;
+    border-color: #2980b9;
+    background: rgba(255, 255, 255, 0.15);
+  }
+
+  .config-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .config-buttons .btn {
+    margin: 0;
+  }
+
   .alert {
     padding: 15px;
     border-radius: 8px;
@@ -889,8 +1459,42 @@ function connectWebSocket() {
   ws.onmessage = function(event) {
     try {
       const data = JSON.parse(event.data);
+      console.log('Network config WebSocket message:', data.cmd, data);
+      
       if (data.cmd === "networkConfig") {
         updateNetworkConfigDisplay(data);
+      } else if (data.cmd === "setWiFiConfig") {
+        if (data.success) {
+          showAlert(data.message || 'Konfiguracja WiFi zapisana pomyślnie', 'success');
+        } else {
+          showAlert(data.error || 'Błąd zapisu konfiguracji WiFi', 'error');
+        }
+      } else if (data.cmd === "setNetworkConfig") {
+        if (data.success) {
+          showAlert(data.message || 'Konfiguracja sieci zapisana pomyślnie', 'success');
+        } else {
+          showAlert(data.error || 'Błąd zapisu konfiguracji sieci', 'error');
+        }
+      } else if (data.cmd === "testWiFi") {
+        if (data.wifiConnected) {
+          showAlert(`WiFi połączony: ${data.ssid} (${data.localIP})`, 'success');
+        } else {
+          showAlert('WiFi nie połączony', 'error');
+        }
+      } else if (data.cmd === "applyNetworkConfig") {
+        if (data.success) {
+          showAlert(data.message || 'Konfiguracja sieci zastosowana', 'success');
+        } else {
+          showAlert(data.error || 'Błąd zastosowania konfiguracji', 'error');
+        }
+      } else if (data.cmd === "resetNetworkConfig") {
+        if (data.success) {
+          showAlert(data.message || 'Konfiguracja zresetowana', 'success');
+          // Reload config after reset
+          setTimeout(() => loadCurrentConfig(), 1000);
+        } else {
+          showAlert(data.error || 'Błąd resetowania konfiguracji', 'error');
+        }
       }
     } catch (error) {
       console.error('Error parsing WebSocket data:', error);
@@ -912,12 +1516,20 @@ function showAlert(message, type = 'info') {
 }
 
 function loadCurrentConfig() {
+  console.log('Loading current network config...');
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({cmd: "getNetworkConfig"}));
+    const command = {cmd: "getNetworkConfig"};
+    console.log('Sending command:', command);
+    ws.send(JSON.stringify(command));
+  } else {
+    console.log('WebSocket not connected, state:', ws ? ws.readyState : 'no ws');
+    showAlert('Brak połączenia WebSocket!', 'error');
   }
 }
 
 function updateNetworkConfigDisplay(data) {
+  console.log('Updating network config display:', data);
+  
   // Update WiFi fields
   document.getElementById('wifi-ssid').value = data.wifiSSID || '';
   document.getElementById('wifi-password').value = data.wifiPassword || '';
@@ -951,19 +1563,24 @@ function saveWiFiConfig() {
   const ssid = document.getElementById('wifi-ssid').value.trim();
   const password = document.getElementById('wifi-password').value;
   
+  console.log('Saving WiFi config:', { ssid, password: password ? '***' : 'empty' });
+  
   if (!ssid) {
     showAlert('Wprowadź nazwę sieci WiFi!', 'error');
     return;
   }
   
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
+    const command = {
       cmd: "setWiFiConfig",
       ssid: ssid,
       password: password
-    }));
+    };
+    console.log('Sending WiFi config command:', command);
+    ws.send(JSON.stringify(command));
     showAlert('Konfiguracja WiFi wysłana...', 'info');
   } else {
+    console.log('WebSocket not connected, state:', ws ? ws.readyState : 'no ws');
     showAlert('Brak połączenia WebSocket!', 'error');
   }
 }
@@ -976,6 +1593,8 @@ function saveNetworkConfig() {
   const dns1 = document.getElementById('dns1').value.trim();
   const dns2 = document.getElementById('dns2').value.trim();
   
+  console.log('Saving network config:', { useDHCP, staticIP, gateway, subnet, dns1, dns2 });
+  
   if (!useDHCP) {
     if (!staticIP || !gateway || !subnet) {
       showAlert('Wypełnij wszystkie pola dla statycznego IP!', 'error');
@@ -984,7 +1603,7 @@ function saveNetworkConfig() {
   }
   
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
+    const command = {
       cmd: "setNetworkConfig",
       useDHCP: useDHCP,
       staticIP: staticIP,
@@ -992,9 +1611,12 @@ function saveNetworkConfig() {
       subnet: subnet,
       dns1: dns1,
       dns2: dns2
-    }));
+    };
+    console.log('Sending network config command:', command);
+    ws.send(JSON.stringify(command));
     showAlert('Konfiguracja sieci wysłana...', 'info');
   } else {
+    console.log('WebSocket not connected, state:', ws ? ws.readyState : 'no ws');
     showAlert('Brak połączenia WebSocket!', 'error');
   }
 }
@@ -1423,6 +2045,14 @@ const char *dashboard_html = R"rawliteral(
           <div class="data-label">NC2.5</div>
           <div class="data-value" id="sps30-nc25">--<span class="data-unit">#/cm³</span></div>
         </div>
+        <div class="data-item">
+          <div class="data-label">NC4.0</div>
+          <div class="data-value" id="sps30-nc4">--<span class="data-unit">#/cm³</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">NC10</div>
+          <div class="data-value" id="sps30-nc10">--<span class="data-unit">#/cm³</span></div>
+        </div>
       </div>
       <div class="last-update" id="sps30-update">Ostatnia aktualizacja: --</div>
     </div>
@@ -1696,6 +2326,8 @@ function updateValue(elementId, value, precision = 1) {
     } else {
       element.textContent = value;
     }
+  } else {
+    console.log(`Failed to update ${elementId}: element=${!!element}, value=${value}`);
   }
 }
 
@@ -1746,21 +2378,29 @@ function createMCP3424Card(device, address) {
 
 function updateMCP3424Devices(adcData) {
   const container = document.getElementById('adc-sensors-container');
-  if (!container) return;
+  if (!container) {
+    console.log('MCP3424 container not found');
+    return;
+  }
+  
+  console.log('Updating MCP3424 devices:', adcData.mcp3424);
   
   if (adcData.mcp3424 && adcData.mcp3424.enabled && adcData.mcp3424.deviceCount > 0) {
     // Clear existing MCP3424 cards
     container.innerHTML = '';
     
+    console.log('Creating cards for', adcData.mcp3424.deviceCount, 'devices');
+    
     // Create cards for each device
     adcData.mcp3424.devices.forEach((device, index) => {
+      console.log('Device', index, ':', device);
       container.innerHTML += createMCP3424Card(index, device.address);
       
       // Update values
-      updateValue(`mcp3424-${index}-ch1`, device.channels.ch1, 6);
-      updateValue(`mcp3424-${index}-ch2`, device.channels.ch2, 6);
-      updateValue(`mcp3424-${index}-ch3`, device.channels.ch3, 6);
-      updateValue(`mcp3424-${index}-ch4`, device.channels.ch4, 6);
+      updateValue(`mcp3424-${index}-ch1`, device.channels.ch1, 1);
+      updateValue(`mcp3424-${index}-ch2`, device.channels.ch2, 1);
+      updateValue(`mcp3424-${index}-ch3`, device.channels.ch3, 1);
+      updateValue(`mcp3424-${index}-ch4`, device.channels.ch4, 1);
       updateStatus(`mcp3424-status-${index}`, device.valid);
       
       const updateElement = document.getElementById(`mcp3424-update-${index}`);
@@ -1769,6 +2409,7 @@ function updateMCP3424Devices(adcData) {
       }
     });
   } else {
+    console.log('MCP3424 not enabled or no devices');
     container.innerHTML = '';
   }
 }
@@ -1786,6 +2427,8 @@ function connectWebSocket() {
     try {
       const data = JSON.parse(event.data);
       lastUpdateTime = Date.now();
+      
+      console.log('Received WebSocket data:', data);
       
       // Show/hide cards based on sensor availability
       if (data.sensorsEnabled) {
@@ -1908,17 +2551,20 @@ function connectWebSocket() {
       
       // SCD41 CO2 data
       if (data.scd41 && data.scd41.valid) {
-        updateValue('scd41-co2', data.scd41.CO2 || 0, 0);
+        console.log('SCD41 data:', data.scd41);
+        updateValue('scd41-co2', data.scd41.co2 || 0, 0);
         updateValue('scd41-temp', data.scd41.temperature || 0, 1);
         updateValue('scd41-humidity', data.scd41.humidity || 0, 1);
         updateStatus('scd41-status', true);
         document.getElementById('scd41-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
       } else {
+        console.log('SCD41 not valid or missing:', data.scd41);
         updateStatus('scd41-status', false);
       }
       
       // SPS30 particle sensor data
       if (data.sps30 && data.sps30.valid) {
+        console.log('SPS30 data:', data.sps30);
         updateValue('sps30-pm1', data.sps30.PM1 || 0, 1);
         updateValue('sps30-pm25', data.sps30.PM25 || 0, 1);
         updateValue('sps30-pm4', data.sps30.PM4 || 0, 1);
@@ -1927,26 +2573,32 @@ function connectWebSocket() {
         updateValue('sps30-nc05', data.sps30.NC05 || 0, 1);
         updateValue('sps30-nc1', data.sps30.NC1 || 0, 1);
         updateValue('sps30-nc25', data.sps30.NC25 || 0, 1);
+        updateValue('sps30-nc4', data.sps30.NC4 || 0, 1);
+        updateValue('sps30-nc10', data.sps30.NC10 || 0, 1);
         updateStatus('sps30-status', true);
         document.getElementById('sps30-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
       } else {
+        console.log('SPS30 not valid or missing:', data.sps30);
         updateStatus('sps30-status', false);
       }
       
-      // ADC data - Update MCP3424 devices dynamically
-      if (data.adc) {
-        updateMCP3424Devices(data.adc);
+      // MCP3424 devices
+      if (data.mcp3424 && data.mcp3424.enabled) {
+        console.log('MCP3424 data:', data.mcp3424);
+        updateMCP3424Devices(data);
+      }
         
         // ADS1110 data
-        if (data.adc.ads1110 && data.adc.ads1110.enabled) {
-          updateValue('ads-voltage', data.adc.ads1110.voltage || 0, 6);
-          updateValue('ads-rate', data.adc.ads1110.dataRate || 0, 0);
-          updateValue('ads-gain', data.adc.ads1110.gain || 0, 0);
-          updateStatus('ads1110-status', data.adc.ads1110.valid);
+      if (data.ads1110 && data.ads1110.enabled) {
+        console.log('ADS1110 data:', data.ads1110);
+        updateValue('ads-voltage', data.ads1110.voltage || 0, 6);
+        updateValue('ads-rate', data.ads1110.dataRate || 0, 0);
+        updateValue('ads-gain', data.ads1110.gain || 0, 0);
+        updateStatus('ads1110-status', data.ads1110.valid);
           document.getElementById('ads1110-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
         } else {
+        console.log('ADS1110 not valid or missing:', data.ads1110);
           updateStatus('ads1110-status', false);
-        }
       }
       
       // Power monitor data

@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <esp_task_wdt.h>
 #include <Adafruit_NeoPixel.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
 #include <time.h>
 
 // Project includes
@@ -16,11 +18,16 @@
 #include <history.h>
 #include <fan.h>
 
+
+
 //#include <html.h>
 
 // Global configuration
 FeatureConfig config;
 SerialSensorConfig serialSensorConfigs[MAX_SERIAL_SENSORS];
+
+// Global battery data
+BatteryData batteryData;
 
 // Hardware objects
 HardwareSerial MySerial(2); // Solar sensor serial
@@ -37,6 +44,8 @@ void watchDogTask(void *parameter);
 void initializeHardware();
 void processSerialCommands();
 void updateSystemStatus();
+
+
 
 
 
@@ -66,6 +75,33 @@ void setup() {
     }
     Serial.setTimeout(1000);
     esp_log_level_set("*", ESP_LOG_VERBOSE);
+    
+    // Initialize LittleFS and load system configuration
+    if (initLittleFS()) {
+        // Check and repair LittleFS if needed
+        if (checkAndRepairLittleFS()) {
+            if (loadSystemConfig(config)) {
+                Serial.println("System configuration loaded from file");
+            } else {
+                Serial.println("Using default system configuration");
+            }
+        } else {
+            Serial.println("LittleFS check failed, attempting cleanup...");
+            if (cleanLittleFS() && checkAndRepairLittleFS()) {
+                Serial.println("LittleFS cleaned and repaired successfully");
+                if (loadSystemConfig(config)) {
+                    Serial.println("System configuration loaded after cleanup");
+                } else {
+                    Serial.println("Using default system configuration after cleanup");
+                }
+            } else {
+                Serial.println("LittleFS cleanup failed, using defaults");
+            }
+        }
+    } else {
+        Serial.println("Failed to initialize LittleFS, using defaults");
+    }
+    
     // Don't wait for Serial - system should work without it
     if (Serial) {
         Serial.println("=== ESP32 Multi-Sensor System Starting ===");
@@ -158,6 +194,12 @@ void setup() {
         Serial.println("=== System initialization complete ===");
     }
     delay(1000);
+    // if (config.enablePushbullet && strlen(config.pushbulletToken) > 0) {
+    //     // Wait a bit for WiFi to stabilize
+    //    // delay(5000);
+    //     sendSystemStartupNotification();
+    // }
+    
 }
 
 void loop() {
@@ -193,6 +235,10 @@ void loop() {
     
     readBatteryVoltage();
     readSerialSensors();
+    
+    // Update battery status and check for shutdown
+    updateBatteryStatus();
+    checkBatteryShutdown();
     
     // Update fan RPM measurement if enabled
     if (config.enableFan) {
@@ -346,10 +392,14 @@ void loop() {
 }
 
 void initializeHardware() {
-    // Initialize LED strip
-    pixels.begin();
-    pixels.setPixelColor(0, pixels.Color(255, 255, 255)); // White during initialization
-    pixels.show();
+    // Initialize LED strip only if not in low power mode
+    if (!config.lowPowerMode) {
+        pixels.begin();
+        pixels.setPixelColor(0, pixels.Color(255, 255, 255)); // White during initialization
+        pixels.show();
+    } else {
+        safePrintln("Low power mode: LED disabled");
+    }
     
     // Initialize solar sensor serial if enabled
     // if (config.enableSolarSensor) {
@@ -370,7 +420,27 @@ void initializeHardware() {
         initializeFan();
     }
     
+    // Initialize battery monitoring
+    initializeBatteryMonitoring();
+    
+    // Send startup notification (after WiFi is connected)
+  
     safePrintln("Hardware initialization complete");
+
+    //wait to time to be set
+    int proby = 0;
+    while (!isTimeSet() && proby < 5) {
+        delay(1000);
+        proby++;
+    }
+    if (isTimeSet()) {
+        safePrintln("Czas zsynchronizowany: " + getFormattedTime() + " " + getFormattedDate());
+        if (config.enablePushbullet && strlen(config.pushbulletToken) > 0) {
+            sendSystemStartupNotification();
+        }
+    } else {
+        safePrintln("Blad: nie udalo sie zsynchronizowac czasu po 5 probach");
+    }
 }
 
 void processSerialCommands() {
@@ -409,6 +479,11 @@ void processSerialCommands() {
                 //ip address
                 safePrintln("IP Address: " + String(WiFi.localIP().toString()));    
                 safePrintln("Auto Reset: " + String(config.autoReset ? "ENABLED" : "DISABLED"));
+                safePrintln("Low Power Mode: " + String(config.lowPowerMode ? "ENABLED" : "DISABLED"));
+                safePrintln("Pushbullet: " + String(config.enablePushbullet ? "ENABLED" : "DISABLED"));
+                if (config.enablePushbullet) {
+                    safePrintln("Pushbullet Token: " + String(strlen(config.pushbulletToken) > 0 ? "SET" : "NOT SET"));
+                }
                 if (config.enableModbus) {
                     safePrint("Modbus Activity: ");
                     if (hasHadModbusActivity) {
@@ -422,12 +497,21 @@ void processSerialCommands() {
                 safePrintln("Free PSRAM: " + String(ESP.getFreePsram() / 1024) + " KB");
                 safePrintln("Uptime: " + String(millis() / 1000) + " seconds");
                 
+                // Battery status
+                if (batteryData.valid) {
+                    safePrintln("=== Battery Status ===");
+                    safePrintln("Voltage: " + String(batteryData.voltage, 3) + "V");
+                    safePrintln("Current: " + String(batteryData.current, 2) + "mA");
+                    safePrintln("Power: " + String(batteryData.power, 1) + "mW");
+                    safePrintln("Charge: " + String(batteryData.chargePercent) + "%");
+                    safePrintln("Source: " + String(batteryData.isBatteryPowered ? "External" : "Battery"));
+                    safePrintln("Low Battery: " + String(batteryData.lowBattery ? "YES" : "NO"));
+                    safePrintln("Critical: " + String(batteryData.criticalBattery ? "YES" : "NO"));
+                } else {
+                    safePrintln("Battery Status: No valid data");
+                }
+                
                 // Time info from ESP32 built-in time functions
-                extern bool timeInitialized;
-                extern String getFormattedTime();
-                extern String getFormattedDate();
-                extern time_t getEpochTime();
-                extern bool isTimeSet();
                 
                 if (isTimeSet()) {
                     safePrintln("Time: " + getFormattedTime());
@@ -444,8 +528,6 @@ void processSerialCommands() {
                 }
                 
                 // Calibration status
-                extern CalibrationConfig calibConfig;
-                extern CalibratedSensorData calibratedData;
                 safePrintln("Calibration: " + String(calibConfig.enableCalibration ? "ENABLED" : "DISABLED"));
                 if (calibConfig.enableCalibration) {
                     safePrintln("Calibration Valid: " + String(calibratedData.valid ? "YES" : "NO"));
@@ -571,10 +653,34 @@ void processSerialCommands() {
                 config.autoReset = true;
                 safePrintln("Auto reset enabled");
             }
-            else if (command.equals("CONFIG_AUTO_RESET_OFF")) {
-                config.autoReset = false;
-                safePrintln("Auto reset disabled");
+                    else if (command.equals("CONFIG_AUTO_RESET_OFF")) {
+            config.autoReset = false;
+            safePrintln("Auto reset disabled");
+        }
+        else if (command.equals("CONFIG_LOW_POWER_ON")) {
+            config.lowPowerMode = true;
+            safePrintln("Low power mode enabled - LED disabled");
+        }
+        else if (command.equals("CONFIG_LOW_POWER_OFF")) {
+            config.lowPowerMode = false;
+            safePrintln("Low power mode disabled - LED enabled");
+        }
+        else if (command.equals("PUSHBULLET_TEST")) {
+            if (config.enablePushbullet && strlen(config.pushbulletToken) > 0) {
+                sendPushbulletNotification("🧪 Test Notification", "This is a test notification from ESP32 Sensor Cube\nTime: " + getFormattedTime() + "\nUptime: " + getUptimeString());
+                safePrintln("Test notification sent");
+            } else {
+                safePrintln("Pushbullet not configured - enable and set token first");
             }
+        }
+        else if (command.equals("PUSHBULLET_BATTERY_TEST")) {
+            if (config.enablePushbullet && strlen(config.pushbulletToken) > 0) {
+                sendBatteryCriticalNotification();
+                safePrintln("Battery critical test notification sent");
+            } else {
+                safePrintln("Pushbullet not configured - enable and set token first");
+            }
+        }
             else if (command.equals("CONFIG_CALIB_ON")) {
                 extern CalibrationConfig calibConfig;
                 calibConfig.enableCalibration = true;
@@ -730,11 +836,6 @@ void processSerialCommands() {
         }
         else if (command.equals("TIME_INFO")) {
             if (isSerialAvailable()) {
-                extern bool isTimeSet();
-                extern String getFormattedTime();
-                extern String getFormattedDate();
-                extern time_t getEpochTime();
-                
                 safePrintln("=== Time Information ===");
                 safePrintln("Time Synchronized: " + String(isTimeSet() ? "YES" : "NO"));
                 if (isTimeSet()) {
@@ -764,6 +865,23 @@ void processSerialCommands() {
                 safePrintln("=== Sensor History Status ===");
                 printHistoryMemoryUsage();
                 printHistoryStatus();
+            }
+        }
+        else if (command.equals("BATTERY")) {
+            if (isSerialAvailable()) {
+                safePrintln("=== Battery Status ===");
+                if (batteryData.valid) {
+                    safePrintln("Voltage: " + String(batteryData.voltage, 3) + "V");
+                    safePrintln("Current: " + String(batteryData.current, 2) + "mA");
+                    safePrintln("Power: " + String(batteryData.power, 1) + "mW");
+                    safePrintln("Charge: " + String(batteryData.chargePercent) + "%");
+                    safePrintln("Source: " + String(batteryData.isBatteryPowered ? "External" : "Battery"));
+                    safePrintln("Low Battery: " + String(batteryData.lowBattery ? "YES" : "NO"));
+                    safePrintln("Critical: " + String(batteryData.criticalBattery ? "YES" : "NO"));
+                    safePrintln("OFF Pin: " + String(digitalRead(OFF_PIN) ? "HIGH" : "LOW"));
+                } else {
+                    safePrintln("No valid battery data available");
+                }
             }
         }
         else if (command.equals("RESTART")) {
@@ -937,21 +1055,23 @@ void updateSystemStatus() {
             if (opcn3SensorStatus) workingSensors++;
         }
         
-        // Ustaw kolor LED na podstawie statusu wszystkich wlaczonych czujnikow
-        if (enabledSensors > 0) {
-            if (workingSensors == enabledSensors) {
-                pixels.setPixelColor(0, pixels.Color(0, 255, 0)); // Zielony - wszystkie wlaczone dzialaja
-            } else if (workingSensors >= 2) {
-                pixels.setPixelColor(0, pixels.Color(0, 255, 255)); // Cyjan - wiekszosc dziala
-            } else if (workingSensors == 1) {
-                pixels.setPixelColor(0, pixels.Color(255, 255, 0)); // Zolty - tylko 1 dziala
+        // Ustaw kolor LED na podstawie statusu wszystkich wlaczonych czujnikow (tylko jeśli nie w trybie niskiego poboru mocy)
+        if (!config.lowPowerMode) {
+            if (enabledSensors > 0) {
+                if (workingSensors == enabledSensors) {
+                    pixels.setPixelColor(0, pixels.Color(0, 255, 0)); // Zielony - wszystkie wlaczone dzialaja
+                } else if (workingSensors >= 2) {
+                    pixels.setPixelColor(0, pixels.Color(0, 255, 255)); // Cyjan - wiekszosc dziala
+                } else if (workingSensors == 1) {
+                    pixels.setPixelColor(0, pixels.Color(255, 255, 0)); // Zolty - tylko 1 dziala
+                } else {
+                    pixels.setPixelColor(0, pixels.Color(255, 0, 0)); // Czerwony - zadne nie dzialaja
+                }
             } else {
-                pixels.setPixelColor(0, pixels.Color(255, 0, 0)); // Czerwony - zadne nie dzialaja
+                pixels.setPixelColor(0, pixels.Color(128, 128, 128)); // Szary - brak wlaczonych czujnikow
             }
-        } else {
-            pixels.setPixelColor(0, pixels.Color(128, 128, 128)); // Szary - brak wlaczonych czujnikow
+            pixels.show();
         }
-        pixels.show();
     }
 }
 void watchDogTask(void *parameter) {
@@ -963,5 +1083,194 @@ void watchDogTask(void *parameter) {
         ESP_ERROR_CHECK(esp_task_wdt_reset());
         vTaskDelay(1500 / portTICK_PERIOD_MS);
     }
+}
+
+// Battery monitoring functions
+void initializeBatteryMonitoring() {
+    // Initialize OFF pin - default LOW (safe state)
+    pinMode(OFF_PIN, OUTPUT);
+    digitalWrite(OFF_PIN, LOW);
+    safePrintln("Battery monitoring initialized - OFF pin set to LOW");
+}
+
+void setOffPin(bool state) {
+    digitalWrite(OFF_PIN, state ? HIGH : LOW);
+    safePrintln("OFF pin set to: " + String(state ? "HIGH" : "LOW"));
+}
+
+float calculateBatteryPercentage(float voltage) {
+    // Li-ion 2S battery: 7.25V = 0%, 8.35V = 100%
+    const float MIN_VOLTAGE = 7.25;
+    const float MAX_VOLTAGE = 8.35;
+    
+    if (voltage <= MIN_VOLTAGE) return 0.0;
+    if (voltage >= MAX_VOLTAGE) return 100.0;
+    
+    return ((voltage - MIN_VOLTAGE) / (MAX_VOLTAGE - MIN_VOLTAGE)) * 100.0;
+}
+
+bool isBatteryPowered(float current) {
+    // If current > -20mA, we're powered by external source (charging or external power)
+    // If current < -20mA, we're running on battery (discharging)
+    return current > -20.0;
+}
+
+void updateBatteryStatus() {
+    if (!config.enableINA219 || !ina219SensorStatus || !ina219Data.valid) {
+        return;
+    }
+    
+    // Update voltage history (moving average)
+    batteryData.voltageHistory[batteryData.voltageIndex] = ina219Data.busVoltage;
+    batteryData.voltageIndex = (batteryData.voltageIndex + 1) % BatteryData::VOLTAGE_AVERAGE_SIZE;
+    
+    if (batteryData.voltageIndex == 0) {
+        batteryData.voltageHistoryFull = true;
+    }
+    
+    // Calculate average voltage
+    float avgVoltage = 0.0;
+    int count = batteryData.voltageHistoryFull ? BatteryData::VOLTAGE_AVERAGE_SIZE : batteryData.voltageIndex;
+    
+    for (int i = 0; i < count; i++) {
+        avgVoltage += batteryData.voltageHistory[i];
+    }
+    avgVoltage /= count;
+    
+    // Update battery data
+    batteryData.voltage = avgVoltage;
+    batteryData.current = ina219Data.current;
+    batteryData.power = ina219Data.power;
+    batteryData.chargePercent = (uint8_t)calculateBatteryPercentage(avgVoltage);
+    batteryData.isBatteryPowered = isBatteryPowered(ina219Data.current);
+    batteryData.lowBattery = (avgVoltage < 7.2);
+    batteryData.criticalBattery = (avgVoltage < 7.0);
+    batteryData.valid = true;
+    batteryData.lastUpdate = millis();
+    
+    // Debug output every 30 seconds
+    // static unsigned long lastBatteryDebug = 0;
+    // if (millis() - lastBatteryDebug > 30000) {
+    //     lastBatteryDebug = millis();
+    //     safePrintln("=== Battery Status ===");
+    //     safePrint("Voltage: "); safePrint(String(avgVoltage, 3)); safePrintln("V");
+    //     safePrint("Current: "); safePrint(String(ina219Data.current, 2)); safePrintln("mA");
+    //     safePrint("Power: "); safePrint(String(ina219Data.power, 1)); safePrintln("mW");
+    //     safePrint("Charge: "); safePrint(String(batteryData.chargePercent)); safePrintln("%");
+    //     safePrint("Source: "); safePrintln(batteryData.isBatteryPowered ? "External" : "Battery");
+    //     safePrint("Low Battery: "); safePrintln(batteryData.lowBattery ? "YES" : "NO");
+    //     safePrint("Critical: "); safePrintln(batteryData.criticalBattery ? "YES" : "NO");
+    // }
+}
+
+void checkBatteryShutdown() {
+    if (!batteryData.valid) return;
+    
+    // If battery voltage drops below 7.2V, activate OFF pin
+    if (batteryData.lowBattery && batteryData.isBatteryPowered) {
+        safePrintln("WARNING: Low battery detected! Activating OFF pin...");
+        
+        // Send critical battery notification
+        sendBatteryCriticalNotification();
+        
+        delay(2000);
+        
+        setOffPin(HIGH);
+        
+        // Wait a moment for devices to shut down
+        delay(2000);
+        
+        // Keep OFF pin HIGH for 5 seconds to ensure shutdown
+        unsigned long shutdownStart = millis();
+        while (millis() - shutdownStart < 5000) {
+            safePrintln("Shutdown in progress... " + String((5000 - (millis() - shutdownStart)) / 1000) + "s");
+            delay(1000);
+        }
+        
+        // Reset OFF pin to LOW and restart system
+        setOffPin(LOW);
+        safePrintln("System restarting after battery shutdown...");
+        delay(1000);
+        ESP.restart();
+    }
+}
+
+// Pushbullet notification functions
+String getUptimeString() {
+    unsigned long uptime = millis() / 1000;
+    unsigned long days = uptime / 86400;
+    unsigned long hours = (uptime % 86400) / 3600;
+    unsigned long minutes = (uptime % 3600) / 60;
+    
+    String result = "";
+    if (days > 0) result += String(days) + "d ";
+    if (hours > 0 || days > 0) result += String(hours) + "h ";
+    result += String(minutes) + "m";
+    
+    return result;
+}
+
+void sendPushbulletNotification(const String& title, const String& message) {
+    if (!config.enablePushbullet || strlen(config.pushbulletToken) == 0) {
+        return;
+    }
+    
+    if (WiFi.status() != WL_CONNECTED) {
+        safePrintln("Pushbullet: No WiFi connection");
+        return;
+    }
+    
+    HTTPClient http;
+    http.begin("https://api.pushbullet.com/v2/pushes");
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("Access-Token", config.pushbulletToken);
+    
+    // Use ArduinoJson to properly format JSON
+    DynamicJsonDocument doc(1024);
+    doc["type"] = "note";
+    doc["title"] = title;
+    doc["body"] = message;
+    
+    String jsonPayload;
+    serializeJson(doc, jsonPayload);
+    
+    int httpResponseCode = http.POST(jsonPayload);
+    
+    if (httpResponseCode == 200) {
+        safePrintln("Pushbullet notification sent successfully");
+    } else {
+        safePrintln("Pushbullet notification failed: " + String(httpResponseCode));
+        safePrintln("Response: " + http.getString());
+        safePrintln("Sent JSON: " + jsonPayload);
+    }
+    
+    http.end();
+}
+
+void sendBatteryCriticalNotification() {
+    if (!batteryData.valid) return;
+    
+    String title = "🔋 CRITICAL BATTERY - Device Shutting Down";
+    String message = "Device: ESP32 Sensor Cube\n";
+    message += "Voltage: " + String(batteryData.voltage, 3) + "V\n";
+    message += "Charge: " + String(batteryData.chargePercent) + "%\n";
+    message += "Current: " + String(batteryData.current, 2) + "mA\n";
+    message += "Uptime: " + getUptimeString() + "\n";
+    message += "Time: " + getFormattedTime() + " " + getFormattedDate() + "\n";
+    message += "IP: " + WiFi.localIP().toString();
+    
+    sendPushbulletNotification(title, message);
+}
+
+void sendSystemStartupNotification() {
+    String title = "🚀 ESP32 Sensor Cube Started";
+    String message = "Device: ESP32 Sensor Cube\n";
+    message += "Version: " + String(FIRMWARE_VERSION) + "\n";
+    message += "IP: " + WiFi.localIP().toString() + "\n";
+    message += "WiFi Signal: " + String(WiFi.RSSI()) + " dBm\n";
+    message += "Free Heap: " + String(ESP.getFreeHeap() / 1024) + " KB\n";
+    message += "Time: " + getFormattedTime() + " " + getFormattedDate();
+    
+    sendPushbulletNotification(title, message);
 }
 

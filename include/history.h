@@ -30,6 +30,12 @@ void getFormattedDateTime(char* buffer, size_t bufferSize);
 #define CALIB_DATA_SIZE 300       // wiele floatów kalibracji
 #define HCHO_DATA_SIZE 32         // 5 floats + flags
 #define FAN_DATA_SIZE 16          // dutyCycle, rpm, flags
+#define BATTERY_DATA_SIZE 32      // voltage, current, power, chargePercent, flags
+#define BATTERY_ENTRY_SIZE 36     // BATTERY_DATA_SIZE + timestamp (4B)
+
+// Rozmiary historii dla baterii
+#define BATTERY_FAST_HISTORY 360  // 1 godzina (co 10s)
+#define BATTERY_SLOW_HISTORY 288  // 24 godziny (co 5min)
 
 // Struktura wpisu historii
 template<typename T>
@@ -274,6 +280,7 @@ private:
     SensorHistory<CalibratedSensorData, CALIB_FAST_HISTORY, CALIB_SLOW_HISTORY>* calibHistory;
     SensorHistory<HCHOData, HCHO_FAST_HISTORY, HCHO_SLOW_HISTORY>* hchoHistory;
     SensorHistory<FanData, FAN_FAST_HISTORY, FAN_SLOW_HISTORY>* fanHistory;
+    SensorHistory<BatteryData, BATTERY_FAST_HISTORY, BATTERY_SLOW_HISTORY>* batteryHistory;
     
     bool initialized = false;
     size_t totalMemoryUsed = 0;
@@ -299,6 +306,7 @@ public:
     SensorHistory<CalibratedSensorData, CALIB_FAST_HISTORY, CALIB_SLOW_HISTORY>* getCalibHistory() { return calibHistory; }
     SensorHistory<HCHOData, HCHO_FAST_HISTORY, HCHO_SLOW_HISTORY>* getHCHOHistory() { return hchoHistory; }
     SensorHistory<FanData, FAN_FAST_HISTORY, FAN_SLOW_HISTORY>* getFanHistory() { return fanHistory; }
+    SensorHistory<BatteryData, BATTERY_FAST_HISTORY, BATTERY_SLOW_HISTORY>* getBatteryHistory() { return batteryHistory; }
     
     bool isInitialized() const { return initialized; }
     size_t getTotalMemoryUsed() const { return totalMemoryUsed; }

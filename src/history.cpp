@@ -299,6 +299,24 @@ bool HistoryManager::initialize() {
         }
     }
     
+    // Battery history - always enabled if INA219 is enabled
+    if (config.enableINA219) {
+        batteryHistory = new SensorHistory<BatteryData, BATTERY_FAST_HISTORY, BATTERY_SLOW_HISTORY>();
+        if (batteryHistory && batteryHistory->initialize()) {
+            safePrint("Battery history initialized: ");
+            safePrint(String(BATTERY_FAST_HISTORY));
+            safePrint(" fast + ");
+            safePrint(String(BATTERY_SLOW_HISTORY));
+            safePrint(" slow samples (");
+            safePrint(String((BATTERY_FAST_HISTORY + BATTERY_SLOW_HISTORY) * BATTERY_ENTRY_SIZE));
+            safePrintln(" bytes)");
+            totalMemoryUsed += (BATTERY_FAST_HISTORY + BATTERY_SLOW_HISTORY) * BATTERY_ENTRY_SIZE;
+        } else {
+            safePrintln("Failed to initialize Battery history");
+            allSuccess = false;
+        }
+    }
+    
     // Fan history - only if enabled
     if (config.enableFan) {
         fanHistory = new SensorHistory<FanData, FAN_FAST_HISTORY, FAN_SLOW_HISTORY>();
@@ -427,6 +445,14 @@ void HistoryManager::updateHistory() {
             }
         }
         
+        // Battery data - always if INA219 enabled
+        if (batteryHistory && config.enableINA219) {
+            extern BatteryData batteryData;
+            if (batteryData.valid) {
+                batteryHistory->addFastSample(batteryData, currentTime);
+            }
+        }
+        
         // Fan data - only if enabled
         if (fanHistory && config.enableFan) {
             FanData fanData;
@@ -511,6 +537,14 @@ void HistoryManager::updateHistory() {
             HCHOData slowAvg = getHCHOSlowAverage();
             if (slowAvg.valid) {
                 hchoHistory->addSlowSample(slowAvg, currentTime);
+            }
+        }
+        
+        // Battery slow samples - always if INA219 enabled
+        if (batteryHistory && config.enableINA219) {
+            extern BatteryData batteryData;
+            if (batteryData.valid) {
+                batteryHistory->addSlowSample(batteryData, currentTime);
             }
         }
         
@@ -853,6 +887,36 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
                 data["busVoltage"] = round(buffer[i].data.busVoltage * 1000) / 1000.0;
                 data["current"] = round(buffer[i].data.current * 100) / 100.0;
                 data["power"] = round(buffer[i].data.power * 100) / 100.0;
+                totalSamples++;
+            }
+        }
+    } else if (sensor == "battery") {
+        auto* batteryHist = historyManager.getBatteryHistory();
+        if (batteryHist && batteryHist->isInitialized()) {
+            HistoryEntry<BatteryData> buffer[MAX_SAMPLES];
+            size_t count;
+            if (sampleType == "slow") {
+                count = batteryHist->getSlowSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            } else {
+                count = batteryHist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
+            }
+            
+            for (size_t i = 0; i < count; i++) {
+                if (ESP.getFreeHeap() < 10000) {
+                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (battery), stopping at sample " + String(i));
+                    break;
+                }
+                JsonObject sample = dataArray.createNestedObject();
+                sample["timestamp"] = buffer[i].timestamp;
+                sample["dateTime"] = buffer[i].dateTime;
+                JsonObject data = sample.createNestedObject("data");
+                data["voltage"] = round(buffer[i].data.voltage * 1000) / 1000.0;
+                data["current"] = round(buffer[i].data.current * 100) / 100.0;
+                data["power"] = round(buffer[i].data.power * 100) / 100.0;
+                data["chargePercent"] = buffer[i].data.chargePercent;
+                data["isBatteryPowered"] = buffer[i].data.isBatteryPowered;
+                data["lowBattery"] = buffer[i].data.lowBattery;
+                data["criticalBattery"] = buffer[i].data.criticalBattery;
                 totalSamples++;
             }
         }

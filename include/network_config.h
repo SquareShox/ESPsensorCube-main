@@ -4,6 +4,8 @@
 #include <config.h>
 
 // Function declarations
+bool cleanLittleFS();
+bool checkAndRepairLittleFS();
 bool initLittleFS();
 bool saveNetworkConfig(const NetworkConfig& config);
 bool loadNetworkConfig(NetworkConfig& config);
@@ -13,6 +15,10 @@ bool applyNetworkConfig();
 String getNetworkConfigJson();
 bool deleteAllConfig();
 String listLittleFSFiles();
+
+// Main system configuration functions
+bool saveSystemConfig(const FeatureConfig& config);
+bool loadSystemConfig(FeatureConfig& config);
 
 // MCP3424 configuration functions
 bool saveMCP3424Config(const MCP3424Config& config);
