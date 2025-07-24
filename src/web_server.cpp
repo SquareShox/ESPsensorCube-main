@@ -592,6 +592,9 @@ void initializeWebServer() {
     server.on("/common.js", HTTP_GET, [](AsyncWebServerRequest *request) {
         request->send(200, "text/javascript", common_js);
     });
+    server.on("/common.js", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/javascript", common_js);
+    });
     server.on("/test", HTTP_GET, [](AsyncWebServerRequest *request) {
         request->send(200, "text/plain", "WebSocket test: " + String(ws.count()) + " clients connected");
     });
