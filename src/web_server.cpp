@@ -575,19 +575,22 @@ void initializeWiFi() {
 void initializeWebServer() {
     if (!config.enableWebServer || !config.enableWiFi) return;
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send(200, "text/html", update_html);
+        request->send(200, "text/html", String(update_html) + common_js);
     });
     server.on("/dashboard", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send(200, "text/html", dashboard_html);
+        request->send(200, "text/html", String(dashboard_html) + common_js);
     });
     server.on("/charts", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send(200, "text/html", charts_html);
+        request->send(200, "text/html", String(charts_html) + common_js);
     });
     server.on("/network", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send(200, "text/html", network_config_html);
+        request->send(200, "text/html", String(network_config_html) + common_js);
     });
     server.on("/mcp3424", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send(200, "text/html", mcp3424_config_html);
+        request->send(200, "text/html", String(mcp3424_config_html) + common_js);
+    });
+    server.on("/common.js", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/javascript", common_js);
     });
     server.on("/common.js", HTTP_GET, [](AsyncWebServerRequest *request) {
         request->send(200, "text/javascript", common_js);
