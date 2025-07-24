@@ -1,5 +1,5 @@
-#ifndef CHART_H
-#define CHART_H
+#ifndef CHARTS_HTML_H
+#define CHARTS_HTML_H
 
 const char *charts_html = R"rawliteral(
 <!DOCTYPE html>
@@ -249,6 +249,7 @@ const char *charts_html = R"rawliteral(
     }
   }
 </style>
+<script src="/common.js"></script>
 </head>
 <body>
   <div class="header">
@@ -1631,4 +1632,4 @@ window.addEventListener('beforeunload', function() {
 </html>
 )rawliteral";
 
-#endif // CHART_H 
+#endif // CHARTS_HTML_H 

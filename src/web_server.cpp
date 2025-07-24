@@ -1,6 +1,10 @@
 #include <web_server.h>
-#include <html.h>
-#include <chart.h>
+#include <update_html.h>
+#include <dashboard_html.h>
+#include <network_config_html.h>
+#include <mcp3424_config_html.h>
+#include <charts_html.h>
+#include <common_js.h>
 #include <sensors.h>
 #include <calib.h>
 #include <network_config.h>
@@ -584,6 +588,9 @@ void initializeWebServer() {
     });
     server.on("/mcp3424", HTTP_GET, [](AsyncWebServerRequest *request) {
         request->send(200, "text/html", mcp3424_config_html);
+    });
+    server.on("/common.js", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/javascript", common_js);
     });
     server.on("/test", HTTP_GET, [](AsyncWebServerRequest *request) {
         request->send(200, "text/plain", "WebSocket test: " + String(ws.count()) + " clients connected");
