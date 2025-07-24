@@ -28,14 +28,14 @@ void initializeFan() {
     // Configure PWM for fan control
     ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RESOLUTION);
     ledcAttachPin(PWM_PIN, PWM_CHANNEL);
-    ledcWrite(PWM_CHANNEL, 0); // Start with fan off
+    ledcWrite(PWM_CHANNEL, 128); // Start with fan off
     
     // Configure tacho pin as input with pullup
     pinMode(TACHO_PIN, INPUT_PULLUP);
     
     // Configure GLine pin as output
     pinMode(GLine_PIN, OUTPUT);
-    digitalWrite(GLine_PIN, LOW); // Start with router off
+    digitalWrite(GLine_PIN, HIGH); // Start with router ON
     
     safePrintln("Fan system initialized");
     safePrintln("PWM Pin: " + String(PWM_PIN) + " (Channel " + String(PWM_CHANNEL) + ")");

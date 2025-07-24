@@ -27,10 +27,10 @@
 #define IPS_TX_PIN 4         // Serial1 TX for IPS
 #define HCHO_RX_PIN 9       // HCHO sensor UART RX pin
 #define HCHO_TX_PIN 10        // HCHO sensor UART TX pin
-#define TACHO_PIN 1
-#define PWM_PIN 12 
-#define GLine_PIN 11
-#define OFF_PIN 13
+#define TACHO_PIN 11
+#define PWM_PIN 13 
+#define GLine_PIN 12
+#define OFF_PIN 1
 
 // Serial Configuration
 #define SERIAL_BAUD 115200

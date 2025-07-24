@@ -452,18 +452,21 @@ String getAllSensorJson() {
 
 void wsBroadcastTask(void *parameter) {
     for (;;) {
+        // Sprawdz polaczenia WebSocket i zarzadzaj pamiecia
+        checkWebSocketConnections();
+        
         // Skip broadcast if memory is low
         if (ESP.getFreeHeap() > 20000) {
             // Użyj getAllSensorJson zamiast broadcastSensorData
             String jsonData = getAllSensorJson();
             if (jsonData.length() > 0) {
                 ws.textAll(jsonData);
-                safePrintln("WebSocket broadcast: " + String(jsonData.length()) + " bytes");
+           //     safePrintln("WebSocket broadcast: " + String(jsonData.length()) + " bytes");
             } else {
-                safePrintln("WebSocket broadcast: empty JSON");
+            //    safePrintln("WebSocket broadcast: empty JSON");
             }
         } else {
-            safePrintln("Skipping WebSocket broadcast - low memory: " + String(ESP.getFreeHeap()));
+          //  safePrintln("Skipping WebSocket broadcast - low memory: " + String(ESP.getFreeHeap()));
         }
         vTaskDelay(10000 / portTICK_PERIOD_MS); // 10s
     }
@@ -476,12 +479,8 @@ void timeCheckTask(void *parameter) {
             time_t now = time(nullptr);
             if (now > 8 * 3600 * 2) { // > year 1970
                 timeInitialized = true;
-                safePrintln("Time synchronized: " + getFormattedTime() + " " + getFormattedDate());
-                if (config.enablePushbullet && strlen(config.pushbulletToken) > 0) {
-                    // Wait a bit for WiFi to stabilize
-                    //delay(5000);
-                    
-                }
+              //  safePrintln("Time synchronized: " + getFormattedTime() + " " + getFormattedDate());
+               
             }
         }
         vTaskDelay(10000 / portTICK_PERIOD_MS); // Check every 10 seconds
@@ -677,8 +676,8 @@ void initializeWebServer() {
     initializeWebSocket(ws);
     server.addHandler(&ws);
     server.begin();
-    safePrintln("Web server started");
-    safePrintln("WebSocket initialized and ready");
+    // safePrintln("Web server started");
+    // safePrintln("WebSocket initialized and ready");
     xTaskCreatePinnedToCore(wsBroadcastTask, "wsBroadcastTask", 4096, NULL, 1, NULL, 1);
     xTaskCreatePinnedToCore(WiFiReconnectTask, "wifiReconnectTask", 4096, NULL, 1, NULL, 0);
     xTaskCreatePinnedToCore(timeCheckTask, "timeCheckTask", 2048, NULL, 1, NULL, 0);

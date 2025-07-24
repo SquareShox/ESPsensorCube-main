@@ -8,10 +8,33 @@
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 #include <network_config.h>
+#include <esp_task_wdt.h>
 
 // Forward declarations for safe printing functions
 void safePrint(const String& message);
 void safePrintln(const String& message);
+
+// Struktura do sledzenia klientow WebSocket
+struct WebSocketClientInfo {
+    AsyncWebSocketClient* client;
+    unsigned long lastPingTime;
+    unsigned long lastPongTime;
+    bool pingSent;
+    bool isActive;
+};
+
+#define MAX_WS_CLIENTS 5
+WebSocketClientInfo wsClients[MAX_WS_CLIENTS];
+int wsClientCount = 0;
+
+// Zmienne globalne dla zarzadzania pamiecia WebSocket
+unsigned long lastPingTime = 0;
+unsigned long lastCleanupTime = 0;
+unsigned long lastMemoryCheck = 0;
+unsigned long lastNativePingTime = 0;
+
+// External WebSocket object
+extern AsyncWebSocket ws;
 
 // External sensor data
 extern SolarData solarData;
@@ -1403,57 +1426,7 @@ void handleSystemCommand(AsyncWebSocketClient* client, JsonDocument& doc) {
     client->text(responseStr);
 }
 
-void handleCalibrationCommand(AsyncWebSocketClient* client, JsonDocument& doc) {
-    String command = doc["command"] | "";
-    
-    DynamicJsonDocument response(2048);
-    response["cmd"] = "calibration";
-    response["command"] = command;
-    
-    if (command == "start") {
-        // Start kalibracji
-        response["success"] = true;
-        response["message"] = "Calibration started";
-        
-    } else if (command == "stop") {
-        // Stop kalibracji
-        response["success"] = true;
-        response["message"] = "Calibration stopped";
-        
-    } else if (command == "reset") {
-        // Reset kalibracji
-        response["success"] = true;
-        response["message"] = "Calibration reset";
-        
-    } else if (command == "status") {
-        // Status kalibracji
-        response["success"] = true;
-        response["enabled"] = calibConfig.enableCalibration;
-        response["valid"] = calibratedData.valid;
-        if (calibratedData.valid) {
-            JsonObject data = response.createNestedObject("data");
-            data["CO"] = calibratedData.CO;
-            data["NO"] = calibratedData.NO;
-            data["NO2"] = calibratedData.NO2;
-            data["O3"] = calibratedData.O3;
-            data["SO2"] = calibratedData.SO2;
-            data["H2S"] = calibratedData.H2S;
-            data["NH3"] = calibratedData.NH3;
-            data["VOC"] = calibratedData.VOC;
-            data["VOC_ppb"] = calibratedData.VOC_ppb;
-            data["HCHO"] = calibratedData.HCHO;
-            data["PID"] = calibratedData.PID;
-        }
-        
-    } else {
-        response["success"] = false;
-        response["error"] = "Unknown calibration command: " + command;
-    }
-    
-    String responseStr;
-    serializeJson(response, responseStr);
-    client->text(responseStr);
-}
+
 
 // Główna funkcja obsługi WebSocket
 void handleWebSocketMessage(AsyncWebSocketClient* client, void* arg, uint8_t* data, size_t len) {
@@ -1461,12 +1434,16 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, void* arg, uint8_t* da
     
     // Sprawdź dostępną pamięć
     if (ESP.getFreeHeap() < 10000) {
+        safePrintln("WebSocket: Low memory in message handler: " + String(ESP.getFreeHeap()));
         DynamicJsonDocument errorResponse(1024);
         errorResponse["error"] = "Low memory";
         errorResponse["freeHeap"] = ESP.getFreeHeap();
         String errorStr;
         serializeJson(errorResponse, errorStr);
         client->text(errorStr);
+        
+        // Wymus czyszczenie pamieci
+        cleanupWebSocketMemory();
         return;
     }
     
@@ -1502,8 +1479,18 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, void* arg, uint8_t* da
         handleGetConfig(client, doc);
     } else if (cmd == "system") {
         handleSystemCommand(client, doc);
-    } else if (cmd == "calibration") {
-        handleCalibrationCommand(client, doc);
+    } else if (cmd == "pingpong") {
+        // Natywne ping/pong jest obsługiwane przez WebSocket framework
+        // Ta komenda jest zachowana dla kompatybilności z frontendem
+        DynamicJsonDocument response(256);
+        response["cmd"] = "pingpong";
+        response["command"] = "pong";
+        response["timestamp"] = millis();
+        response["freeHeap"] = ESP.getFreeHeap();
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
     } else if (cmd == "getNetworkConfig") {
         // Handle network config request
         DynamicJsonDocument response(2048);
@@ -1804,6 +1791,156 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, void* arg, uint8_t* da
         serializeJson(errorResponse, errorStr);
         client->text(errorStr);
     }
+    
+    // Sprawdz pamiec po przetworzeniu wiadomosci
+    if (ESP.getFreeHeap() < 15000) {
+       // safePrintln("WebSocket: Low memory after message processing: " + String(ESP.getFreeHeap()));
+        cleanupWebSocketMemory();
+    }
+}
+
+// Funkcja dodawania klienta do sledzenia
+void addWebSocketClient(AsyncWebSocketClient* client) {
+    if (wsClientCount < MAX_WS_CLIENTS) {
+        wsClients[wsClientCount].client = client;
+        wsClients[wsClientCount].lastPingTime = 0;
+        wsClients[wsClientCount].lastPongTime = millis();
+        wsClients[wsClientCount].pingSent = false;
+        wsClients[wsClientCount].isActive = true;
+        wsClientCount++;
+        safePrintln("WebSocket: Client added to tracking, total: " + String(wsClientCount));
+    }
+}
+
+// Funkcja usuwania klienta ze sledzenia
+void removeWebSocketClient(AsyncWebSocketClient* client) {
+    for (int i = 0; i < wsClientCount; i++) {
+        if (wsClients[i].client == client) {
+            // Przesun pozostale klienty
+            for (int j = i; j < wsClientCount - 1; j++) {
+                wsClients[j] = wsClients[j + 1];
+            }
+            wsClientCount--;
+            safePrintln("WebSocket: Client removed from tracking, remaining: " + String(wsClientCount));
+            break;
+        }
+    }
+}
+
+// Funkcja aktualizacji czasu pong dla klienta
+void updateClientPongTime(AsyncWebSocketClient* client) {
+    for (int i = 0; i < wsClientCount; i++) {
+        if (wsClients[i].client == client) {
+            wsClients[i].lastPongTime = millis();
+            wsClients[i].pingSent = false;
+            wsClients[i].isActive = true;
+            break;
+        }
+    }
+}
+
+// Funkcja wysylania natywnego ping WebSocket
+void sendNativePing(AsyncWebSocketClient* client) {
+    if (client && client->status() == 1) { // WS_CONNECTED = 1
+        client->ping();
+      //  safePrintln("WebSocket: Native ping sent to client");
+    }
+}
+
+// Funkcja sprawdzania i czyszczenia nieaktywnych klientow
+void cleanupInactiveClients() {
+    unsigned long currentTime = millis();
+    const unsigned long PING_TIMEOUT = 30000; // 30 sekund
+    const unsigned long PONG_TIMEOUT = 10000; // 10 sekund
+    
+    for (int i = wsClientCount - 1; i >= 0; i--) {
+        if (!wsClients[i].isActive) continue;
+        
+        // Sprawdz czy klient odpowiada na ping
+        if (wsClients[i].pingSent && (currentTime - wsClients[i].lastPingTime > PONG_TIMEOUT)) {
+            safePrintln("WebSocket: Client timeout - no pong response");
+            wsClients[i].client->close();
+            wsClients[i].isActive = false;
+            removeWebSocketClient(wsClients[i].client);
+            continue;
+        }
+        
+        // Sprawdz czy klient jest aktywny
+        if (currentTime - wsClients[i].lastPongTime > PING_TIMEOUT) {
+            if (!wsClients[i].pingSent) {
+                // Wyslij ping
+                sendNativePing(wsClients[i].client);
+                wsClients[i].lastPingTime = currentTime;
+                wsClients[i].pingSent = true;
+              //  safePrintln("WebSocket: Sending ping to inactive client");
+            }
+        }
+    }
+}
+
+// Funkcja wysylania natywnego ping WebSocket (zachowana dla kompatybilnosci)
+void sendPingToClient(AsyncWebSocketClient* client) {
+    sendNativePing(client);
+}
+
+// Funkcja sprawdzania polaczen WebSocket
+void checkWebSocketConnections() {
+    unsigned long currentTime = millis();
+    
+    // Sprawdz pamiec co 30 sekund
+    if (currentTime - lastMemoryCheck > 30000) {
+        lastMemoryCheck = currentTime;
+        
+        uint32_t freeHeap = ESP.getFreeHeap();
+      //  safePrintln("WebSocket memory check - Free heap: " + String(freeHeap) + " bytes");
+        
+        // Jezeli pamiec jest niska, wymus czyszczenie
+        if (freeHeap < 30000) {
+            safePrintln("WebSocket: Low memory detected, forcing cleanup");
+            cleanupWebSocketMemory();
+        }
+    }
+    
+    // Sprawdz nieaktywne klienty co 15 sekund
+    if (currentTime - lastNativePingTime > 15000) {
+        lastNativePingTime = currentTime;
+        cleanupInactiveClients();
+    }
+    
+    // Czyszczenie pamieci co 5 minut
+    if (currentTime - lastCleanupTime > 300000) {
+        lastCleanupTime = currentTime;
+        safePrintln("WebSocket: Periodic memory cleanup");
+        cleanupWebSocketMemory();
+    }
+}
+
+// Funkcja czyszczenia pamieci WebSocket
+void cleanupWebSocketMemory() {
+    safePrintln("WebSocket: Starting memory cleanup");
+    
+    uint32_t freeHeapBefore = ESP.getFreeHeap();
+    
+    // Sprawdz nieaktywne klienty i wymus czyszczenie
+    cleanupInactiveClients();
+    
+    // Sprawdz czy klienci odpowiadaja
+    safePrintln("WebSocket: Tracked clients: " + String(wsClientCount) + ", Total clients: " + String(ws.count()));
+    
+    // Użyj inteligentnego czyszczenia pamięci
+    intelligentMemoryCleanup();
+    
+    uint32_t freeHeapAfter = ESP.getFreeHeap();
+    int32_t recovered = (int32_t)freeHeapAfter - (int32_t)freeHeapBefore;
+    
+    safePrintln("WebSocket: Memory cleanup completed. Before: " + String(freeHeapBefore) + 
+                " bytes, After: " + String(freeHeapAfter) + " bytes, Recovered: " + String(recovered) + " bytes");
+    
+    // Jezeli pamiec nadal jest niska, zaloguj ostrzezenie
+    if (freeHeapAfter < 20000) {
+        safePrintln("WebSocket: WARNING - Memory still low after cleanup!");
+        safePrintln("WebSocket: Consider running MEMORY_EMERGENCY command for aggressive cleanup");
+    }
 }
 
 // Funkcja inicjalizacji WebSocket
@@ -1812,104 +1949,209 @@ void initializeWebSocket(AsyncWebSocket& ws) {
         if (type == WS_EVT_CONNECT) {
             safePrintln("WebSocket client connected");
             
-            // Wyślij powitalną wiadomość
-            DynamicJsonDocument welcome(512);   
-            welcome["cmd"] = "welcome";
-            welcome["message"] = "WebSocket connected";
-            welcome["uptime"] = millis() / 1000;
-            welcome["version"] = "1.0";
+            // Dodaj klienta do sledzenia
+            addWebSocketClient(client);
             
-            String welcomeStr;
-            serializeJson(welcome, welcomeStr);
-            client->text(welcomeStr);
+            // Sprawdz pamiec przed wyslaniem powitalnej wiadomosci
+            if (ESP.getFreeHeap() > 15000) {
+                // Wyślij powitalną wiadomość
+                DynamicJsonDocument welcome(512);   
+                welcome["cmd"] = "welcome";
+                welcome["message"] = "WebSocket connected";
+                welcome["uptime"] = millis() / 1000;
+                welcome["version"] = "1.0";
+                welcome["freeHeap"] = ESP.getFreeHeap();
+                
+                String welcomeStr;
+                serializeJson(welcome, welcomeStr);
+                client->text(welcomeStr);
+            } else {
+                safePrintln("WebSocket: Low memory, skipping welcome message");
+            }
             
         } else if (type == WS_EVT_DISCONNECT) {
             safePrintln("WebSocket client disconnected");
+            
+            // Usun klienta ze sledzenia
+            removeWebSocketClient(client);
+            
+            // Wymus czyszczenie pamieci po rozlaczeniu
+            if (ESP.getFreeHeap() < 40000) {
+                safePrintln("WebSocket: Forcing memory cleanup after disconnect");
+                cleanupWebSocketMemory();
+            }
+            
+            // Zaloguj liczbe pozostalych klientow
+            safePrintln("WebSocket: Remaining clients: " + String(server->count()));
+            
+        } else if (type == WS_EVT_PONG) {
+            // Klient odpowiedzial na ping
+            safePrintln("WebSocket: Pong received from client");
+            updateClientPongTime(client);
+            
+        } else if (type == WS_EVT_ERROR) {
+            safePrintln("WebSocket: Error event");
+            removeWebSocketClient(client);
+            
         } else if (type == WS_EVT_DATA) {
-            handleWebSocketMessage(client, arg, data, len);
+            // Aktualizuj czas aktywnosci klienta
+            updateClientPongTime(client);
+            
+            // Sprawdz pamiec przed przetwarzaniem wiadomosci
+            if (ESP.getFreeHeap() > 10000) {
+                handleWebSocketMessage(client, arg, data, len);
+            } else {
+                safePrintln("WebSocket: Low memory, skipping message processing");
+                
+                // Wyslij blad pamieci do klienta
+                DynamicJsonDocument errorResponse(256);
+                errorResponse["error"] = "Low memory";
+                errorResponse["freeHeap"] = ESP.getFreeHeap();
+                String errorStr;
+                serializeJson(errorResponse, errorStr);
+                client->text(errorStr);
+            }
         }
     });
     
-    safePrintln("WebSocket initialized");
+    safePrintln("WebSocket initialized with native ping/pong management");
 }
 
 // Funkcja do wysyłania danych do wszystkich klientów WebSocket
-void broadcastSensorData(AsyncWebSocket& ws) {
-    if (ws.count() == 0) return; // Brak klientów
+
+// ==============================================
+// ZAAWANSOWANE CZYSZCZENIE PAMIECI
+// ==============================================
+
+void forceGarbageCollection() {
+    safePrintln("WebSocket: Starting forced garbage collection");
     
-    // Sprawdź pamięć
-    if (ESP.getFreeHeap() < 15000) return;
+    uint32_t heap_before = ESP.getFreeHeap();
+    uint32_t internal_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    uint32_t spiram_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     
-    DynamicJsonDocument doc(2048);  
-    doc["cmd"] = "update";
-    doc["timestamp"] = millis();
-    doc["uptime"] = millis() / 1000;
-    doc["freeHeap"] = ESP.getFreeHeap();
-    
-    // Dodaj dane sensorów
-    JsonObject sensors = doc.createNestedObject("sensors");
-    
-    // SHT40
-    if (sht40SensorStatus && sht40Data.valid) {
-        JsonObject sht40 = sensors.createNestedObject("sht40");
-        sht40["temperature"] = sht40Data.temperature;
-        sht40["humidity"] = sht40Data.humidity;
-        sht40["pressure"] = sht40Data.pressure;
-        sht40["valid"] = true;
+    // 1. Sprawdz integralnosc heap
+    bool integrity_ok = heap_caps_check_integrity_all(false);
+    if (!integrity_ok) {
+        safePrintln("ALERT: Heap corruption detected during cleanup!");
     }
     
-    // SPS30
-    if (sps30SensorStatus && sps30Data.valid) {
-        JsonObject sps30 = sensors.createNestedObject("sps30");
-        sps30["PM1"] = sps30Data.pm1_0;
-        sps30["PM25"] = sps30Data.pm2_5;
-        sps30["PM4"] = sps30Data.pm4_0;
-        sps30["PM10"] = sps30Data.pm10;
-        sps30["NC05"] = sps30Data.nc0_5;
-        sps30["NC1"] = sps30Data.nc1_0;
-        sps30["NC25"] = sps30Data.nc2_5;
-        sps30["NC4"] = sps30Data.nc4_0;
-        sps30["NC10"] = sps30Data.nc10;
-        sps30["TPS"] = sps30Data.typical_particle_size;
-        sps30["valid"] = true;
+    // 2. Wymus defragmentacje przez wielokrotne alokacje/dealokacje
+    const int NUM_ATTEMPTS = 5;
+    const size_t BLOCK_SIZES[] = {64, 128, 256, 512, 1024};
+    
+    for (int attempt = 0; attempt < NUM_ATTEMPTS; attempt++) {
+        void* ptrs[20];
+        int allocated = 0;
+        
+        // Alokuj bloki różnej wielkości
+        for (int i = 0; i < 20; i++) {
+            size_t size = BLOCK_SIZES[i % 5];
+            ptrs[i] = heap_caps_malloc(size, MALLOC_CAP_INTERNAL);
+            if (ptrs[i]) {
+                allocated++;
+                // Wypelnij losowymi danymi aby wymusic fizyczne uzycie
+                memset(ptrs[i], (uint8_t)(i + attempt), size);
+            }
+        }
+        
+        // Zwolnij w odwrotnej kolejności
+        for (int i = allocated - 1; i >= 0; i--) {
+            if (ptrs[i]) {
+                heap_caps_free(ptrs[i]);
+                ptrs[i] = nullptr;
+            }
+        }
+        
+        // Mikro-delay między próbami
+        delayMicroseconds(100);
     }
     
-    // CO2
-    if (scd41SensorStatus && i2cSensorData.valid && i2cSensorData.type == SENSOR_SCD41) {
-        JsonObject co2 = sensors.createNestedObject("co2");
-        co2["co2"] = i2cSensorData.co2;
-        co2["valid"] = true;
+    // 3. Arduino/FreeRTOS cleanup
+    yield();
+    vTaskDelay(pdMS_TO_TICKS(1)); // FreeRTOS task switch
+    
+    // 4. WebSocket specific cleanup
+    cleanupInactiveClients();
+    
+    // 5. Wymus czyszczenie TCP/IP bufferów
+    WiFi.printDiag(Serial); // To może wymusić czyszczenie WiFi bufferów
+    
+    uint32_t heap_after = ESP.getFreeHeap();
+    uint32_t internal_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    uint32_t spiram_after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    
+    int32_t heap_recovered = (int32_t)heap_after - (int32_t)heap_before;
+    int32_t internal_recovered = (int32_t)internal_after - (int32_t)internal_before;
+    int32_t spiram_recovered = (int32_t)spiram_after - (int32_t)spiram_before;
+    
+    safePrintln("Forced GC Results:");
+    safePrintln("- Total heap recovered: " + String(heap_recovered) + " bytes");
+    safePrintln("- Internal recovered: " + String(internal_recovered) + " bytes");
+    safePrintln("- SPIRAM recovered: " + String(spiram_recovered) + " bytes");
+    safePrintln("- Final free heap: " + String(heap_after) + " bytes");
+    
+    if (heap_recovered > 1000) {
+        safePrintln("SUCCESS: Significant memory recovered!");
+    } else if (heap_recovered > 0) {
+        safePrintln("INFO: Some memory recovered");
+    } else {
+        safePrintln("WARNING: No memory recovered - possible leak");
     }
-    
-    // Power
-    if (ina219SensorStatus && ina219Data.valid) {
-        JsonObject power = sensors.createNestedObject("power");
-        power["busVoltage"] = ina219Data.busVoltage;
-        power["current"] = ina219Data.current;
-        power["power"] = ina219Data.power;
-        power["valid"] = true;
-    }
-    
-    // HCHO
-    if (hchoSensorStatus && hchoData.valid) {
-        JsonObject hcho = sensors.createNestedObject("hcho");
-        hcho["hcho_mg"] = hchoData.hcho;
-        hcho["hcho_ppb"] = hchoData.hcho_ppb;
-        hcho["valid"] = true;
-    }
-    
-    // Fan control system
-    JsonObject fan = sensors.createNestedObject("fan");
-    fan["enabled"] = config.enableFan && isFanEnabled();
-    fan["dutyCycle"] = config.enableFan ? getFanDutyCycle() : 0;
-    fan["rpm"] = config.enableFan ? getFanRPM() : 0;
-    fan["glineEnabled"] = config.enableFan && isGLineEnabled();
-    fan["pwmValue"] = config.enableFan ? map(getFanDutyCycle(), 0, 100, 0, 255) : 0;
-    fan["valid"] = config.enableFan;
-    
-    String jsonStr;
-    serializeJson(doc, jsonStr);
-    
-    // Wyślij do wszystkich klientów
-    ws.textAll(jsonStr);
 }
+
+void intelligentMemoryCleanup() {
+    uint32_t free_heap = ESP.getFreeHeap();
+    uint32_t min_free = ESP.getMinFreeHeap();
+    
+    safePrintln("Starting intelligent memory cleanup");
+    safePrintln("Current free: " + String(free_heap) + ", Min ever: " + String(min_free));
+    
+    // Determine cleanup strategy based on memory state
+    if (free_heap < 20000) {
+        safePrintln("CRITICAL: Very low memory - aggressive cleanup");
+        forceGarbageCollection();
+        cleanupInactiveClients();
+        
+        // Emergency: close all WebSocket connections if still critical
+        if (ESP.getFreeHeap() < 15000) {
+            safePrintln("EMERGENCY: Closing all WebSocket connections");
+            ws.closeAll();
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+        
+    } else if (free_heap < 40000) {
+        safePrintln("LOW: Moderate cleanup needed");
+        cleanupInactiveClients();
+        
+        // Light defragmentation
+        void* temp = heap_caps_malloc(1024, MALLOC_CAP_INTERNAL);
+        if (temp) {
+            heap_caps_free(temp);
+        }
+        yield();
+        
+    } else {
+        safePrintln("NORMAL: Light maintenance cleanup");
+        cleanupInactiveClients();
+        yield();
+    }
+    
+    uint32_t final_free = ESP.getFreeHeap();
+    safePrintln("Cleanup completed - Final free: " + String(final_free) + " bytes");
+}
+
+// Funkcja do wywołania z main.cpp jako komenda Serial
+void performEmergencyCleanup() {
+    safePrintln("=== EMERGENCY MEMORY CLEANUP ===");
+    forceGarbageCollection();
+    intelligentMemoryCleanup();
+    
+    // Final report
+    safePrintln("=== CLEANUP SUMMARY ===");
+    safePrintln("Free heap: " + String(ESP.getFreeHeap()) + " bytes");
+    safePrintln("Free internal: " + String(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)) + " bytes");
+    safePrintln("Free SPIRAM: " + String(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)) + " bytes");
+    safePrintln("Largest block: " + String(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)) + " bytes");
+}
+

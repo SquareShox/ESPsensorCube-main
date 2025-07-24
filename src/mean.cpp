@@ -1754,63 +1754,133 @@ public:
         
         // Allocate buffers only for enabled sensors
         if (solarEnabled) {
-            solarFastBuffer = new CircularBuffer<SolarData, FAST_BUFFER_SIZE>();
-            solarSlowBuffer = new CircularBuffer<SolarData, SLOW_BUFFER_SIZE>();
-            Serial.println("  - Solar buffers allocated");
+            solarFastBuffer = new(std::nothrow) CircularBuffer<SolarData, FAST_BUFFER_SIZE>();
+            solarSlowBuffer = new(std::nothrow) CircularBuffer<SolarData, SLOW_BUFFER_SIZE>();
+            if (solarFastBuffer && solarSlowBuffer) {
+                Serial.println("  - Solar buffers allocated");
+            } else {
+                Serial.println("  - ERROR: Failed to allocate Solar buffers");
+                delete solarFastBuffer; delete solarSlowBuffer;
+                solarFastBuffer = nullptr; solarSlowBuffer = nullptr;
+                solarEnabled = false;
+            }
         }
         
         if (i2cEnabled) {
-            i2cFastBuffer = new CircularBuffer<I2CSensorData, FAST_BUFFER_SIZE>();
-            i2cSlowBuffer = new CircularBuffer<I2CSensorData, SLOW_BUFFER_SIZE>();
-            Serial.println("  - I2C buffers allocated");
+            i2cFastBuffer = new(std::nothrow) CircularBuffer<I2CSensorData, FAST_BUFFER_SIZE>();
+            i2cSlowBuffer = new(std::nothrow) CircularBuffer<I2CSensorData, SLOW_BUFFER_SIZE>();
+            if (i2cFastBuffer && i2cSlowBuffer) {
+                Serial.println("  - I2C buffers allocated");
+            } else {
+                Serial.println("  - ERROR: Failed to allocate I2C buffers");
+                delete i2cFastBuffer; delete i2cSlowBuffer;
+                i2cFastBuffer = nullptr; i2cSlowBuffer = nullptr;
+                i2cEnabled = false;
+            }
         }
         
         if (sps30Enabled) {
-            sps30FastBuffer = new CircularBuffer<SPS30Data, FAST_BUFFER_SIZE>();
-            sps30SlowBuffer = new CircularBuffer<SPS30Data, SLOW_BUFFER_SIZE>();
-            Serial.println("  - SPS30 buffers allocated");
+            sps30FastBuffer = new(std::nothrow) CircularBuffer<SPS30Data, FAST_BUFFER_SIZE>();
+            sps30SlowBuffer = new(std::nothrow) CircularBuffer<SPS30Data, SLOW_BUFFER_SIZE>();
+            if (sps30FastBuffer && sps30SlowBuffer) {
+                Serial.println("  - SPS30 buffers allocated");
+            } else {
+                Serial.println("  - ERROR: Failed to allocate SPS30 buffers");
+                delete sps30FastBuffer; delete sps30SlowBuffer;
+                sps30FastBuffer = nullptr; sps30SlowBuffer = nullptr;
+                sps30Enabled = false;
+            }
         }
         
         if (ipsEnabled) {
-            ipsFastBuffer = new CircularBuffer<IPSSensorData, FAST_BUFFER_SIZE>();
-            ipsSlowBuffer = new CircularBuffer<IPSSensorData, SLOW_BUFFER_SIZE>();
-            Serial.println("  - IPS buffers allocated");
+            ipsFastBuffer = new(std::nothrow) CircularBuffer<IPSSensorData, FAST_BUFFER_SIZE>();
+            ipsSlowBuffer = new(std::nothrow) CircularBuffer<IPSSensorData, SLOW_BUFFER_SIZE>();
+            if (ipsFastBuffer && ipsSlowBuffer) {
+                Serial.println("  - IPS buffers allocated");
+            } else {
+                Serial.println("  - ERROR: Failed to allocate IPS buffers");
+                delete ipsFastBuffer; delete ipsSlowBuffer;
+                ipsFastBuffer = nullptr; ipsSlowBuffer = nullptr;
+                ipsEnabled = false;
+            }
         }
         
         if (mcp3424Enabled) {
-            mcp3424FastBuffer = new CircularBuffer<MCP3424Data, FAST_BUFFER_SIZE>();
-            mcp3424SlowBuffer = new CircularBuffer<MCP3424Data, SLOW_BUFFER_SIZE>();
-            Serial.println("  - MCP3424 buffers allocated");
+            mcp3424FastBuffer = new(std::nothrow) CircularBuffer<MCP3424Data, FAST_BUFFER_SIZE>();
+            mcp3424SlowBuffer = new(std::nothrow) CircularBuffer<MCP3424Data, SLOW_BUFFER_SIZE>();
+            if (mcp3424FastBuffer && mcp3424SlowBuffer) {
+                Serial.println("  - MCP3424 buffers allocated");
+            } else {
+                Serial.println("  - ERROR: Failed to allocate MCP3424 buffers");
+                delete mcp3424FastBuffer; delete mcp3424SlowBuffer;
+                mcp3424FastBuffer = nullptr; mcp3424SlowBuffer = nullptr;
+                mcp3424Enabled = false;
+            }
         }
         
         if (ads1110Enabled) {
-            ads1110FastBuffer = new CircularBuffer<ADS1110Data, FAST_BUFFER_SIZE>();
-            ads1110SlowBuffer = new CircularBuffer<ADS1110Data, SLOW_BUFFER_SIZE>();
-            Serial.println("  - ADS1110 buffers allocated");
+            ads1110FastBuffer = new(std::nothrow) CircularBuffer<ADS1110Data, FAST_BUFFER_SIZE>();
+            ads1110SlowBuffer = new(std::nothrow) CircularBuffer<ADS1110Data, SLOW_BUFFER_SIZE>();
+            if (ads1110FastBuffer && ads1110SlowBuffer) {
+                Serial.println("  - ADS1110 buffers allocated");
+            } else {
+                Serial.println("  - ERROR: Failed to allocate ADS1110 buffers");
+                delete ads1110FastBuffer; delete ads1110SlowBuffer;
+                ads1110FastBuffer = nullptr; ads1110SlowBuffer = nullptr;
+                ads1110Enabled = false;
+            }
         }
         
         if (ina219Enabled) {
-            ina219FastBuffer = new CircularBuffer<INA219Data, FAST_BUFFER_SIZE>();
-            ina219SlowBuffer = new CircularBuffer<INA219Data, SLOW_BUFFER_SIZE>();
-            Serial.println("  - INA219 buffers allocated");
+            ina219FastBuffer = new(std::nothrow) CircularBuffer<INA219Data, FAST_BUFFER_SIZE>();
+            ina219SlowBuffer = new(std::nothrow) CircularBuffer<INA219Data, SLOW_BUFFER_SIZE>();
+            if (ina219FastBuffer && ina219SlowBuffer) {
+                Serial.println("  - INA219 buffers allocated");
+            } else {
+                Serial.println("  - ERROR: Failed to allocate INA219 buffers");
+                delete ina219FastBuffer; delete ina219SlowBuffer;
+                ina219FastBuffer = nullptr; ina219SlowBuffer = nullptr;
+                ina219Enabled = false;
+            }
         }
         
         if (sht40Enabled) {
-            sht40FastBuffer = new CircularBuffer<SHT40Data, FAST_BUFFER_SIZE>();
-            sht40SlowBuffer = new CircularBuffer<SHT40Data, SLOW_BUFFER_SIZE>();
-            Serial.println("  - SHT40 buffers allocated");
+            sht40FastBuffer = new(std::nothrow) CircularBuffer<SHT40Data, FAST_BUFFER_SIZE>();
+            sht40SlowBuffer = new(std::nothrow) CircularBuffer<SHT40Data, SLOW_BUFFER_SIZE>();
+            if (sht40FastBuffer && sht40SlowBuffer) {
+                Serial.println("  - SHT40 buffers allocated");
+            } else {
+                Serial.println("  - ERROR: Failed to allocate SHT40 buffers");
+                delete sht40FastBuffer; delete sht40SlowBuffer;
+                sht40FastBuffer = nullptr; sht40SlowBuffer = nullptr;
+                sht40Enabled = false;
+            }
         }
 
         if (calibEnabled) {
-            calibFastBuffer = new CircularBuffer<CalibratedSensorData, FAST_BUFFER_SIZE>();
-            calibSlowBuffer = new CircularBuffer<CalibratedSensorData, SLOW_BUFFER_SIZE>();
-            Serial.println("  - Calibration buffers allocated");
+            calibFastBuffer = new(std::nothrow) CircularBuffer<CalibratedSensorData, FAST_BUFFER_SIZE>();
+            calibSlowBuffer = new(std::nothrow) CircularBuffer<CalibratedSensorData, SLOW_BUFFER_SIZE>();
+            if (calibFastBuffer && calibSlowBuffer) {
+                Serial.println("  - Calibration buffers allocated");
+            } else {
+                Serial.println("  - ERROR: Failed to allocate Calibration buffers");
+                delete calibFastBuffer; delete calibSlowBuffer;
+                calibFastBuffer = nullptr; calibSlowBuffer = nullptr;
+                calibEnabled = false;
+            }
         }
         
         if (hchoEnabled) {
-            hchoFastBuffer = new CircularBuffer<HCHOData, FAST_BUFFER_SIZE>();
-            hchoSlowBuffer = new CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>();
-            Serial.println("  - HCHO buffers allocated");
+            hchoFastBuffer = new(std::nothrow) CircularBuffer<HCHOData, FAST_BUFFER_SIZE>();
+            hchoSlowBuffer = new(std::nothrow) CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>();
+            if (hchoFastBuffer && hchoSlowBuffer) {
+                Serial.println("  - HCHO buffers allocated");
+            } else {
+                Serial.println("  - ERROR: Failed to allocate HCHO buffers");
+                delete hchoFastBuffer; delete hchoSlowBuffer;
+                hchoFastBuffer = nullptr; hchoSlowBuffer = nullptr;
+                hchoEnabled = false;
+            }
         }
         
         // Calculate total memory usage estimation

@@ -130,7 +130,7 @@ bool HistoryManager::initialize() {
     
     // Initialize history buffers based on enabled sensors
     if (config.enableSolarSensor) {
-        solarHistory = new SensorHistory<SolarData, SOLAR_FAST_HISTORY, SOLAR_SLOW_HISTORY>();
+        solarHistory = new(std::nothrow) SensorHistory<SolarData, SOLAR_FAST_HISTORY, SOLAR_SLOW_HISTORY>();
         if (solarHistory && solarHistory->initialize()) {
             safePrint("Solar history initialized: ");
             safePrint(String(SOLAR_FAST_HISTORY));
@@ -141,13 +141,15 @@ bool HistoryManager::initialize() {
             safePrintln(" bytes)");
             totalMemoryUsed += (SOLAR_FAST_HISTORY + SOLAR_SLOW_HISTORY) * SOLAR_ENTRY_SIZE;
         } else {
-            safePrintln("Failed to initialize Solar history");
+            safePrintln("Failed to initialize Solar history - memory allocation failed");
+            if (solarHistory) delete solarHistory;
+            solarHistory = nullptr;
             allSuccess = false;
         }
     }
     
     if (config.enableI2CSensors) {
-        i2cHistory = new SensorHistory<I2CSensorData, I2C_FAST_HISTORY, I2C_SLOW_HISTORY>();
+        i2cHistory = new(std::nothrow) SensorHistory<I2CSensorData, I2C_FAST_HISTORY, I2C_SLOW_HISTORY>();
         if (i2cHistory && i2cHistory->initialize()) {
             safePrint("I2C history initialized: ");
             safePrint(String(I2C_FAST_HISTORY));
@@ -158,13 +160,15 @@ bool HistoryManager::initialize() {
             safePrintln(" bytes)");
             totalMemoryUsed += (I2C_FAST_HISTORY + I2C_SLOW_HISTORY) * I2C_ENTRY_SIZE;
         } else {
-            safePrintln("Failed to initialize I2C history");
+            safePrintln("Failed to initialize I2C history - memory allocation failed");
+            if (i2cHistory) delete i2cHistory;
+            i2cHistory = nullptr;
             allSuccess = false;
         }
     }
     
     if (config.enableSPS30) {
-        sps30History = new SensorHistory<SPS30Data, SPS30_FAST_HISTORY, SPS30_SLOW_HISTORY>();
+        sps30History = new(std::nothrow) SensorHistory<SPS30Data, SPS30_FAST_HISTORY, SPS30_SLOW_HISTORY>();
         if (sps30History && sps30History->initialize()) {
             safePrint("SPS30 history initialized: ");
             safePrint(String(SPS30_FAST_HISTORY));
@@ -175,13 +179,15 @@ bool HistoryManager::initialize() {
             safePrintln(" bytes)");
             totalMemoryUsed += (SPS30_FAST_HISTORY + SPS30_SLOW_HISTORY) * SPS30_ENTRY_SIZE;
         } else {
-            safePrintln("Failed to initialize SPS30 history");
+            safePrintln("Failed to initialize SPS30 history - memory allocation failed");
+            if (sps30History) delete sps30History;
+            sps30History = nullptr;
             allSuccess = false;
         }
     }
     
     if (config.enableIPS) {
-        ipsHistory = new SensorHistory<IPSSensorData, IPS_FAST_HISTORY, IPS_SLOW_HISTORY>();
+        ipsHistory = new(std::nothrow) SensorHistory<IPSSensorData, IPS_FAST_HISTORY, IPS_SLOW_HISTORY>();
         if (ipsHistory && ipsHistory->initialize()) {
             safePrint("IPS history initialized: ");
             safePrint(String(IPS_FAST_HISTORY));
@@ -192,13 +198,15 @@ bool HistoryManager::initialize() {
             safePrintln(" bytes)");
             totalMemoryUsed += (IPS_FAST_HISTORY + IPS_SLOW_HISTORY) * IPS_ENTRY_SIZE;
         } else {
-            safePrintln("Failed to initialize IPS history");
+            safePrintln("Failed to initialize IPS history - memory allocation failed");
+            if (ipsHistory) delete ipsHistory;
+            ipsHistory = nullptr;
             allSuccess = false;
         }
     }
     
     if (config.enableMCP3424) {
-        mcp3424History = new SensorHistory<MCP3424Data, MCP3424_FAST_HISTORY, MCP3424_SLOW_HISTORY>();
+        mcp3424History = new(std::nothrow) SensorHistory<MCP3424Data, MCP3424_FAST_HISTORY, MCP3424_SLOW_HISTORY>();
         if (mcp3424History && mcp3424History->initialize()) {
             safePrint("MCP3424 history initialized: ");
             safePrint(String(MCP3424_FAST_HISTORY));
@@ -209,13 +217,15 @@ bool HistoryManager::initialize() {
             safePrintln(" bytes)");
             totalMemoryUsed += (MCP3424_FAST_HISTORY + MCP3424_SLOW_HISTORY) * MCP3424_ENTRY_SIZE;
         } else {
-            safePrintln("Failed to initialize MCP3424 history");
+            safePrintln("Failed to initialize MCP3424 history - memory allocation failed");
+            if (mcp3424History) delete mcp3424History;
+            mcp3424History = nullptr;
             allSuccess = false;
         }
     }
     
     if (config.enableADS1110) {
-        ads1110History = new SensorHistory<ADS1110Data, ADS1110_FAST_HISTORY, ADS1110_SLOW_HISTORY>();
+        ads1110History = new(std::nothrow) SensorHistory<ADS1110Data, ADS1110_FAST_HISTORY, ADS1110_SLOW_HISTORY>();
         if (ads1110History && ads1110History->initialize()) {
             safePrint("ADS1110 history initialized: ");
             safePrint(String(ADS1110_FAST_HISTORY));
@@ -226,13 +236,15 @@ bool HistoryManager::initialize() {
             safePrintln(" bytes)");
             totalMemoryUsed += (ADS1110_FAST_HISTORY + ADS1110_SLOW_HISTORY) * ADS1110_ENTRY_SIZE;
         } else {
-            safePrintln("Failed to initialize ADS1110 history");
+            safePrintln("Failed to initialize ADS1110 history - memory allocation failed");
+            if (ads1110History) delete ads1110History;
+            ads1110History = nullptr;
             allSuccess = false;
         }
     }
     
     if (config.enableINA219) {
-        ina219History = new SensorHistory<INA219Data, INA219_FAST_HISTORY, INA219_SLOW_HISTORY>();
+        ina219History = new(std::nothrow) SensorHistory<INA219Data, INA219_FAST_HISTORY, INA219_SLOW_HISTORY>();
         if (ina219History && ina219History->initialize()) {
             safePrint("INA219 history initialized: ");
             safePrint(String(INA219_FAST_HISTORY));
@@ -243,13 +255,15 @@ bool HistoryManager::initialize() {
             safePrintln(" bytes)");
             totalMemoryUsed += (INA219_FAST_HISTORY + INA219_SLOW_HISTORY) * INA219_ENTRY_SIZE;
         } else {
-            safePrintln("Failed to initialize INA219 history");
+            safePrintln("Failed to initialize INA219 history - memory allocation failed");
+            if (ina219History) delete ina219History;
+            ina219History = nullptr;
             allSuccess = false;
         }
     }
     
     if (config.enableSHT40) {
-        sht40History = new SensorHistory<SHT40Data, SHT40_FAST_HISTORY, SHT40_SLOW_HISTORY>();
+        sht40History = new(std::nothrow) SensorHistory<SHT40Data, SHT40_FAST_HISTORY, SHT40_SLOW_HISTORY>();
         if (sht40History && sht40History->initialize()) {
             safePrint("SHT40 history initialized: ");
             safePrint(String(SHT40_FAST_HISTORY));
@@ -260,13 +274,15 @@ bool HistoryManager::initialize() {
             safePrintln(" bytes)");
             totalMemoryUsed += (SHT40_FAST_HISTORY + SHT40_SLOW_HISTORY) * SHT40_ENTRY_SIZE;
         } else {
-            safePrintln("Failed to initialize SHT40 history");
+            safePrintln("Failed to initialize SHT40 history - memory allocation failed");
+            if (sht40History) delete sht40History;
+            sht40History = nullptr;
             allSuccess = false;
         }
     }
     
     if (calibConfig.enableCalibration) {
-        calibHistory = new SensorHistory<CalibratedSensorData, CALIB_FAST_HISTORY, CALIB_SLOW_HISTORY>();
+        calibHistory = new(std::nothrow) SensorHistory<CalibratedSensorData, CALIB_FAST_HISTORY, CALIB_SLOW_HISTORY>();
         if (calibHistory && calibHistory->initialize()) {
             safePrint("Calibration history initialized: ");
             safePrint(String(CALIB_FAST_HISTORY));
@@ -277,13 +293,15 @@ bool HistoryManager::initialize() {
             safePrintln(" bytes)");
             totalMemoryUsed += (CALIB_FAST_HISTORY + CALIB_SLOW_HISTORY) * CALIB_ENTRY_SIZE;
         } else {
-            safePrintln("Failed to initialize Calibration history");
+            safePrintln("Failed to initialize Calibration history - memory allocation failed");
+            if (calibHistory) delete calibHistory;
+            calibHistory = nullptr;
             allSuccess = false;
         }
     }
     
     if (config.enableHCHO) {
-        hchoHistory = new SensorHistory<HCHOData, HCHO_FAST_HISTORY, HCHO_SLOW_HISTORY>();
+        hchoHistory = new(std::nothrow) SensorHistory<HCHOData, HCHO_FAST_HISTORY, HCHO_SLOW_HISTORY>();
         if (hchoHistory && hchoHistory->initialize()) {
             safePrint("HCHO history initialized: ");
             safePrint(String(HCHO_FAST_HISTORY));
@@ -294,14 +312,16 @@ bool HistoryManager::initialize() {
             safePrintln(" bytes)");
             totalMemoryUsed += (HCHO_FAST_HISTORY + HCHO_SLOW_HISTORY) * HCHO_ENTRY_SIZE;
         } else {
-            safePrintln("Failed to initialize HCHO history");
+            safePrintln("Failed to initialize HCHO history - memory allocation failed");
+            if (hchoHistory) delete hchoHistory;
+            hchoHistory = nullptr;
             allSuccess = false;
         }
     }
     
     // Battery history - always enabled if INA219 is enabled
     if (config.enableINA219) {
-        batteryHistory = new SensorHistory<BatteryData, BATTERY_FAST_HISTORY, BATTERY_SLOW_HISTORY>();
+        batteryHistory = new(std::nothrow) SensorHistory<BatteryData, BATTERY_FAST_HISTORY, BATTERY_SLOW_HISTORY>();
         if (batteryHistory && batteryHistory->initialize()) {
             safePrint("Battery history initialized: ");
             safePrint(String(BATTERY_FAST_HISTORY));
@@ -312,14 +332,16 @@ bool HistoryManager::initialize() {
             safePrintln(" bytes)");
             totalMemoryUsed += (BATTERY_FAST_HISTORY + BATTERY_SLOW_HISTORY) * BATTERY_ENTRY_SIZE;
         } else {
-            safePrintln("Failed to initialize Battery history");
+            safePrintln("Failed to initialize Battery history - memory allocation failed");
+            if (batteryHistory) delete batteryHistory;
+            batteryHistory = nullptr;
             allSuccess = false;
         }
     }
     
     // Fan history - only if enabled
     if (config.enableFan) {
-        fanHistory = new SensorHistory<FanData, FAN_FAST_HISTORY, FAN_SLOW_HISTORY>();
+        fanHistory = new(std::nothrow) SensorHistory<FanData, FAN_FAST_HISTORY, FAN_SLOW_HISTORY>();
         if (fanHistory && fanHistory->initialize()) {
             safePrint("Fan history initialized: ");
             safePrint(String(FAN_FAST_HISTORY));
@@ -330,7 +352,9 @@ bool HistoryManager::initialize() {
             safePrintln(" bytes)");
             totalMemoryUsed += (FAN_FAST_HISTORY + FAN_SLOW_HISTORY) * FAN_ENTRY_SIZE;
         } else {
-            safePrintln("Failed to initialize Fan history");
+            safePrintln("Failed to initialize Fan history - memory allocation failed");
+            if (fanHistory) delete fanHistory;
+            fanHistory = nullptr;
             allSuccess = false;
         }
     }

@@ -4,6 +4,10 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <time.h>
+// ESP-IDF heap debugging includes (Arduino compatible)
+#include <esp_heap_caps.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 // Project includes
 #include <config.h>
@@ -12,6 +16,7 @@
 #include <ips_sensor.h>
 #include <modbus_handler.h>
 #include <web_server.h>
+#include <web_socket.h>
 #include <mean.h>
 #include <calib.h>
 #include <network_config.h>
@@ -29,6 +34,9 @@ SerialSensorConfig serialSensorConfigs[MAX_SERIAL_SENSORS];
 // Global battery data
 BatteryData batteryData;
 
+// Simplified memory monitoring
+static unsigned long last_heap_report = 0;
+
 // Hardware objects
 HardwareSerial MySerial(2); // Solar sensor serial
 Adafruit_NeoPixel pixels(1, WS2812_PIN, NEO_GRB + NEO_KHZ800);
@@ -37,6 +45,21 @@ Adafruit_NeoPixel pixels(1, WS2812_PIN, NEO_GRB + NEO_KHZ800);
 bool sendDataFlag = false;
 unsigned long lastSensorCheck = 0;
 unsigned long lastMovingAverageUpdate = 0;
+
+// Heap debugging function declarations (Arduino compatible)
+void initializeHeapDebugging();
+void printHeapInfo();
+void printDetailedHeapInfo();
+void takeHeapSnapshot();
+void printHeapHistory();
+void analyzeMemoryLeaks();
+void performHeapAnalysis();
+void startHeapMonitoring();
+void stopHeapMonitoring();
+void printTaskMemoryStats();
+void printAllTasksMemoryStats();
+void printSingleTaskMemoryStats(const char* taskName);
+
 // Function declarations
 void setup();
 void loop();
@@ -319,6 +342,27 @@ void loop() {
     // Update sensor history
     updateSensorHistory();
     
+    // Periodic heap monitoring (every 2 minutes)
+    // if (currentTime - last_heap_report >= 120000) {
+    //     last_heap_report = currentTime;
+        
+    //     // Take snapshot for history
+    //     takeHeapSnapshot();
+        
+    //     safePrintln("\n=== PERIODIC HEAP MONITOR ===");
+    //     printHeapInfo();
+        
+    //     // Auto-analyze if memory usage is concerning
+    //     uint32_t current_free = ESP.getFreeHeap();
+    //     if (heap_baseline > 0) {
+    //         int32_t memory_change = (int32_t)current_free - (int32_t)heap_baseline;
+    //         if (memory_change < -10000) { // More than 10KB lost
+    //             safePrintln("ALERT: Significant memory loss detected! Starting detailed analysis...");
+    //             analyzeMemoryLeaks();
+    //         }
+    //     }
+    // }
+    
     // Auto reset check
     if (config.autoReset) {
         static unsigned long lastValidData = millis();
@@ -528,14 +572,30 @@ void processSerialCommands() {
                 }
                 
                 // Calibration status
-                safePrintln("Calibration: " + String(calibConfig.enableCalibration ? "ENABLED" : "DISABLED"));
-                if (calibConfig.enableCalibration) {
-                    safePrintln("Calibration Valid: " + String(calibratedData.valid ? "YES" : "NO"));
-                    safePrintln("Last Calibration: " + String((millis() - calibratedData.lastUpdate) / 1000) + " seconds ago");
-                }
+                // safePrintln("Calibration: " + String(calibConfig.enableCalibration ? "ENABLED" : "DISABLED"));
+                // if (calibConfig.enableCalibration) {
+                //     safePrintln("Calibration Valid: " + String(calibratedData.valid ? "YES" : "NO"));
+                //     safePrintln("Last Calibration: " + String((millis() - calibratedData.lastUpdate) / 1000) + " seconds ago");
+                // }
                 
-                safePrintln("=== Moving Averages Status ===");
-                printMovingAverageStatus();
+                // safePrintln("=== Moving Averages Status ===");
+                // printMovingAverageStatus();
+                
+                safePrintln("=== Memory Management Commands ===");
+                safePrintln("MEMORY_EMERGENCY - Full aggressive memory cleanup & analysis");
+                safePrintln("MEMORY_FORCE_GC - Force defragmentation garbage collection");
+                safePrintln("MEMORY_SMART - Intelligent adaptive memory cleanup");
+                safePrintln("Current memory status:");
+                safePrintln("- Free heap: " + String(ESP.getFreeHeap()) + " bytes");
+                safePrintln("- Min free ever: " + String(ESP.getMinFreeHeap()) + " bytes");
+                safePrintln("- Largest block: " + String(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)) + " bytes");
+                
+                extern int wsClientCount;
+                extern AsyncWebSocket ws;
+                safePrintln("WebSocket status: " + String(wsClientCount) + " tracked, " + String(ws.count()) + " active");
+                if (wsClientCount != ws.count()) {
+                    safePrintln("WARNING: WebSocket client count mismatch - possible memory leak!");
+                }
             }
         }
         else if (command.equals("AVGSTATUS")) {
@@ -889,6 +949,59 @@ void processSerialCommands() {
             delay(1000);
             ESP.restart();
         }
+        else if (command.equals("MEMORY_EMERGENCY")) {
+            performEmergencyCleanup();
+        }
+        else if (command.equals("MEMORY_FORCE_GC")) {
+            forceGarbageCollection();
+        }
+        else if (command.equals("MEMORY_SMART")) {
+            intelligentMemoryCleanup();
+        }
+        // // Heap debugging commands
+        // else if (command.equals("HEAP_INFO")) {
+        //     printHeapInfo();
+        // }
+        // else if (command.equals("HEAP_DETAILED")) {
+        //     printDetailedHeapInfo();
+        // }
+        // else if (command.equals("HEAP_ANALYSIS")) {
+        //     performHeapAnalysis();
+        // }
+        // else if (command.equals("HEAP_MONITOR_START")) {
+        //     startHeapMonitoring();
+        // }
+        // else if (command.equals("HEAP_MONITOR_STOP")) {
+        //     stopHeapMonitoring();
+        // }
+        // else if (command.equals("HEAP_HISTORY")) {
+        //     printHeapHistory();
+        // }
+        // else if (command.equals("HEAP_SNAPSHOT")) {
+        //     takeHeapSnapshot();
+        //     safePrintln("Heap snapshot taken");
+        // }
+        // else if (command.equals("HEAP_LEAKS")) {
+        //     analyzeMemoryLeaks();
+        // }
+        // else if (command.equals("HEAP_BASELINE")) {
+        //     heap_baseline = ESP.getFreeHeap();
+        //     safePrintln("New heap baseline set: " + String(heap_baseline) + " bytes");
+        // }
+        // else if (command.equals("HEAP_INTEGRITY")) {
+        //     bool integrity_ok = heap_caps_check_integrity_all(true);
+        //     safePrintln("Heap integrity check: " + String(integrity_ok ? "PASSED" : "FAILED"));
+        // }
+        // else if (command.equals("HEAP_TASKS")) {
+        //     printTaskMemoryStats();
+        // }
+        // else if (command.equals("HEAP_TASKS_ALL")) {
+        //     printAllTasksMemoryStats();
+        // }
+        // else if (command.startsWith("HEAP_TASK_")) {
+        //     String taskName = command.substring(10); // Remove "HEAP_TASK_"
+        //     printSingleTaskMemoryStats(taskName.c_str());
+        // }
     }
     
     // Process Serial1 commands if needed
@@ -1273,4 +1386,379 @@ void sendSystemStartupNotification() {
     
     sendPushbulletNotification(title, message);
 }
+
+// ===========================================
+// HEAP DEBUGGING FUNCTIONS
+// ===========================================
+
+// void initializeHeapDebugging() {
+//     // Set baseline heap size
+//     heap_baseline = ESP.getFreeHeap();
+//     heap_low_watermark = heap_baseline;
+    
+//     // Initialize heap history
+//     for (int i = 0; i < MAX_HEAP_SNAPSHOTS; i++) {
+//         heap_history[i].timestamp = 0;
+//     }
+    
+//     safePrintln("=== Heap Debugging Initialized ===");
+//     safePrintln("Baseline heap: " + String(heap_baseline) + " bytes");
+//     safePrintln("Monitoring enabled: " + String(heap_monitoring_enabled ? "YES" : "NO"));
+    
+//     // Take initial snapshot
+//     takeHeapSnapshot();
+    
+//     // Print initial heap info
+//     printHeapInfo();
+// }
+
+// void printHeapInfo() {
+//     // Basic heap information
+//     uint32_t free_heap = ESP.getFreeHeap();
+//     uint32_t total_heap = ESP.getHeapSize();
+//     uint32_t min_free = ESP.getMinFreeHeap();
+    
+//     // Advanced heap caps info
+//     uint32_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+//     uint32_t free_spiram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+//     uint32_t largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+//     uint32_t min_free_internal = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+    
+//     safePrintln("=== HEAP STATUS ===");
+//     safePrintln("Free: " + String(free_heap) + " bytes (" + String((free_heap * 100) / total_heap) + "%)");
+//     safePrintln("Total: " + String(total_heap) + " bytes");
+//     safePrintln("Min Free Ever: " + String(min_free) + " bytes");
+//     safePrintln("Largest Block: " + String(largest_block) + " bytes");
+//     safePrintln("Internal Free: " + String(free_internal) + " bytes");
+//     safePrintln("SPIRAM Free: " + String(free_spiram) + " bytes");
+//     safePrintln("Min Internal: " + String(min_free_internal) + " bytes");
+    
+//     if (heap_baseline > 0) {
+//         int32_t memory_delta = (int32_t)free_heap - (int32_t)heap_baseline;
+//         safePrintln("Memory Change: " + String(memory_delta) + " bytes");
+//         if (memory_delta < -1000) {
+//             safePrintln("WARNING: Possible memory leak detected!");
+//         }
+//     }
+    
+//     // Memory fragmentation analysis
+//     float fragmentation = 100.0 - ((float)largest_block * 100.0 / (float)free_heap);
+//     safePrintln("Fragmentation: " + String(fragmentation, 1) + "%");
+// }
+
+// void printDetailedHeapInfo() {
+//     safePrintln("=== DETAILED HEAP ANALYSIS ===");
+    
+//     // Get detailed heap information
+//     multi_heap_info_t info;
+//     heap_caps_get_info(&info, MALLOC_CAP_INTERNAL);
+    
+//     safePrintln("Internal Heap Details:");
+//     safePrintln("  Total Free: " + String(info.total_free_bytes) + " bytes");
+//     safePrintln("  Total Allocated: " + String(info.total_allocated_bytes) + " bytes");
+//     safePrintln("  Largest Free Block: " + String(info.largest_free_block) + " bytes");
+//     safePrintln("  Min Free Ever: " + String(info.minimum_free_bytes) + " bytes");
+//     safePrintln("  Allocated Blocks: " + String(info.allocated_blocks));
+//     safePrintln("  Free Blocks: " + String(info.free_blocks));
+//     safePrintln("  Total Blocks: " + String(info.total_blocks));
+    
+//     // SPIRAM info if available
+//     if (ESP.getPsramSize() > 0) {
+//         heap_caps_get_info(&info, MALLOC_CAP_SPIRAM);
+//         safePrintln("SPIRAM Heap Details:");
+//         safePrintln("  Total Free: " + String(info.total_free_bytes) + " bytes");
+//         safePrintln("  Total Allocated: " + String(info.total_allocated_bytes) + " bytes");
+//         safePrintln("  Largest Free Block: " + String(info.largest_free_block) + " bytes");
+//         safePrintln("  Min Free Ever: " + String(info.minimum_free_bytes) + " bytes");
+//         safePrintln("  Allocated Blocks: " + String(info.allocated_blocks));
+//         safePrintln("  Free Blocks: " + String(info.free_blocks));
+//     }
+// }
+
+// void takeHeapSnapshot() {
+//     if (!heap_monitoring_enabled) return;
+    
+//     HeapSnapshot& snapshot = heap_history[heap_history_index];
+//     snapshot.free_heap = ESP.getFreeHeap();
+//     snapshot.free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+//     snapshot.free_spiram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+//     snapshot.largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+//     snapshot.min_free_heap = ESP.getMinFreeHeap();
+//     snapshot.timestamp = millis();
+    
+//     // Update watermark
+//     if (snapshot.free_heap < heap_low_watermark) {
+//         heap_low_watermark = snapshot.free_heap;
+//     }
+    
+//     heap_history_index = (heap_history_index + 1) % MAX_HEAP_SNAPSHOTS;
+//     if (heap_history_index == 0) {
+//         heap_history_full = true;
+//     }
+// }
+
+// void startHeapMonitoring() {
+//     heap_monitoring_enabled = true;
+//     takeHeapSnapshot();
+//     safePrintln("Heap monitoring started - taking periodic snapshots");
+// }
+
+// void stopHeapMonitoring() {
+//     heap_monitoring_enabled = false;
+//     safePrintln("Heap monitoring stopped");
+// }
+
+// void printHeapHistory() {
+//     safePrintln("=== HEAP HISTORY ===");
+    
+//     int start_idx = heap_history_full ? heap_history_index : 0;
+//     int count = heap_history_full ? MAX_HEAP_SNAPSHOTS : heap_history_index;
+    
+//     safePrintln("Showing last " + String(count) + " snapshots:");
+//     safePrintln("Time(s)\tFree\tInternal\tSPIRAM\tLargest\tMinEver");
+    
+//     for (int i = 0; i < count; i++) {
+//         int idx = heap_history_full ? (start_idx + i) % MAX_HEAP_SNAPSHOTS : i;
+//         HeapSnapshot& snap = heap_history[idx];
+        
+//         if (snap.timestamp > 0) {
+//             safePrint(String(snap.timestamp / 1000) + "\t");
+//             safePrint(String(snap.free_heap) + "\t");
+//             safePrint(String(snap.free_internal) + "\t");
+//             safePrint(String(snap.free_spiram) + "\t");
+//             safePrint(String(snap.largest_block) + "\t");
+//             safePrintln(String(snap.min_free_heap));
+//         }
+//     }
+    
+//     // Analyze trend
+//     if (count >= 3) {
+//         int first_idx = heap_history_full ? start_idx : 0;
+//         int last_idx = heap_history_full ? 
+//             (start_idx + count - 1) % MAX_HEAP_SNAPSHOTS : count - 1;
+        
+//         int32_t trend = (int32_t)heap_history[last_idx].free_heap - 
+//                        (int32_t)heap_history[first_idx].free_heap;
+        
+//         safePrintln("Memory trend: " + String(trend) + " bytes");
+//         if (trend < -1000) {
+//             safePrintln("WARNING: Downward memory trend detected!");
+//         }
+//     }
+// }
+
+// void analyzeMemoryLeaks() {
+//     safePrintln("=== MEMORY LEAK ANALYSIS ===");
+    
+//     // Check heap integrity
+//     bool integrity_ok = heap_caps_check_integrity_all(true);
+//     safePrintln("Heap integrity: " + String(integrity_ok ? "OK" : "CORRUPTED"));
+    
+//     if (!integrity_ok) {
+//         safePrintln("ERROR: Heap corruption detected!");
+//         // Try to get more info about corruption
+//         heap_caps_check_integrity(MALLOC_CAP_INTERNAL, true);
+//         if (ESP.getPsramSize() > 0) {
+//             heap_caps_check_integrity(MALLOC_CAP_SPIRAM, true);
+//         }
+//     }
+    
+//     // Compare current vs baseline
+//     uint32_t current_free = ESP.getFreeHeap();
+//     if (heap_baseline > 0) {
+//         int32_t memory_change = (int32_t)current_free - (int32_t)heap_baseline;
+        
+//         safePrintln("Memory analysis:");
+//         safePrintln("  Baseline: " + String(heap_baseline) + " bytes");
+//         safePrintln("  Current: " + String(current_free) + " bytes");
+//         safePrintln("  Change: " + String(memory_change) + " bytes");
+        
+//         if (memory_change < -5000) {
+//             safePrintln("  Status: MEMORY LEAK DETECTED!");
+//         } else if (memory_change < -1000) {
+//             safePrintln("  Status: Possible memory leak");
+//         } else {
+//             safePrintln("  Status: Memory usage normal");
+//         }
+//     }
+    
+//     // WebSocket specific analysis
+//     extern int wsClientCount;
+//     extern AsyncWebSocket ws;
+//     safePrintln("WebSocket analysis:");
+//     safePrintln("  Tracked clients: " + String(wsClientCount));
+//     safePrintln("  Active connections: " + String(ws.count()));
+//     safePrintln("  WebSocket memory usage: ~" + String((wsClientCount * 100) + (ws.count() * 200)) + " bytes estimated");
+// }
+
+// void performHeapAnalysis() {
+//     safePrintln("\n===========================================");
+//     safePrintln("    COMPREHENSIVE HEAP ANALYSIS");
+//     safePrintln("===========================================");
+    
+//     printHeapInfo();
+//     safePrintln("");
+//     printDetailedHeapInfo();
+//     safePrintln("");
+//     analyzeMemoryLeaks();
+    
+//     safePrintln("===========================================");
+// }
+
+// void printTaskMemoryStats() {
+//     safePrintln("=== TASK MEMORY OVERVIEW ===");
+    
+//     // Get basic FreeRTOS task info (Arduino compatible)
+//     UBaseType_t taskCount = uxTaskGetNumberOfTasks();
+//     safePrintln("Total active tasks: " + String(taskCount));
+    
+//     safePrintln("");
+//     safePrintln("┌────────────────────┬─────────────────────┬─────────────────┐");
+//     safePrintln("│ TASK ANALYSIS      │ CURRENT STATUS      │ NOTES           │");
+//     safePrintln("├────────────────────┼─────────────────────┼─────────────────┤");
+//     safePrintln("│ Total Tasks        │ " + String(taskCount) + "                   │ Active FreeRTOS │");
+//     safePrintln("│ Current Task       │ " + String(pcTaskGetTaskName(NULL)) + "            │ Running now     │");
+    
+//     // Check specific known tasks
+//     TaskHandle_t mainTask = xTaskGetHandle("loopTask");
+//     if (mainTask != NULL) {
+//         UBaseType_t mainStack = uxTaskGetStackHighWaterMark(mainTask);
+//         safePrintln("│ Main Loop Task     │ Stack: " + String(mainStack) + " bytes     │ Arduino loop    │");
+//     } else {
+//         safePrintln("│ Main Loop Task     │ Not found           │ Check task name │");
+//     }
+    
+//     TaskHandle_t wifiTask = xTaskGetHandle("wifi");
+//     if (wifiTask != NULL) {
+//         UBaseType_t wifiStack = uxTaskGetStackHighWaterMark(wifiTask);
+//         safePrintln("│ WiFi Task          │ Stack: " + String(wifiStack) + " bytes     │ WiFi management │");
+//     } else {
+//         safePrintln("│ WiFi Task          │ Not found           │ May use diff name│");
+//     }
+    
+//     // Check our custom tasks
+//     TaskHandle_t wsTask = xTaskGetHandle("wsBroadcastTask");
+//     if (wsTask != NULL) {
+//         UBaseType_t wsStack = uxTaskGetStackHighWaterMark(wsTask);
+//         safePrintln("│ WebSocket Task     │ Stack: " + String(wsStack) + " bytes     │ WS broadcast    │");
+//     } else {
+//         safePrintln("│ WebSocket Task     │ Not found           │ May not be active│");
+//     }
+    
+//     safePrintln("└────────────────────┴─────────────────────┴─────────────────┘");
+    
+//     safePrintln("");
+//     safePrintln("Stack analysis:");
+//     safePrintln("- Values show remaining stack (lower = more used)");
+//     safePrintln("- WARNING if <500 bytes remaining");
+//     safePrintln("- Stack overflow protection active");
+    
+//     safePrintln("");
+//     safePrintln("Key tasks to monitor:");
+//     safePrintln("- loopTask: Main Arduino loop");
+//     safePrintln("- wifi: WiFi stack memory usage");
+//     safePrintln("- async_tcp: AsyncWebServer connections");
+//     safePrintln("- wsBroadcastTask: WebSocket broadcast (custom)");
+// }
+
+// void printAllTasksMemoryStats() {
+//     safePrintln("=== ENHANCED TASK ANALYSIS ===");
+    
+//     // Print basic task info first
+//     printTaskMemoryStats();
+    
+//     safePrintln("");
+//     safePrintln("=== MEMORY ANALYSIS BY COMPONENT ===");
+    
+//     // Analyze memory by major components
+//     uint32_t free_heap = ESP.getFreeHeap();
+//     uint32_t total_heap = ESP.getHeapSize();
+//     uint32_t used_heap = total_heap - free_heap;
+    
+//     safePrintln("Total heap usage breakdown:");
+//     safePrintln("- Total heap: " + String(total_heap) + " bytes");
+//     safePrintln("- Used heap: " + String(used_heap) + " bytes (" + String((used_heap * 100) / total_heap) + "%)");
+//     safePrintln("- Free heap: " + String(free_heap) + " bytes (" + String((free_heap * 100) / total_heap) + "%)");
+    
+//     // Estimate memory usage by major components
+//     safePrintln("");
+//     safePrintln("Estimated memory usage by component:");
+//     safePrintln("- WiFi stack: ~40-60KB (when connected)");
+//     safePrintln("- WebSocket connections: ~2-5KB per connection");
+//     safePrintln("- Sensor buffers: ~10-20KB");
+//     safePrintln("- History buffer (PSRAM): External memory");
+//     safePrintln("- ArduinoJson documents: Variable (check JSON usage)");
+    
+//     // Check for potential issues
+//     safePrintln("");
+//     safePrintln("=== POTENTIAL MEMORY ISSUES ===");
+//     extern int wsClientCount;
+//     extern AsyncWebSocket ws;
+    
+//     uint32_t estimated_ws_memory = (wsClientCount * 1000) + (ws.count() * 2000);
+//     safePrintln("WebSocket estimated usage: " + String(estimated_ws_memory) + " bytes");
+//     safePrintln("- Tracked clients: " + String(wsClientCount));
+//     safePrintln("- Active connections: " + String(ws.count()));
+    
+//     if (wsClientCount != ws.count()) {
+//         safePrintln("WARNING: Mismatch between tracked and actual WebSocket clients!");
+//         safePrintln("This may indicate a memory leak in WebSocket client tracking.");
+//     }
+// }
+
+// void printSingleTaskMemoryStats(const char* taskName) {
+//     safePrintln("=== SINGLE TASK ANALYSIS ===");
+//     safePrintln("Searching for task: " + String(taskName));
+    
+//     // Find specific task (Arduino compatible)
+//     TaskHandle_t taskHandle = xTaskGetHandle(taskName);
+//     if (taskHandle != NULL) {
+//         safePrintln("Task found!");
+        
+//         // Get basic info available in Arduino Core
+//         UBaseType_t stackWaterMark = uxTaskGetStackHighWaterMark(taskHandle);
+//         UBaseType_t priority = uxTaskPriorityGet(taskHandle);
+        
+//         safePrintln("Task details:");
+//         safePrintln("- Name: " + String(taskName));
+//         safePrintln("- Current Priority: " + String(priority));
+//         safePrintln("- Stack High Water Mark: " + String(stackWaterMark) + " bytes");
+        
+//         // Stack usage analysis
+//         safePrintln("- Stack remaining: " + String(stackWaterMark) + " bytes");
+        
+//         if (stackWaterMark < 500) {
+//             safePrintln("WARNING: Low stack remaining! Risk of stack overflow!");
+//         } else if (stackWaterMark < 1000) {
+//             safePrintln("CAUTION: Stack getting low, monitor closely");
+//         } else {
+//             safePrintln("Stack usage: OK");
+//         }
+        
+//         // Additional analysis for known tasks
+//         if (String(taskName) == "loopTask") {
+//             safePrintln("- Type: Main Arduino loop task");
+//             safePrintln("- Function: Runs setup() once, then loop() repeatedly");
+//         } else if (String(taskName).indexOf("wifi") >= 0) {
+//             safePrintln("- Type: WiFi management task");
+//             safePrintln("- Function: Handles WiFi connections and protocols");
+//         } else if (String(taskName).indexOf("ws") >= 0 || String(taskName).indexOf("WebSocket") >= 0) {
+//             safePrintln("- Type: WebSocket related task");
+//             safePrintln("- Function: Handles WebSocket connections and data");
+//         }
+        
+//     } else {
+//         safePrintln("Task '" + String(taskName) + "' not found!");
+//         safePrintln("");
+//         safePrintln("Common task names to try:");
+//         safePrintln("- loopTask (Arduino main loop)");
+//         safePrintln("- wifi (WiFi management)");
+//         safePrintln("- async_tcp (AsyncWebServer)");
+//         safePrintln("- Watchdog (System watchdog)");
+//         safePrintln("- WiFi Reconnect (Custom WiFi task)");
+//         safePrintln("");
+//         safePrintln("Current task overview:");
+//         printTaskMemoryStats();
+//     }
+// }
 
