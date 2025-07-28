@@ -10,6 +10,9 @@ System WebSocket dla ESP Sensor Cube umozliwia:
 - 🔬 **Kontrola kalibracji** sensorów gazowych
 - 📡 **Broadcast danych** do wszystkich klientów
 - 📊 **Monitorowanie historii** (zużycie pamięci, liczba próbek)
+- 🌀 **Sterowanie wentylatorem** (prędkość, włącz/wyłącz)
+- ⚡ **Sterowanie GLine** (router power control)
+- 😴 **Tryb sleep** (czasowe wyłączenie GLine z opóźnieniem)
 
 ## Struktura plików
 
@@ -165,6 +168,18 @@ ws.onmessage = function(event) {
 | `setConfig` | Ustaw konfigurację | `{"cmd": "setConfig", "enableSPS30": true}` |
 | `system` | Komendy systemowe | `{"cmd": "system", "command": "memory"}` |
 | `calibration` | Kontrola kalibracji | `{"cmd": "calibration", "command": "status"}` |
+
+**Komendy wentylatora i GLine:**
+| Komenda | Opis | Przykład |
+|---------|------|----------|
+| `fan_on` | Włącz wentylator | `{"cmd": "system", "command": "fan_on"}` |
+| `fan_off` | Wyłącz wentylator | `{"cmd": "system", "command": "fan_off"}` |
+| `fan_speed` | Ustaw prędkość | `{"cmd": "system", "command": "fan_speed", "value": 75}` |
+| `gline_on` | Włącz GLine | `{"cmd": "system", "command": "gline_on"}` |
+| `gline_off` | Wyłącz GLine | `{"cmd": "system", "command": "gline_off"}` |
+| `sleep` | Tryb sleep | `{"cmd": "system", "command": "sleep", "delay": 60, "duration": 300}` |
+| `sleep_stop` | Zatrzymaj sleep | `{"cmd": "system", "command": "sleep_stop"}` |
+| `fan_status` | Status wentylatora | `{"cmd": "system", "command": "fan_status"}` |
 
 ## Szczegółowy przewodnik komend
 
@@ -568,6 +583,69 @@ const thirtyMinutesAgo = now - (30 * 60 * 1000); // 30 minut wstecz
 }
 ```
 
+#### Sterowanie wentylatorem:
+```json
+{
+    "cmd": "system",
+    "command": "fan_on"
+}
+```
+
+```json
+{
+    "cmd": "system",
+    "command": "fan_off"
+}
+```
+
+```json
+{
+    "cmd": "system",
+    "command": "fan_speed",
+    "value": 75
+}
+```
+
+#### Sterowanie GLine:
+```json
+{
+    "cmd": "system",
+    "command": "gline_on"
+}
+```
+
+```json
+{
+    "cmd": "system",
+    "command": "gline_off"
+}
+```
+
+#### Tryb sleep:
+```json
+{
+    "cmd": "system",
+    "command": "sleep",
+    "delay": 60,
+    "duration": 300
+}
+```
+
+```json
+{
+    "cmd": "system",
+    "command": "sleep_stop"
+}
+```
+
+#### Status wentylatora:
+```json
+{
+    "cmd": "system",
+    "command": "fan_status"
+}
+```
+
 #### Informacje o historii:
 ```json
 {
@@ -677,30 +755,29 @@ const thirtyMinutesAgo = now - (30 * 60 * 1000); // 30 minut wstecz
 - `History: Added I2C fast sample`
 - `History: I2C data not valid`
 
-### 10. Sterowanie wentylatorem
+### 10. Sterowanie wentylatorem i GLine
 
-#### Włączenie wentylatora:
-```json
-{
-    "cmd": "setConfig",
-    "enableFan": true
-}
-```
-
-#### Wyłączenie wentylatora:
-```json
-{
-    "cmd": "setConfig",
-    "enableFan": false
-}
-```
-
-#### Ustawienie prędkości (duty cycle 0-100%):
+#### Włączenie/wyłączenie wentylatora:
 ```json
 {
     "cmd": "system",
-    "command": "fan",
-    "dutyCycle": 75
+    "command": "fan_on"
+}
+```
+
+```json
+{
+    "cmd": "system",
+    "command": "fan_off"
+}
+```
+
+#### Ustawienie prędkości wentylatora (duty cycle 0-100%):
+```json
+{
+    "cmd": "system",
+    "command": "fan_speed",
+    "value": 75
 }
 ```
 
@@ -708,17 +785,102 @@ const thirtyMinutesAgo = now - (30 * 60 * 1000); // 30 minut wstecz
 ```json
 {
     "cmd": "system",
-    "command": "gline",
-    "enabled": true
+    "command": "gline_on"
 }
 ```
 
-#### Status wentylatora:
 ```json
 {
-    "cmd": "getSensorData",
-    "sensor": "fan"
+    "cmd": "system",
+    "command": "gline_off"
 }
+```
+
+#### Tryb sleep - czasowe wyłączenie GLine:
+```json
+{
+    "cmd": "system",
+    "command": "sleep",
+    "delay": 60,
+    "duration": 300
+}
+```
+**Parametry:**
+- `delay` - opóźnienie w sekundach przed rozpoczęciem sleep (domyślnie 0)
+- `duration` - czas trwania sleep w sekundach
+
+#### Przykłady trybu sleep:
+```json
+// Wyłącz GLine za 60 sekund na 5 minut
+{
+    "cmd": "system",
+    "command": "sleep",
+    "delay": 60,
+    "duration": 300
+}
+
+// Wyłącz GLine natychmiast na 2 godziny
+{
+    "cmd": "system",
+    "command": "sleep",
+    "delay": 0,
+    "duration": 7200
+}
+
+// Wyłącz GLine za 30 minut na 1 godzinę
+{
+    "cmd": "system",
+    "command": "sleep",
+    "delay": 1800,
+    "duration": 3600
+}
+```
+
+#### Zatrzymanie trybu sleep:
+```json
+{
+    "cmd": "system",
+    "command": "sleep_stop"
+}
+```
+
+#### Status wentylatora i GLine:
+```json
+{
+    "cmd": "system",
+    "command": "fan_status"
+}
+```
+
+**Odpowiedź:**
+```json
+{
+    "cmd": "fan_status",
+    "success": true,
+    "data": {
+        "enabled": true,
+        "dutyCycle": 75,
+        "rpm": 1200,
+        "glineEnabled": false,
+        "sleepMode": true,
+        "sleepStartTime": 1700000000000,
+        "sleepDuration": 300000,
+        "sleepEndTime": 1700000300000,
+        "valid": true
+    }
+}
+```
+
+#### Komendy Serial (dodatkowo):
+```
+FAN_ON              - Włącz wentylator (50% prędkości)
+FAN_OFF             - Wyłącz wentylator
+FAN_SPEED_75        - Ustaw prędkość na 75%
+GLINE_ON            - Włącz GLine
+GLINE_OFF           - Wyłącz GLine
+SLEEP_60_300        - Sleep: opóźnienie 60s, trwanie 300s
+SLEEP_STOP          - Zatrzymaj tryb sleep
+FAN_STATUS          - Pokaż status wentylatora
 ```
 
 ### 11. Przełączanie między danymi aktualnymi a uśrednionymi
@@ -1404,6 +1566,91 @@ toggleSensor('enableSPS30', true);
 toggleSensor('enableSHT40', false);
 ```
 
+### Sterowanie wentylatorem i GLine:
+```javascript
+// Sterowanie wentylatorem
+function setFanSpeed(speed) {
+    ws.send(JSON.stringify({
+        cmd: 'system',
+        command: 'fan_speed',
+        value: speed
+    }));
+}
+
+function turnFanOn() {
+    ws.send(JSON.stringify({
+        cmd: 'system',
+        command: 'fan_on'
+    }));
+}
+
+function turnFanOff() {
+    ws.send(JSON.stringify({
+        cmd: 'system',
+        command: 'fan_off'
+    }));
+}
+
+// Sterowanie GLine
+function setGLine(enabled) {
+    ws.send(JSON.stringify({
+        cmd: 'system',
+        command: enabled ? 'gline_on' : 'gline_off'
+    }));
+}
+
+// Tryb sleep
+function startSleepMode(delaySeconds, durationSeconds) {
+    ws.send(JSON.stringify({
+        cmd: 'system',
+        command: 'sleep',
+        delay: delaySeconds,
+        duration: durationSeconds
+    }));
+}
+
+function stopSleepMode() {
+    ws.send(JSON.stringify({
+        cmd: 'system',
+        command: 'sleep_stop'
+    }));
+}
+
+// Status wentylatora
+function getFanStatus() {
+    ws.send(JSON.stringify({
+        cmd: 'system',
+        command: 'fan_status'
+    }));
+}
+
+// Przykłady użycia:
+setFanSpeed(75);           // Ustaw prędkość na 75%
+turnFanOn();               // Włącz wentylator
+setGLine(true);            // Włącz GLine
+startSleepMode(60, 300);   // Sleep: opóźnienie 60s, trwanie 5min
+stopSleepMode();           // Zatrzymaj sleep
+getFanStatus();            // Pobierz status
+
+// Przykład obsługi odpowiedzi:
+ws.onmessage = function(event) {
+    const data = JSON.parse(event.data);
+    
+    if (data.cmd === 'fan_status' && data.success) {
+        const fan = data.data;
+        console.log('Wentylator:', fan.enabled ? 'Włączony' : 'Wyłączony');
+        console.log('Prędkość:', fan.dutyCycle + '%');
+        console.log('RPM:', fan.rpm);
+        console.log('GLine:', fan.glineEnabled ? 'Włączony' : 'Wyłączony');
+        
+        if (fan.sleepMode) {
+            const endTime = new Date(fan.sleepEndTime);
+            console.log('Tryb sleep aktywny, kończy się:', endTime.toLocaleString());
+        }
+    }
+};
+```
+
 ### Monitorowanie historii:
 ```javascript
 function getHistoryInfo() {
@@ -1682,3 +1929,190 @@ W przypadku problemów:
 2. Użyj testu Python: `python test_websocket.py`
 3. Sprawdź konfigurację w `include/config.h`
 4. Sprawdź czy port 80 nie jest blokowany przez firewall 
+
+# WebSocket API - Komendy Sterowania Wentylatorem i GLine (Sleep Mode)
+
+## Nowe Komendy WebSocket
+
+### 1. Ustawienie predkosci wentylatora
+```json
+{
+  "cmd": "system",
+  "command": "fan_speed",
+  "value": 60
+}
+```
+- `value`: liczba (0-100), procent PWM
+- Odpowiedz:
+```json
+{
+  "cmd": "system",
+  "command": "fan_speed",
+  "success": true,
+  "message": "Fan speed set to 60%"
+}
+```
+
+### 2. Wlaczenie/Wylaczenie wentylatora
+```json
+{
+  "cmd": "system",
+  "command": "fan_on"
+}
+```
+```json
+{
+  "cmd": "system",
+  "command": "fan_off"
+}
+```
+- Odpowiedz:
+```json
+{
+  "cmd": "system",
+  "command": "fan_on",
+  "success": true,
+  "message": "Fan enabled"
+}
+```
+
+### 3. Wlaczenie/Wylaczenie GLine (Router Power)
+```json
+{
+  "cmd": "system",
+  "command": "gline_on"
+}
+```
+```json
+{
+  "cmd": "system",
+  "command": "gline_off"
+}
+```
+- Odpowiedz:
+```json
+{
+  "cmd": "system",
+  "command": "gline_on",
+  "success": true,
+  "message": "GLine enabled"
+}
+```
+
+### 4. Sleep Mode (czasowe wylaczenie GLine)
+```json
+{
+  "cmd": "system",
+  "command": "sleep",
+  "delay": 60,      // sekundy do rozpoczecia sleep
+  "duration": 300   // sekundy trwania sleep
+}
+```
+- Odpowiedz:
+```json
+{
+  "cmd": "system",
+  "command": "sleep",
+  "success": true,
+  "message": "Sleep mode scheduled: delay 60s, duration 300s"
+}
+```
+
+#### Przerwanie sleep/wake:
+```json
+{
+  "cmd": "system",
+  "command": "sleep_stop"
+}
+```
+LUB
+```json
+{
+  "cmd": "system",
+  "command": "wake"
+}
+```
+- Odpowiedz:
+```json
+{
+  "cmd": "system",
+  "command": "sleep_stop",
+  "success": true,
+  "message": "Sleep mode stopped"
+}
+```
+
+### 5. Status wentylatora i sleep
+```json
+{
+  "cmd": "system",
+  "command": "fan_status"
+}
+```
+- Odpowiedz:
+```json
+{
+  "cmd": "system",
+  "command": "fan_status",
+  "success": true,
+  "status": {
+    "enabled": true,
+    "dutyCycle": 60,
+    "rpm": 1200,
+    "glineEnabled": false,
+    "sleepMode": true,
+    "sleepStartTime": 1712345678,
+    "sleepDuration": 300000,
+    "sleepEndTime": 1712345978,
+    "valid": true
+  }
+}
+```
+- `sleepMode`: true gdy sleep aktywny
+- `sleepStartTime`, `sleepEndTime`: timestamp (sekundy od 1970)
+- `sleepDuration`: ms
+
+---
+
+## Komendy Serial (Monitor portu szeregowego)
+
+- `FAN_ON` - wlacz wentylator (50%)
+- `FAN_OFF` - wylacz wentylator
+- `FAN_SPEED_[0-100]` - ustaw PWM
+- `GLINE_ON` - wlacz GLine
+- `GLINE_OFF` - wylacz GLine
+- `FAN_STATUS` - wypisz status
+- `SLEEP_[delay]_[duration]` - sleep mode (np. `SLEEP_60_300`)
+- `SLEEP_STOP` lub `SLEEP_WAKE` - przerwij sleep
+
+Przyklad:
+```
+FAN_SPEED_80
+SLEEP_30_120
+FAN_STATUS
+```
+
+---
+
+## FAQ
+
+**Q: Co sie stanie gdy sleep mode jest aktywny?**
+A: GLine zostanie wylaczony na zadany czas, po czym automatycznie powroci do poprzedniego stanu.
+
+**Q: Czy sleep mozna przerwac?**
+A: Tak, komenda `sleep_stop` (WebSocket) lub `SLEEP_STOP`/`SLEEP_WAKE` (Serial) natychmiast przywraca GLine.
+
+**Q: Czy status sleep jest widoczny?**
+A: Tak, w odpowiedzi na `fan_status` (`sleepMode: true` oraz czasy).
+
+---
+
+## Uwagi
+- Wszystkie komendy WebSocket wymagaja pola `cmd: "system"`.
+- Odpowiedzi zawsze zawieraja pole `success` oraz `message`.
+- Sleep mode nie wplywa na prace wentylatora.
+- Komendy dzialaja tylko gdy `config.enableFan == true`.
+
+---
+
+**Ostatnia aktualizacja: [data automatyczna przez AI]** 

@@ -10,6 +10,7 @@
 #define CONNECTION_TIMEOUT (20 * 60 * 1000) // 20 minutes
 
 #define FIRMWARE_VERSION "1.0.0"
+#define DEVICE_ID "DAC-001"
 
 // Pin Definitions
 #define WS2812_PIN 21
@@ -108,9 +109,11 @@ struct NetworkConfig {
 // MCP3424 Device Assignment Structure
 struct MCP3424DeviceAssignment {
     uint8_t deviceIndex;           // Index of MCP3424 device (0-7)
+    uint8_t i2cAddress;            // Physical I2C address (0x68-0x6F)
     char gasType[16];              // Gas type (e.g., "NO", "O3", "NO2", "CO", "SO2", "TGS1", "TGS2", "TGS3")
     char description[32];          // Human readable description
     bool enabled;                  // Whether this device is active
+    bool autoDetected;             // Whether device was found during I2C scan
 };
 
 // MCP3424 Device Configuration

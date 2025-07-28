@@ -223,6 +223,229 @@ const char *update_html = R"rawliteral(
     transition: width 0.3s ease;
   }
 
+  /* Fan Control Styles */
+  .control-section {
+    margin-bottom: 25px;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 10px;
+    border-left: 4px solid #667eea;
+  }
+
+  .control-section h4 {
+    margin-bottom: 15px;
+    color: #333;
+    font-size: 1.2em;
+  }
+
+  .control-buttons {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-bottom: 15px;
+  }
+
+  .control-buttons .btn {
+    flex: 1;
+    min-width: 120px;
+    margin: 5px;
+  }
+
+  .speed-control {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    margin: 15px 0;
+  }
+
+  .speed-control label {
+    font-weight: bold;
+    color: #333;
+  }
+
+  .speed-control input[type="range"] {
+    width: 100%;
+    max-width: 300px;
+    height: 8px;
+    border-radius: 5px;
+    background: #ddd;
+    outline: none;
+    -webkit-appearance: none;
+  }
+
+  .speed-control input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #667eea;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  }
+
+  .speed-control input[type="range"]::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #667eea;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  }
+
+  .sleep-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+    margin-bottom: 15px;
+  }
+
+  .sleep-input {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .sleep-input label {
+    font-weight: bold;
+    color: #333;
+    font-size: 0.9em;
+  }
+
+  .sleep-input-field {
+    padding: 8px 12px;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    font-size: 1em;
+    transition: border-color 0.3s ease;
+  }
+
+  .sleep-input-field:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 8px rgba(102, 126, 234, 0.3);
+  }
+
+  .status-section {
+    background: #e8f4f8;
+    padding: 15px;
+    border-radius: 8px;
+    border-left: 4px solid #2196f3;
+  }
+
+  .status-section h4 {
+    margin-bottom: 10px;
+    color: #1976d2;
+  }
+
+  /* Configuration Styles */
+  .config-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .config-section {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 10px;
+    border-left: 4px solid #4caf50;
+  }
+
+  .config-section h4 {
+    margin-bottom: 15px;
+    color: #2e7d32;
+    font-size: 1.1em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .config-checkbox {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 6px;
+    transition: background-color 0.2s ease;
+  }
+
+  .config-checkbox:hover {
+    background-color: rgba(76, 175, 80, 0.1);
+  }
+
+  .config-checkbox input[type="checkbox"] {
+    margin-right: 10px;
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+  }
+
+  .config-checkbox .checkmark {
+    margin-left: 5px;
+    flex: 1;
+    font-weight: 500;
+    color: #333;
+  }
+
+  .config-buttons {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-top: 15px;
+  }
+
+  .config-buttons .btn {
+    flex: 1;
+    min-width: 150px;
+  }
+
+  .setting-group {
+    margin-bottom: 15px;
+  }
+
+  .setting-label {
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+    font-weight: bold;
+    color: #333;
+  }
+
+  .setting-checkbox {
+    margin-right: 10px;
+    width: 16px;
+    height: 16px;
+  }
+
+  .setting-input {
+    width: 100%;
+    padding: 10px 15px;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    font-size: 1em;
+    transition: border-color 0.3s ease;
+  }
+
+  .setting-input:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 8px rgba(102, 126, 234, 0.3);
+  }
+
+  .btn-primary {
+    background: linear-gradient(45deg, #667eea, #764ba2);
+  }
+
+  .btn-info {
+    background: linear-gradient(45deg, #17a2b8, #20c997);
+  }
+
   @media (max-width: 768px) {
     .main-container {
       grid-template-columns: 1fr;
@@ -235,6 +458,24 @@ const char *update_html = R"rawliteral(
     .nav a {
       display: block;
       margin: 10px 0;
+    }
+
+    .control-buttons {
+      flex-direction: column;
+    }
+
+    .sleep-controls {
+      grid-template-columns: 1fr;
+    }
+
+    .config-buttons {
+      flex-direction: column;
+    }
+
+    .control-buttons .btn,
+    .config-buttons .btn {
+      min-width: auto;
+      width: 100%;
     }
   }
 </style>
@@ -251,6 +492,7 @@ const char *update_html = R"rawliteral(
     <a href="/dashboard">📊 Dashboard</a>
     <a href="/charts">📈 Wykresy</a>
     <a href="/network">🌐 Sieć</a>
+    <a href="/mcp3424">🔌 MCP3424</a>
   </div>
 
   <div class="main-container">
@@ -333,7 +575,7 @@ const char *update_html = R"rawliteral(
       </a>
       
       <a href="/mcp3424" class="btn btn-warning">
-        🔌 Konfiguracja MCP3424
+        🔌 MCP3424 ADC
       </a>
       
       <div class="status-text">
@@ -361,7 +603,7 @@ const char *update_html = R"rawliteral(
       
       <div class="setting-group">
         <label class="setting-label">Token Pushbullet:</label>
-        <input type="text" id="pushbulletToken" class="setting-input" placeholder="Wprowadź token Pushbullet">
+        <input type="password" id="pushbulletToken" class="setting-input" placeholder="Wprowadź token Pushbullet">
       </div>
       
       <button class="btn btn-primary" onclick="savePushbulletConfig()">
@@ -401,6 +643,92 @@ const char *update_html = R"rawliteral(
       <button class="btn btn-warning" id="refreshInfo">
         🔄 Odśwież Info
       </button>
+    </div>
+
+    <!-- Fan Control Card -->
+    <div class="control-card">
+      <div class="card-header">
+        <div class="card-icon system-icon">🌀</div>
+        <div class="card-title">Sterowanie Wentylatorem i GLine</div>
+      </div>
+      <div class="card-description">
+        Kontrola wentylatora, GLine (router) i tryb sleep
+      </div>
+      
+      <!-- Fan Control -->
+      <div class="control-section">
+        <h4>🌀 Wentylator</h4>
+        <div class="control-buttons">
+          <button class="btn btn-success" onclick="sendFanCommand('fan_on')">
+            🌀 Włącz Wentylator
+          </button>
+          <button class="btn btn-danger" onclick="sendFanCommand('fan_off')">
+            ⏹️ Wyłącz Wentylator
+          </button>
+        </div>
+        
+        <div class="speed-control">
+          <label>Prędkość: <span id="fanSpeedValue">50</span>% <small style="color: #666;">(0% = wyłączony)</small></label>
+          <input type="range" id="fanSpeedSlider" min="0" max="100" value="50" 
+                 oninput="updateFanSpeed(this.value)" 
+                 onmouseup="sendFanCommand('fan_speed', this.value)"
+                 ontouchend="sendFanCommand('fan_speed', this.value)">
+          <button class="btn btn-primary" onclick="setFanSpeed()" style="margin-top: 10px; min-width: 150px;">
+            ⚡ Ustaw Prędkość
+          </button>
+        </div>
+      </div>
+      
+      <!-- GLine Control -->
+      <div class="control-section">
+        <h4>⚡ GLine (Router)</h4>
+        <div class="control-buttons">
+          <button class="btn btn-success" onclick="sendFanCommand('gline_on')">
+            ⚡ Włącz GLine
+          </button>
+          <button class="btn btn-danger" onclick="sendFanCommand('gline_off')">
+            🔌 Wyłącz GLine
+          </button>
+        </div>
+      </div>
+      
+      <!-- Sleep Mode -->
+      <div class="control-section">
+        <h4>😴 Tryb Sleep</h4>
+        <div class="sleep-controls">
+          <div class="sleep-input">
+            <label>Opóźnienie (s):</label>
+            <input type="number" id="sleepDelay" min="0" max="3600" value="60" class="sleep-input-field">
+          </div>
+          <div class="sleep-input">
+            <label>Czas trwania (s):</label>
+            <input type="number" id="sleepDuration" min="10" max="7200" value="300" class="sleep-input-field">
+          </div>
+        </div>
+        <div class="control-buttons">
+          <button class="btn btn-warning" onclick="startSleepMode()">
+            😴 Start Sleep
+          </button>
+          <button class="btn btn-success" onclick="sendFanCommand('sleep_stop')">
+            ⏰ Stop Sleep
+          </button>
+        </div>
+      </div>
+      
+      <!-- Status Display -->
+      <div class="status-section">
+        <h4>📊 Status</h4>
+        <div class="status-text" id="fanStatus">
+          <strong>Wentylator:</strong> <span id="fanState">--</span><br>
+          <strong>Prędkość:</strong> <span id="fanDutyCycle">--</span>%<br>
+          <strong>RPM:</strong> <span id="fanRPM">--</span><br>
+          <strong>GLine:</strong> <span id="glineState">--</span><br>
+          <strong>Sleep Mode:</strong> <span id="sleepState">--</span>
+        </div>
+        <button class="btn btn-primary" onclick="getFanStatus()">
+          🔄 Odśwież Status
+        </button>
+      </div>
     </div>
 
     <!-- System Configuration Card -->
@@ -558,6 +886,14 @@ function connectWebSocket() {
           loadSystemConfigMain();
         } else {
           showAlert('Błąd aktualizacji konfiguracji: ' + (data.error || 'Nieznany błąd'), 'error');
+        }
+      } else if (data.cmd === 'system') {
+        // Handle system commands (including fan control)
+        updateFanStatusDisplay(data);
+        
+        // Also handle other system messages
+        if (data.command === 'memory') {
+          updateSystemInfo(data);
         }
       } else {
         // Handle other messages
@@ -922,6 +1258,184 @@ document.getElementById('updateForm').addEventListener('submit', function(e) {
   setTimeout(() => clearInterval(progressInterval), 5000);
 });
 
+// Fan Control Functions
+function sendFanCommand(command, value = null) {
+  console.log('Sending fan command:', command, value);
+  
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const message = {
+      cmd: 'system',
+      command: command
+    };
+    
+    if (value !== null) {
+      message.value = value;
+    }
+    
+    // For sleep command, add delay and duration
+    if (command === 'sleep') {
+      message.delay = parseInt(document.getElementById('sleepDelay').value) || 60;
+      message.duration = parseInt(document.getElementById('sleepDuration').value) || 300;
+    }
+    
+    ws.send(JSON.stringify(message));
+    
+    // Show loading feedback
+    showAlert(`Wykonuję komendę: ${command}`, 'info');
+    
+    // Refresh status after command
+    setTimeout(() => {
+      getFanStatus();
+    }, 1000);
+  } else {
+    showAlert('Brak połączenia WebSocket', 'error');
+  }
+}
+
+function updateFanSpeed(value) {
+  document.getElementById('fanSpeedValue').textContent = value;
+}
+
+function setFanSpeed() {
+  const speed = document.getElementById('fanSpeedSlider').value;
+  sendFanCommand('fan_speed', speed);
+}
+
+function startSleepMode() {
+  const delay = parseInt(document.getElementById('sleepDelay').value) || 60;
+  const duration = parseInt(document.getElementById('sleepDuration').value) || 300;
+  
+  if (confirm(`Uruchomić tryb sleep z opóźnieniem ${delay}s i czasem trwania ${duration}s?`)) {
+    sendFanCommand('sleep');
+  }
+}
+
+function getFanStatus() {
+  console.log('Getting fan status...');
+  
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      cmd: 'system',
+      command: 'fan_status'
+    }));
+  } else {
+    showAlert('Brak połączenia WebSocket', 'error');
+  }
+}
+
+function updateFanStatusDisplay(data) {
+  console.log('Updating fan status display:', data);
+  
+  if (data.cmd === 'system' && data.command === 'fan_status') {
+    document.getElementById('fanState').textContent = data.enabled ? 'Włączony' : 'Wyłączony';
+    document.getElementById('fanDutyCycle').textContent = data.dutyCycle || '--';
+    document.getElementById('fanRPM').textContent = data.rpm || '--';
+    document.getElementById('glineState').textContent = data.glineEnabled ? 'Włączony' : 'Wyłączony';
+    
+    // Update sleep mode status
+    if (data.sleepMode) {
+      const sleepEnd = new Date(data.sleepEndTime);
+      document.getElementById('sleepState').textContent = `Aktywny do ${sleepEnd.toLocaleTimeString()}`;
+    } else {
+      document.getElementById('sleepState').textContent = 'Nieaktywny';
+    }
+    
+    // Update slider position
+    if (data.dutyCycle !== undefined) {
+      document.getElementById('fanSpeedSlider').value = data.dutyCycle;
+      document.getElementById('fanSpeedValue').textContent = data.dutyCycle;
+    }
+  } else if (data.cmd === 'system' && (
+    data.command === 'fan_on' || 
+    data.command === 'fan_off' || 
+    data.command === 'fan_speed' ||
+    data.command === 'gline_on' ||
+    data.command === 'gline_off' ||
+    data.command === 'sleep' ||
+    data.command === 'sleep_stop'
+  )) {
+    // Handle command responses
+    if (data.success) {
+      showAlert(data.message || `Komenda ${data.command} wykonana pomyślnie`, 'success');
+      
+      // Update specific UI elements based on command
+      if (data.command === 'fan_speed' && data.speed !== undefined) {
+        document.getElementById('fanSpeedSlider').value = data.speed;
+        document.getElementById('fanSpeedValue').textContent = data.speed;
+      }
+    } else {
+      showAlert(data.error || `Błąd wykonania komendy ${data.command}`, 'error');
+    }
+  }
+}
+
+// Alert/notification function
+function showAlert(message, type = 'info') {
+  // Create alert element if it doesn't exist
+  let alertContainer = document.getElementById('alertContainer');
+  if (!alertContainer) {
+    alertContainer = document.createElement('div');
+    alertContainer.id = 'alertContainer';
+    alertContainer.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 10000;
+      max-width: 300px;
+    `;
+    document.body.appendChild(alertContainer);
+  }
+  
+  // Create alert
+  const alert = document.createElement('div');
+  alert.style.cssText = `
+    padding: 15px;
+    margin-bottom: 10px;
+    border-radius: 8px;
+    color: white;
+    font-weight: bold;
+    opacity: 0;
+    transform: translateX(100%);
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  `;
+  
+  // Set color based on type
+  switch (type) {
+    case 'success':
+      alert.style.background = 'linear-gradient(45deg, #4caf50, #8bc34a)';
+      break;
+    case 'error':
+      alert.style.background = 'linear-gradient(45deg, #f44336, #ff5722)';
+      break;
+    case 'warning':
+      alert.style.background = 'linear-gradient(45deg, #ff9800, #ffc107)';
+      break;
+    default:
+      alert.style.background = 'linear-gradient(45deg, #2196f3, #03a9f4)';
+  }
+  
+  alert.textContent = message;
+  alertContainer.appendChild(alert);
+  
+  // Animate in
+  setTimeout(() => {
+    alert.style.opacity = '1';
+    alert.style.transform = 'translateX(0)';
+  }, 100);
+  
+  // Remove after 3 seconds
+  setTimeout(() => {
+    alert.style.opacity = '0';
+    alert.style.transform = 'translateX(100%)';
+    setTimeout(() => {
+      if (alert.parentNode) {
+        alert.parentNode.removeChild(alert);
+      }
+    }, 300);
+  }, 3000);
+}
+
 // Event listeners
 document.getElementById('toggleAutoReset').addEventListener('click', toggleAutoReset);
 document.getElementById('restartBtn').addEventListener('click', restartSystem);
@@ -944,9 +1458,10 @@ window.addEventListener('load', function() {
   }
   xhr.send();
   
-  // Load Pushbullet config after WebSocket connects
+  // Load Pushbullet config and fan status after WebSocket connects
   setTimeout(() => {
     loadPushbulletConfig();
+    getFanStatus(); // Load initial fan status
   }, 2000);
 });
 

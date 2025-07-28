@@ -610,6 +610,82 @@ const char *dashboard_html = R"rawliteral(
       </div>
       <div class="last-update" id="calib-temps-update">Ostatnia aktualizacja: --</div>
     </div>
+
+    <!-- Fan Control Card -->
+    <div class="sensor-card" id="fan-control-card">
+      <div class="sensor-header">
+        <div class="sensor-icon power-icon">🌀</div>
+        <div class="sensor-title">Sterowanie Wentylatorem & GLine</div>
+        <div class="status-indicator" id="fan-control-status"></div>
+      </div>
+      <div class="sensor-data">
+        <div class="data-item">
+          <div class="data-label">Status Wentylatora</div>
+          <div class="data-value" id="fan-status">--</div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">Prędkość</div>
+          <div class="data-value" id="fan-speed">--<span class="data-unit">%</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">RPM</div>
+          <div class="data-value" id="fan-rpm">--<span class="data-unit">rpm</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">Status GLine</div>
+          <div class="data-value" id="gline-status">--</div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">Tryb Sleep</div>
+          <div class="data-value" id="sleep-status">--</div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">Koniec Sleep</div>
+          <div class="data-value" id="sleep-end">--</div>
+        </div>
+      </div>
+      <div class="control-panel">
+        <div class="control-section">
+          <h4>Sterowanie Wentylatorem</h4>
+          <div class="control-buttons">
+            <button class="control-btn" onclick="setFanSpeed(0)">Wyłącz</button>
+            <button class="control-btn" onclick="setFanSpeed(25)">25%</button>
+            <button class="control-btn" onclick="setFanSpeed(50)">50%</button>
+            <button class="control-btn" onclick="setFanSpeed(75)">75%</button>
+            <button class="control-btn" onclick="setFanSpeed(100)">100%</button>
+          </div>
+          <div class="slider-container">
+            <input type="range" id="fan-speed-slider" min="0" max="100" value="50" class="speed-slider">
+            <span id="slider-value">50%</span>
+          </div>
+        </div>
+        <div class="control-section">
+          <h4>Sterowanie GLine</h4>
+          <div class="control-buttons">
+            <button class="control-btn" onclick="setGLine(false)">Wyłącz GLine</button>
+            <button class="control-btn" onclick="setGLine(true)">Włącz GLine</button>
+          </div>
+        </div>
+        <div class="control-section">
+          <h4>Tryb Sleep</h4>
+          <div class="sleep-controls">
+            <div class="sleep-input">
+              <label>Opóźnienie (s):</label>
+              <input type="number" id="sleep-delay" min="0" max="3600" value="60" class="sleep-input-field">
+            </div>
+            <div class="sleep-input">
+              <label>Czas trwania (s):</label>
+              <input type="number" id="sleep-duration" min="60" max="7200" value="300" class="sleep-input-field">
+            </div>
+            <div class="control-buttons">
+              <button class="control-btn" onclick="startSleep()">Start Sleep</button>
+              <button class="control-btn" onclick="stopSleep()">Stop Sleep</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="last-update" id="fan-control-update">Ostatnia aktualizacja: --</div>
+    </div>
   </div>
 
 <script>

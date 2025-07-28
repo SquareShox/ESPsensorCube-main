@@ -3,36 +3,32 @@
 
 #include <Arduino.h>
 #include <AsyncWebSocket.h>
+#include <ArduinoJson.h>
 
 // Deklaracje funkcji WebSocket
 void initializeWebSocket(AsyncWebSocket& ws);
 void broadcastSensorData(AsyncWebSocket& ws);
 
-// Nowe funkcje dla zarzadzania pamiecia i natywnego ping/pong
-void cleanupWebSocketMemory();
-void sendPingToClient(AsyncWebSocketClient* client);
-void checkWebSocketConnections();
+// WebSocket Task System
+bool initializeWebSocketTask();
+void stopWebSocketTask();
+bool sendToWebSocketTask(AsyncWebSocketClient* client, const String& message);
+void webSocketTask(void* parameters);
+void handleWebSocketMessageInTask(AsyncWebSocketClient* client, DynamicJsonDocument& doc);
 
-// Zaawansowane czyszczenie pamieci
-void forceGarbageCollection();
-void intelligentMemoryCleanup();
-void performEmergencyCleanup();
+// WebSocket Monitoring i Reset
+void checkHeapAndReset();
+void checkWebSocketActivity();
+void resetWebSocket();
+void forceWebSocketReset(const String& reason);
+String getWebSocketStatus();
+void checkWebSocketClients();
+
+// Funkcje klientow WebSocket
 void addWebSocketClient(AsyncWebSocketClient* client);
 void removeWebSocketClient(AsyncWebSocketClient* client);
 void updateClientPongTime(AsyncWebSocketClient* client);
 void sendNativePing(AsyncWebSocketClient* client);
-void cleanupInactiveClients();
-
-// Deklaracje funkcji obsługi komend
-void handleGetStatus(AsyncWebSocketClient* client, void* arg);
-void handleGetSensorData(AsyncWebSocketClient* client, void* arg);
-void handleGetHistory(AsyncWebSocketClient* client, void* arg);
-void handleGetHistoryInfo(AsyncWebSocketClient* client, void* arg);
-void handleGetAverages(AsyncWebSocketClient* client, void* arg);
-void handleSetConfig(AsyncWebSocketClient* client, void* arg);
-void handleGetConfig(AsyncWebSocketClient* client, void* arg);
-void handleSystemCommand(AsyncWebSocketClient* client, void* arg);
-void handleCalibrationCommand(AsyncWebSocketClient* client, void* arg);
 
 // Główna funkcja obsługi wiadomości WebSocket
 void handleWebSocketMessage(AsyncWebSocketClient* client, void* arg, uint8_t* data, size_t len);

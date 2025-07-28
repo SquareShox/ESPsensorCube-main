@@ -3,14 +3,15 @@
 #include <modbus_handler.h>
 #include <config.h>
 #include <calib.h>
+#include <new> // For std::nothrow
 
 // Temporal moving average periods
 #define FAST_PERIOD_MS (10 * 1000)   // 10 seconds
 #define SLOW_PERIOD_MS (5 * 60 * 1000) // 5 minutes
 
 // Sample buffer sizes (adjust based on available memory)
-#define FAST_BUFFER_SIZE 30   // ~30 samples for 10s average
-#define SLOW_BUFFER_SIZE 100  // ~100 samples for 5min average
+#define FAST_BUFFER_SIZE 15   // ~30 samples for 10s average
+#define SLOW_BUFFER_SIZE 50  // ~100 samples for 5min average
 
 // Generic circular buffer template for sensor data
 template<typename T, size_t SIZE>

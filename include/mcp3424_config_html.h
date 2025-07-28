@@ -172,6 +172,21 @@ const char *mcp3424_config_html = R"rawliteral(
     color: #666;
   }
 
+  .form-input.found {
+    border-color: #4caf50 !important;
+    background-color: #f8fff8;
+  }
+
+  .form-input.not-found {
+    border-color: #ff9800 !important;
+    background-color: #fff8f0;
+  }
+
+  .form-input.invalid {
+    border-color: #f44336 !important;
+    background-color: #fff0f0;
+  }
+
   .checkbox-group {
     display: flex;
     align-items: center;
@@ -310,6 +325,9 @@ const char *mcp3424_config_html = R"rawliteral(
         <li><strong>Channel 1:</strong> Auxiliary Electrode (AUX)</li>
         <li><strong>Channel 2:</strong> Temperature (TEMP) / TGS C3</li>
         <li><strong>Channel 3:</strong> Supply Voltage (VCC) / TGS C4</li>
+        <li><strong>Adresy I2C:</strong> 0x68-0x6F (domyślnie: Device 0=0x68, Device 1=0x6A, itd.)</li>
+        <li><strong>Walidacja:</strong> Każdy adres I2C i typ gazu musi być unikalny</li>
+        <li><strong>Status adresów:</strong> Zielone = znaleziono, Pomarańczowe = nie znaleziono, Czerwone = błąd</li>
       </ul>
     </div>
 
@@ -335,6 +353,14 @@ const char *mcp3424_config_html = R"rawliteral(
         
         <button class="btn" onclick="loadMCP3424Config()">
           🔄 Odśwież Konfigurację
+        </button>
+        
+        <button class="btn btn-warning" onclick="scanI2CAddresses()">
+          🔍 Skanuj Adresy I2C
+        </button>
+        
+        <button class="btn btn-success" onclick="autoAssignAddresses()">
+          🎯 Automatyczne Przypisanie
         </button>
       </div>
     </div>
@@ -362,9 +388,32 @@ function connectWebSocket() {
       if (data.cmd === "mcp3424Config") {
         console.log('MCP3424 config received:', data.config);
         updateMCP3424ConfigDisplay(data.config);
-      } else if (data.cmd === "mcp3424Config" && data.success) {
-        console.log('MCP3424 config received (alternative):', data.config);
-        updateMCP3424ConfigDisplay(data.config);
+      } else if (data.cmd === "i2cScanResult") {
+        console.log('I2C scan result received:', data);
+        if (data.success) {
+          lastScanResults = data.foundAddresses || []; // Store scan results
+          showAlert(`Skanowanie I2C zakończone. Znaleziono ${data.foundAddresses ? data.foundAddresses.length : 0} urządzeń.`, 'success');
+          // Update the display with found addresses
+          if (data.foundAddresses && data.foundAddresses.length > 0) {
+            updateWithFoundAddresses(data.foundAddresses);
+          }
+        } else {
+          showAlert('Błąd podczas skanowania I2C: ' + (data.error || 'Nieznany błąd'), 'error');
+          lastScanResults = []; // Clear scan results on error
+        }
+      } else if (data.cmd === "setMCP3424Config") {
+        if (data.success) {
+          showAlert('Konfiguracja MCP3424 została zapisana pomyślnie!', 'success');
+        } else {
+          showAlert('Błąd podczas zapisywania konfiguracji MCP3424: ' + (data.error || 'Nieznany błąd'), 'error');
+        }
+      } else if (data.cmd === "resetMCP3424Config") {
+        if (data.success) {
+          showAlert('Konfiguracja MCP3424 została zresetowana do ustawień domyślnych!', 'success');
+          loadMCP3424Config(); // Reload the configuration
+        } else {
+          showAlert('Błąd podczas resetowania konfiguracji MCP3424: ' + (data.error || 'Nieznany błąd'), 'error');
+        }
       }
     } catch (error) {
       console.error('Error parsing WebSocket data:', error);
@@ -382,13 +431,13 @@ function loadMCP3424Config() {
     setTimeout(() => {
       if (document.getElementById('device-grid').children.length === 0) {
         console.log('Timeout - showing default cards');
-        showAlert('Timeout - pokazano domyślne karty', 'warning');
+        showAlert('Timeout połączenia - załadowano domyślną konfigurację', 'warning');
         updateMCP3424ConfigDisplay({ devices: [] });
       }
     }, 3000);
   } else {
     console.log('WebSocket not connected - showing default cards');
-    showAlert('WebSocket nie połączony - pokazano domyślne karty', 'warning');
+    showAlert('WebSocket nie połączony - załadowano domyślną konfigurację', 'warning');
     updateMCP3424ConfigDisplay({ devices: [] });
   }
 }
@@ -410,7 +459,7 @@ function updateMCP3424ConfigDisplay(config) {
   if (config && config.devices && config.devices.length > 0) {
     showAlert(`Załadowano ${config.devices.length} urządzeń`, 'success');
   } else {
-    showAlert('Brak danych konfiguracyjnych - pokazano domyślne karty', 'warning');
+    showAlert('Brak danych konfiguracyjnych - załadowano domyślną konfigurację', 'info');
   }
 }
 
@@ -428,10 +477,25 @@ function createDeviceCard(deviceIndex, deviceData) {
     'TGS Sensor 2', 'TGS Sensor 3'
   ];
   
+  // Default I2C addresses for MCP3424 (0x68-0x6F)
+  const defaultAddresses = [0x68, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x70];
+  const currentAddress = deviceData ? deviceData.i2cAddress : defaultAddresses[deviceIndex];
+  
   card.innerHTML = `
     <div class="device-header">
       <div class="device-title">Device ${deviceIndex}</div>
       <div class="device-index">#${deviceIndex}</div>
+    </div>
+    
+    <div class="form-group">
+      <label class="form-label">Adres I2C:</label>
+      <input type="text" class="form-input" id="i2c-address-${deviceIndex}" 
+             value="0x${currentAddress.toString(16).toUpperCase()}"
+             placeholder="0x68"
+             pattern="0x[0-9A-Fa-f]{2}"
+             title="Format: 0x68-0x6F"
+             onchange="updateDeviceConfig(${deviceIndex})">
+      <small style="color: #666; font-size: 0.9em;">Format: 0x68-0x6F (domyślnie: 0x${defaultAddresses[deviceIndex].toString(16).toUpperCase()})</small>
     </div>
     
     <div class="form-group">
@@ -459,6 +523,7 @@ function createDeviceCard(deviceIndex, deviceData) {
              ${deviceData && deviceData.enabled ? 'checked' : ''}
              onchange="updateDeviceConfig(${deviceIndex})">
       <label for="enabled-${deviceIndex}">Aktywne</label>
+      ${deviceData && deviceData.autoDetected ? '<span style="color: #4caf50; font-size: 0.9em; margin-left: 10px;">🔍 Auto-wykryte</span>' : ''}
     </div>
   `;
   
@@ -470,6 +535,39 @@ function updateDeviceConfig(deviceIndex) {
   const description = document.getElementById(`description-${deviceIndex}`).value;
   const enabled = document.getElementById(`enabled-${deviceIndex}`).checked;
   
+  // Parse I2C address
+  let i2cAddress = 0x68; // default
+  const addressInput = document.getElementById(`i2c-address-${deviceIndex}`);
+  const addressValue = addressInput.value.trim();
+  
+  if (addressValue) {
+    // Validate I2C address format
+    const addressMatch = addressValue.match(/^0x([0-9A-Fa-f]{2})$/);
+    if (addressMatch) {
+      i2cAddress = parseInt(addressMatch[1], 16);
+      // Validate range (0x68-0x6F typical for MCP3424)
+      if (i2cAddress < 0x68 || i2cAddress > 0x6F) {
+        showAlert(`Adres I2C 0x${i2cAddress.toString(16).toUpperCase()} jest poza typowym zakresem MCP3424 (0x68-0x6F)`, 'warning');
+        addressInput.classList.remove('found', 'not-found');
+        addressInput.classList.add('invalid');
+      } else {
+        addressInput.classList.remove('invalid', 'not-found');
+        addressInput.classList.add('found');
+      }
+    } else {
+      showAlert(`Nieprawidłowy format adresu I2C: ${addressValue}. Użyj formatu 0x68-0x6F`, 'error');
+      addressInput.classList.remove('found', 'not-found');
+      addressInput.classList.add('invalid');
+      return;
+    }
+  } else {
+    // Use default address based on device index
+    const defaultAddresses = [0x68, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x70];
+    i2cAddress = defaultAddresses[deviceIndex];
+    addressInput.value = `0x${i2cAddress.toString(16).toUpperCase()}`;
+    addressInput.classList.remove('found', 'not-found', 'invalid');
+  }
+  
   // Update current config
   let device = currentConfig.devices.find(d => d.deviceIndex === deviceIndex);
   if (!device) {
@@ -477,6 +575,7 @@ function updateDeviceConfig(deviceIndex) {
     currentConfig.devices.push(device);
   }
   
+  device.i2cAddress = i2cAddress;
   device.gasType = gasType;
   device.description = description;
   device.enabled = enabled;
@@ -507,6 +606,22 @@ function saveMCP3424Config() {
     return;
   }
   
+  // Check for duplicate I2C addresses
+  const addresses = devices.map(d => d.i2cAddress);
+  const uniqueAddresses = [...new Set(addresses)];
+  if (addresses.length !== uniqueAddresses.length) {
+    showAlert('Każdy adres I2C może być przypisany tylko do jednego urządzenia!', 'error');
+    return;
+  }
+  
+  // Validate I2C addresses are in valid range
+  for (const device of devices) {
+    if (device.i2cAddress < 0x68 || device.i2cAddress > 0x6F) {
+      showAlert(`Adres I2C 0x${device.i2cAddress.toString(16).toUpperCase()} dla urządzenia ${device.deviceIndex} jest poza typowym zakresem MCP3424 (0x68-0x6F)`, 'error');
+      return;
+    }
+  }
+  
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({
       cmd: "setMCP3424Config",
@@ -527,6 +642,112 @@ function resetMCP3424Config() {
       showAlert('Brak połączenia WebSocket!', 'error');
     }
   }
+}
+
+function scanI2CAddresses() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({cmd: "scanI2CAddresses"}));
+    showAlert('Skanowanie adresów I2C...', 'info');
+  } else {
+    showAlert('Brak połączenia WebSocket!', 'error');
+  }
+}
+
+function updateWithFoundAddresses(foundAddresses) {
+  // Update device cards with found addresses
+  for (let i = 0; i < 8; i++) {
+    const addressInput = document.getElementById(`i2c-address-${i}`);
+    if (addressInput) {
+      // Parse current address from input field
+      const addressValue = addressInput.value.trim();
+      let currentAddress = null;
+      
+      const addressMatch = addressValue.match(/^0x([0-9A-Fa-f]{2})$/);
+      if (addressMatch) {
+        currentAddress = parseInt(addressMatch[1], 16);
+      }
+      
+      if (currentAddress !== null) {
+        // Check if this address was found during scan
+        const wasFound = foundAddresses.includes(currentAddress);
+        
+        if (wasFound) {
+          addressInput.classList.remove('not-found', 'invalid');
+          addressInput.classList.add('found');
+          addressInput.title = `✅ Znaleziono urządzenie na adresie 0x${currentAddress.toString(16).toUpperCase()}`;
+        } else {
+          addressInput.classList.remove('found', 'invalid');
+          addressInput.classList.add('not-found');
+          addressInput.title = `❌ Nie znaleziono urządzenia na adresie 0x${currentAddress.toString(16).toUpperCase()}`;
+        }
+      }
+    }
+  }
+  
+  // Show summary
+  const foundCount = foundAddresses.length;
+  const totalExpected = 8;
+  showAlert(`Skanowanie zakończone: ${foundCount}/${totalExpected} adresów I2C znaleziono. Zielone obramowanie = znaleziono, pomarańczowe = nie znaleziono.`, 'info');
+}
+
+let lastScanResults = []; // Store last scan results
+
+function showAlert(message, type) {
+  const container = document.getElementById('alert-container');
+  const alert = document.createElement('div');
+  alert.className = `alert alert-${type === 'success' ? 'success' : type === 'error' ? 'error' : type === 'info' ? 'warning' : 'warning'}`;
+  alert.innerHTML = message;
+  
+  container.innerHTML = ''; // Clear previous alerts
+  container.appendChild(alert);
+  
+  // Auto-hide after 5 seconds for success/info messages
+  if (type === 'success' || type === 'info') {
+    setTimeout(() => {
+      if (alert.parentNode) {
+        alert.parentNode.removeChild(alert);
+      }
+    }, 5000);
+  }
+}
+
+function autoAssignAddresses() {
+  if (lastScanResults.length === 0) {
+    showAlert('Najpierw wykonaj skanowanie I2C aby znaleźć dostępne urządzenia!', 'warning');
+    return;
+  }
+  
+  const defaultAddresses = [0x68, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x70];
+  let assignedCount = 0;
+
+  for (let i = 0; i < 8 && assignedCount < lastScanResults.length; i++) {
+    const addressInput = document.getElementById(`i2c-address-${i}`);
+    if (addressInput && lastScanResults[assignedCount] !== undefined) {
+      const foundAddress = lastScanResults[assignedCount];
+      addressInput.value = `0x${foundAddress.toString(16).toUpperCase()}`;
+      addressInput.classList.remove('not-found', 'invalid');
+      addressInput.classList.add('found');
+      addressInput.title = `✅ Automatycznie przypisano znaleziony adres 0x${foundAddress.toString(16).toUpperCase()}`;
+      
+      // Update the configuration
+      updateDeviceConfig(i);
+      assignedCount++;
+    }
+  }
+  
+  // Reset remaining addresses to defaults if no more found addresses
+  for (let i = assignedCount; i < 8; i++) {
+    const addressInput = document.getElementById(`i2c-address-${i}`);
+    if (addressInput) {
+      const defaultAddress = defaultAddresses[i];
+      addressInput.value = `0x${defaultAddress.toString(16).toUpperCase()}`;
+      addressInput.classList.remove('found', 'not-found', 'invalid');
+      addressInput.title = `Domyślny adres 0x${defaultAddress.toString(16).toUpperCase()}`;
+      updateDeviceConfig(i);
+    }
+  }
+  
+  showAlert(`Automatycznie przypisano ${assignedCount} znalezionych adresów I2C.`, 'success');
 }
 
 // Initialize on page load

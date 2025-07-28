@@ -267,11 +267,18 @@ function handleHistoryResponse(data) {
   
   if (!data.data || data.data.length === 0) {
     console.log('No data array or empty data');
-    document.getElementById('charts-container').innerHTML = '<div class="no-data">📭 Brak danych dla wybranego czujnika</div>';
+    const errorMsg = !data.data ? 'Brak pola data w odpowiedzi' : 'Pusta tablica danych';
+    document.getElementById('charts-container').innerHTML = `<div class="no-data">📭 ${errorMsg}<br><small>Sensor: ${data.sensor}, zakres: ${data.timeRange}, typ: ${data.sampleType}</small></div>`;
     return;
   }
   
   console.log('Data received:', data.data.length, 'samples');
+  console.log('Response info: sensor=' + data.sensor + ', timeRange=' + data.timeRange + ', sampleType=' + data.sampleType);
+  
+  // Log first sample structure for debugging
+  if (data.data.length > 0) {
+    console.log('First sample structure:', data.data[0]);
+  }
   
   const sensorType = document.getElementById('sensorType').value;
   
@@ -379,16 +386,20 @@ function formatChartData(historyData, valueKey, label, color) {
   const formattedData = historyData.map((entry, index) => {
     let timestamp = entry.timestamp;
     
-    // If timestamp looks like millis() (small number), convert to proper epoch time
+    // Convert epoch timestamp from seconds to milliseconds
     if (timestamp < 1600000000000) {
-      const now = Date.now();
-      const systemUptimeMs = timestamp;
-      timestamp = now - (Date.now() % 1000000000) + systemUptimeMs;
+      // If timestamp is smaller than Jan 1, 2020 in milliseconds, assume it's in seconds
+      timestamp = timestamp * 1000;
     }
     
     // Get the value from data object
     const value = entry.data ? entry.data[valueKey] : entry[valueKey];
     const parsedValue = parseFloat(value);
+    
+    // Debug logging for first few entries
+    if (index < 3) {
+      console.log(`Entry ${index}: timestamp=${entry.timestamp}, converted=${timestamp}, value=${value}, parsedValue=${parsedValue}`);
+    }
     
     return {
       x: new Date(timestamp),
@@ -400,6 +411,10 @@ function formatChartData(historyData, valueKey, label, color) {
   formattedData.sort((a, b) => a.x.getTime() - b.x.getTime());
   
   console.log(`Formatted ${formattedData.length} valid points for ${valueKey}`);
+  if (formattedData.length > 0) {
+    console.log(`Time range: ${formattedData[0].x.toISOString()} to ${formattedData[formattedData.length-1].x.toISOString()}`);
+  }
+  
   return formattedData;
 }
 
@@ -756,40 +771,38 @@ function createMCP3424Charts(data) {
   mcpCard.innerHTML = `
     <div class="chart-title">🔌 MCP3424 (18-bit ADC)</div>
     <div class="chart-container" id="mcp3424-chart"></div>
-    <div class="chart-info">Napięcia z konwertera ADC</div>
+    <div class="chart-info">Kanały K1-K8 (napięcia z konwertera ADC)</div>
   `;
   container.appendChild(mcpCard);
   
-  charts.mcp3424 = createChart('mcp3424-chart', 'MCP3424 - Napięcia', [
-    {
-      label: 'Channel 1 (V)',
-      data: formatChartData(data, 'channel1'),
-      borderColor: '#e74c3c',
-      backgroundColor: '#e74c3c20',
-      tension: 0.1
-    },
-    {
-      label: 'Channel 2 (V)',
-      data: formatChartData(data, 'channel2'),
-      borderColor: '#3498db',
-      backgroundColor: '#3498db20',
-      tension: 0.1
-    },
-    {
-      label: 'Channel 3 (V)',
-      data: formatChartData(data, 'channel3'),
-      borderColor: '#27ae60',
-      backgroundColor: '#27ae6020',
-      tension: 0.1
-    },
-    {
-      label: 'Channel 4 (V)',
-      data: formatChartData(data, 'channel4'),
-      borderColor: '#f39c12',
-      backgroundColor: '#f39c1220',
-      tension: 0.1
+  // Create datasets for available K channels
+  const datasets = [];
+  const colors = ['#e74c3c', '#3498db', '#27ae60', '#f39c12', '#9b59b6', '#e67e22', '#1abc9c', '#34495e'];
+  
+  // Check for K1_1 through K8_4 channels
+  for (let k = 1; k <= 8; k++) {
+    for (let ch = 1; ch <= 4; ch++) {
+      const key = `K${k}_${ch}`;
+      // Check if this key exists in data
+      if (data.some(entry => entry.data && entry.data[key] !== undefined)) {
+        datasets.push({
+          label: `${key} (V)`,
+          data: formatChartData(data, key),
+          borderColor: colors[(k-1) % colors.length],
+          backgroundColor: colors[(k-1) % colors.length] + '20',
+          tension: 0.1
+        });
+      }
     }
-  ]);
+  }
+  
+  if (datasets.length === 0) {
+    // No K channel data found, show message
+    container.innerHTML = '<div class="no-data">📭 Brak danych MCP3424<br><small>Sprawdź czy urządzenia MCP3424 są podłączone i skonfigurowane</small></div>';
+    return;
+  }
+  
+  charts.mcp3424 = createChart('mcp3424-chart', 'MCP3424 - Kanały ADC', datasets);
 }
 
 function createADS1110Charts(data) {

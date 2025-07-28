@@ -1,6 +1,7 @@
 #include "i2c_sensors.h"
 #include <sensors.h>
 #include "sps30_sensor.h"
+#include "network_config.h"
 #include <Wire.h>
 #include <MCP342x.h>
 #include <Adafruit_INA219.h>
@@ -141,32 +142,45 @@ void initializeI2C() {
     }
     
     // Initialize ADC sensors
-        // Scan for MCP3424 addresses (0x68-0x6F)
+    // Initialize MCP3424 using new address mapping system
     if (config.enableMCP3424) {
-        safePrintln("Scanning for MCP3424 devices...");
+        // Load MCP3424 configuration, if not found, use defaults
+        extern MCP3424Config mcp3424Config;
+        if (!loadMCP3424Config(mcp3424Config) || !mcp3424Config.configValid) {
+            safePrintln("Loading default MCP3424 mapping...");
+            initializeDefaultMCP3424Mapping();
+        }
+        
+        // Scan and map devices using the new system
+        scanAndMapMCP3424Devices();
+        
+        // Initialize MCP3424 devices based on detected addresses
         mcp3424Data.deviceCount = 0;
         
-        for (uint8_t addr = 0x68; addr <= 0x6F; addr++) {
-            Wire.beginTransmission(addr);
-            uint8_t result = Wire.endTransmission();
-            //exclude device 69 
-            if (addr != 0x69) {
-            
-            if (result == 0 && mcp3424Data.deviceCount < MAX_MCP3424_DEVICES) {
-                safePrint("MCP3424 found at address 0x");
-                safePrintln(String(addr, HEX));
-                // Create new instance for this address
-                mcp3424_devices[mcp3424Data.deviceCount] = new MCP342x(addr);
-               //  mcp3424_devices[mcp3424Data.deviceCount]->convert
-                mcp3424Data.addresses[mcp3424Data.deviceCount] = addr;
-                mcp3424Data.valid[mcp3424Data.deviceCount] = false;
+        for (uint8_t i = 0; i < mcp3424Config.deviceCount; i++) {
+            if (mcp3424Config.devices[i].autoDetected && mcp3424Config.devices[i].enabled) {
+                uint8_t addr = mcp3424Config.devices[i].i2cAddress;
+                uint8_t deviceIndex = mcp3424Config.devices[i].deviceIndex;
                 
-                // Initialize all channels to 0
-                for (int ch = 0; ch < 4; ch++) {
-                    mcp3424Data.channels[mcp3424Data.deviceCount][ch] = 0.0;
-                }
-                
-                mcp3424Data.deviceCount++;
+                if (mcp3424Data.deviceCount < MAX_MCP3424_DEVICES) {
+                    safePrint("Initializing MCP3424 device ");
+                    safePrint(String(deviceIndex));
+                    safePrint(" at address 0x");
+                    safePrint(String(addr, HEX));
+                    safePrint(" for ");
+                    safePrintln(mcp3424Config.devices[i].gasType);
+                    
+                    // Create new instance for this address
+                    mcp3424_devices[mcp3424Data.deviceCount] = new MCP342x(addr);
+                    mcp3424Data.addresses[mcp3424Data.deviceCount] = addr;
+                    mcp3424Data.valid[mcp3424Data.deviceCount] = false;
+                    
+                    // Initialize all channels to 0
+                    for (int ch = 0; ch < 4; ch++) {
+                        mcp3424Data.channels[mcp3424Data.deviceCount][ch] = 0.0;
+                    }
+                    
+                    mcp3424Data.deviceCount++;
                 }
             }
         }
@@ -191,9 +205,9 @@ void initializeI2C() {
                 safePrintln("MCP3424 async task created");
             }
             
-            safePrint("Found ");
+            safePrint("Initialized ");
             safePrint(String(mcp3424Data.deviceCount));
-            safePrint(" MCP3424 devices with 18-bit resolution (cykliczny tryb kanaly 1-4)");
+            safePrint(" MCP3424 devices with 18-bit resolution using address mapping");
             if (mcp3424_debug_enabled) {
                 safePrint(" - DEBUG ON");
             } else {
@@ -201,7 +215,7 @@ void initializeI2C() {
             }
             safePrintln("");
         } else {
-            safePrintln("No MCP3424 devices found in range 0x68-0x6F");
+            safePrintln("No MCP3424 devices found or enabled");
         }
     }
     

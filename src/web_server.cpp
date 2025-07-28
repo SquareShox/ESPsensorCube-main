@@ -1,4 +1,5 @@
 #include <web_server.h>
+#include <web_socket.h>
 #include <update_html.h>
 #include <dashboard_html.h>
 #include <network_config_html.h>
@@ -13,7 +14,6 @@
 #include <ESPAsyncWebServer.h>
 #include <time.h>
 #include <history.h>
-#include <web_socket.h>
 #include <ArduinoJson.h>
 #include <fan.h>
 #include <mean.h>
@@ -96,8 +96,6 @@ time_t getEpochTime() {
 bool isTimeSet() {
     return timeInitialized && (time(nullptr) > 8 * 3600 * 2); // > year 1970
 }
-
-// WebSocket event handler zostanie zastąpiony przez initializeWebSocket
 
 String getAllSensorJson() {
     // Check memory before building JSON
@@ -451,24 +449,41 @@ String getAllSensorJson() {
 }
 
 void wsBroadcastTask(void *parameter) {
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xFrequency = pdMS_TO_TICKS(10000); // 10 sekund
+    
     for (;;) {
-        // Sprawdz polaczenia WebSocket i zarzadzaj pamiecia
-        checkWebSocketConnections();
-        
-        // Skip broadcast if memory is low
-        if (ESP.getFreeHeap() > 20000) {
-            // Użyj getAllSensorJson zamiast broadcastSensorData
-            String jsonData = getAllSensorJson();
-            if (jsonData.length() > 0) {
-                ws.textAll(jsonData);
-           //     safePrintln("WebSocket broadcast: " + String(jsonData.length()) + " bytes");
-            } else {
-            //    safePrintln("WebSocket broadcast: empty JSON");
-            }
-        } else {
-          //  safePrintln("Skipping WebSocket broadcast - low memory: " + String(ESP.getFreeHeap()));
+        // Sprawdź czy są klienci WebSocket
+        if (ws.count() == 0) {
+            vTaskDelayUntil(&xLastWakeTime, xFrequency);
+            continue;
         }
-        vTaskDelay(10000 / portTICK_PERIOD_MS); // 10s
+        
+        // Sprawdź pamięć - użyj tych samych progów co WebSocket task
+        uint32_t freeHeap = ESP.getFreeHeap();
+        if (freeHeap < 20480) { // 20KB minimum heap
+            // Jeśli pamięć krytycznie niska, zasugeruj reset WebSocket
+            if (freeHeap < 10240) { // 10KB critical heap
+                forceWebSocketReset("Critical memory during broadcast");
+            }
+            vTaskDelayUntil(&xLastWakeTime, xFrequency * 2); // Dłuższe opóźnienie
+            continue;
+        }
+        
+        // Sprawdź czy WebSocket nie ma problemów (alternatywnie sprawdź status)
+        if (freeHeap < 30720) { // 30KB - dodatkowy buffer dla broadcast task
+            vTaskDelayUntil(&xLastWakeTime, xFrequency * 2);
+            continue;
+        }
+        
+        // Wyślij dane do wszystkich klientów
+        String jsonData = getAllSensorJson();
+        if (jsonData.length() > 0 && jsonData.length() < 8192) { // Limit rozmiaru
+            ws.textAll(jsonData);
+        }
+        
+        // Regularne opóźnienie
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
 }
 
@@ -479,8 +494,6 @@ void timeCheckTask(void *parameter) {
             time_t now = time(nullptr);
             if (now > 8 * 3600 * 2) { // > year 1970
                 timeInitialized = true;
-              //  safePrintln("Time synchronized: " + getFormattedTime() + " " + getFormattedDate());
-               
             }
         }
         vTaskDelay(10000 / portTICK_PERIOD_MS); // Check every 10 seconds
@@ -516,7 +529,7 @@ void WiFiReconnectTask(void *parameter) {
                 safePrintln("WiFi reconnection failed");
             }
         }
-        vTaskDelay(30000 / portTICK_PERIOD_MS); // Check every 30 seconds
+        vTaskDelay(20000 / portTICK_PERIOD_MS); // Check every 20 seconds
     }
 }
 
@@ -598,7 +611,7 @@ void initializeWebServer() {
         request->send(200, "text/plain", "WebSocket test: " + String(ws.count()) + " clients connected");
     });
     server.on("/api/history", HTTP_GET, [](AsyncWebServerRequest *request) {
-        String sensor = "i2c";  // Default to i2c instead of "all"
+        String sensor = "scd41";  // Default to scd41 (CO2 sensor)
         String timeRange = "1h";
         String sampleType = "fast";  // Default to fast samples
         
@@ -674,10 +687,16 @@ void initializeWebServer() {
     });
     // Inicjalizacja WebSocket z nowym systemem komend
     initializeWebSocket(ws);
+    
+    // Inicjalizacja WebSocket Task System
+    if (initializeWebSocketTask()) {
+        safePrintln("WebSocket Task system initialized successfully");
+    } else {
+        safePrintln("WARNING: WebSocket Task system failed to initialize, using fallback mode");
+    }
+    
     server.addHandler(&ws);
     server.begin();
-    // safePrintln("Web server started");
-    // safePrintln("WebSocket initialized and ready");
     xTaskCreatePinnedToCore(wsBroadcastTask, "wsBroadcastTask", 4096, NULL, 1, NULL, 1);
     xTaskCreatePinnedToCore(WiFiReconnectTask, "wifiReconnectTask", 4096, NULL, 1, NULL, 0);
     xTaskCreatePinnedToCore(timeCheckTask, "timeCheckTask", 2048, NULL, 1, NULL, 0);

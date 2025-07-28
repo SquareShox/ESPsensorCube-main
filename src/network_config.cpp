@@ -3,6 +3,7 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <network_config.h>
+#include <Wire.h>
 
 // Global network configuration
 NetworkConfig networkConfig;
@@ -454,9 +455,11 @@ bool saveMCP3424Config(const MCP3424Config& config) {
     for (uint8_t i = 0; i < config.deviceCount; i++) {
         JsonObject device = devices.createNestedObject();
         device["deviceIndex"] = config.devices[i].deviceIndex;
+        device["i2cAddress"] = config.devices[i].i2cAddress;
         device["gasType"] = config.devices[i].gasType;
         device["description"] = config.devices[i].description;
         device["enabled"] = config.devices[i].enabled;
+        device["autoDetected"] = config.devices[i].autoDetected;
     }
     
     size_t bytesWritten = serializeJson(doc, file);
@@ -504,9 +507,11 @@ bool loadMCP3424Config(MCP3424Config& config) {
     for (uint8_t i = 0; i < config.deviceCount && i < devices.size(); i++) {
         JsonObject device = devices[i];
         config.devices[i].deviceIndex = device["deviceIndex"] | 0;
+        config.devices[i].i2cAddress = device["i2cAddress"] | (0x68 + i); // Default address if not found
         strlcpy(config.devices[i].gasType, device["gasType"] | "", sizeof(config.devices[i].gasType));
         strlcpy(config.devices[i].description, device["description"] | "", sizeof(config.devices[i].description));
         config.devices[i].enabled = device["enabled"] | true;
+        config.devices[i].autoDetected = device["autoDetected"] | false;
     }
     
     safePrintln("MCP3424 config loaded successfully");
@@ -524,9 +529,11 @@ String getMCP3424ConfigJson() {
     for (uint8_t i = 0; i < mcp3424Config.deviceCount; i++) {
         JsonObject device = devices.createNestedObject();
         device["deviceIndex"] = mcp3424Config.devices[i].deviceIndex;
+        device["i2cAddress"] = mcp3424Config.devices[i].i2cAddress;
         device["gasType"] = mcp3424Config.devices[i].gasType;
         device["description"] = mcp3424Config.devices[i].description;
         device["enabled"] = mcp3424Config.devices[i].enabled;
+        device["autoDetected"] = mcp3424Config.devices[i].autoDetected;
     }
     
     String json;
@@ -539,22 +546,43 @@ void initializeDefaultMCP3424Mapping() {
     mcp3424Config.deviceCount = 0;
     mcp3424Config.configValid = false;
     
-    // Assign devices to gas types
-    addMCP3424Device(0, "NO", "NO Sensor (K1)", true);
-    addMCP3424Device(1, "O3", "O3 Sensor (K2)", true);
-    addMCP3424Device(2, "NO2", "NO2 Sensor (K3)", true);
-    addMCP3424Device(3, "CO", "CO Sensor (K4)", true);
-    addMCP3424Device(4, "SO2", "SO2 Sensor (K5)", true);
-    addMCP3424Device(5, "TGS1", "TGS Sensor 1", true);
-    addMCP3424Device(6, "TGS2", "TGS Sensor 2", true);
-    addMCP3424Device(7, "TGS3", "TGS Sensor 3", true);
+    // Assign devices to gas types with specific I2C addresses
+    // Format: deviceIndex, i2cAddress, gasType, description, enabled
+    addMCP3424DeviceWithAddress(0, 0x68, "NO", "NO Sensor (K1)", true);
+    addMCP3424DeviceWithAddress(1, 0x6A, "O3", "O3 Sensor (K2)", true);
+    addMCP3424DeviceWithAddress(2, 0x6B, "NO2", "NO2 Sensor (K3)", true);
+    addMCP3424DeviceWithAddress(3, 0x6C, "CO", "CO Sensor (K4)", true);
+    addMCP3424DeviceWithAddress(4, 0x6D, "SO2", "SO2 Sensor (K5)", true);
+    addMCP3424DeviceWithAddress(5, 0x6E, "TGS1", "TGS Sensor 1", true);
+    addMCP3424DeviceWithAddress(6, 0x6F, "TGS2", "TGS Sensor 2", true);
+    addMCP3424DeviceWithAddress(7, 0x70, "TGS3", "TGS Sensor 3", true);
     
     mcp3424Config.configValid = true;
-    safePrintln("Default MCP3424 device assignment initialized");
+    safePrintln("Default MCP3424 device assignment with I2C addresses initialized");
+    
+    safePrintln("=== MCP3424 Address Mapping ===");
+    safePrintln("0x68 -> Device 0 -> NO (K1)");
+    safePrintln("0x6A -> Device 1 -> O3 (K2)");
+    safePrintln("0x6B -> Device 2 -> NO2 (K3)");
+    safePrintln("0x6C -> Device 3 -> CO (K4)");
+    safePrintln("0x6D -> Device 4 -> SO2 (K5)");
+    safePrintln("0x6E -> Device 5 -> TGS1");
+    safePrintln("0x6F -> Device 6 -> TGS2");
+    safePrintln("0x70 -> Device 7 -> TGS3");
+    safePrintln("===============================");
 }
 
-// Add a new MCP3424 device assignment
+// Add a new MCP3424 device assignment (legacy function for compatibility)
 bool addMCP3424Device(uint8_t deviceIndex, const char* gasType, const char* description, bool enabled) {
+    // Use default I2C address mapping (0x68 + deviceIndex)
+    uint8_t defaultAddress = 0x68 + deviceIndex;
+    if (deviceIndex >= 8) defaultAddress = 0x68; // Fallback for invalid index
+    
+    return addMCP3424DeviceWithAddress(deviceIndex, defaultAddress, gasType, description, enabled);
+}
+
+// Add a new MCP3424 device assignment with specific I2C address
+bool addMCP3424DeviceWithAddress(uint8_t deviceIndex, uint8_t i2cAddress, const char* gasType, const char* description, bool enabled) {
     if (mcp3424Config.deviceCount >= 8) {
         safePrintln("MCP3424 device limit reached (8)");
         return false;
@@ -565,24 +593,219 @@ bool addMCP3424Device(uint8_t deviceIndex, const char* gasType, const char* desc
         return false;
     }
     
+    // Validate I2C address range (0x68-0x6F typical for MCP3424)
+    if (i2cAddress < 0x68 || i2cAddress > 0x6F) {
+        safePrint("Warning: I2C address 0x");
+        safePrint(String(i2cAddress, HEX));
+        safePrintln(" is outside typical MCP3424 range (0x68-0x6F)");
+    }
+    
     MCP3424DeviceAssignment& device = mcp3424Config.devices[mcp3424Config.deviceCount];
     device.deviceIndex = deviceIndex;
+    device.i2cAddress = i2cAddress;
     strlcpy(device.gasType, gasType, sizeof(device.gasType));
     strlcpy(device.description, description, sizeof(device.description));
     device.enabled = enabled;
+    device.autoDetected = false; // Will be set during I2C scan
     
     mcp3424Config.deviceCount++;
+    
+    safePrint("Added MCP3424 mapping: Device ");
+    safePrint(String(deviceIndex));
+    safePrint(" (0x");
+    safePrint(String(i2cAddress, HEX));
+    safePrint(") -> ");
+    safePrint(gasType);
+    safePrint(" (");
+    safePrint(description);
+    safePrintln(")");
+    
     return true;
 }
 
 // Get MCP3424 device index by gas type
 int8_t getMCP3424DeviceByGasType(const char* gasType) {
     for (uint8_t i = 0; i < mcp3424Config.deviceCount; i++) {
-        if (strcmp(mcp3424Config.devices[i].gasType, gasType) == 0 && mcp3424Config.devices[i].enabled) {
+        if (strcmp(mcp3424Config.devices[i].gasType, gasType) == 0 && 
+            mcp3424Config.devices[i].enabled && 
+            mcp3424Config.devices[i].autoDetected) {
             return mcp3424Config.devices[i].deviceIndex;
         }
     }
-    return -1; // Device not found or disabled
+    return -1; // Device not found, disabled, or not detected
+}
+
+// Get MCP3424 device index by I2C address
+int8_t getMCP3424DeviceByI2CAddress(uint8_t i2cAddress) {
+    for (uint8_t i = 0; i < mcp3424Config.deviceCount; i++) {
+        if (mcp3424Config.devices[i].i2cAddress == i2cAddress && 
+            mcp3424Config.devices[i].enabled &&
+            mcp3424Config.devices[i].autoDetected) {
+            return mcp3424Config.devices[i].deviceIndex;
+        }
+    }
+    return -1; // Device not found, disabled, or not detected
+}
+
+// Get I2C address by device index
+uint8_t getMCP3424I2CAddressByDeviceIndex(uint8_t deviceIndex) {
+    for (uint8_t i = 0; i < mcp3424Config.deviceCount; i++) {
+        if (mcp3424Config.devices[i].deviceIndex == deviceIndex && 
+            mcp3424Config.devices[i].enabled) {
+            return mcp3424Config.devices[i].i2cAddress;
+        }
+    }
+    return 0x00; // Invalid address if not found
+}
+
+// Get gas type by I2C address
+String getMCP3424GasTypeByI2CAddress(uint8_t i2cAddress) {
+    for (uint8_t i = 0; i < mcp3424Config.deviceCount; i++) {
+        if (mcp3424Config.devices[i].i2cAddress == i2cAddress && 
+            mcp3424Config.devices[i].enabled &&
+            mcp3424Config.devices[i].autoDetected) {
+            return String(mcp3424Config.devices[i].gasType);
+        }
+    }
+    return "UNKNOWN"; // Not found or not detected
+}
+
+// Update device detection status after I2C scan
+bool updateMCP3424DeviceDetection(uint8_t i2cAddress, bool detected) {
+    for (uint8_t i = 0; i < mcp3424Config.deviceCount; i++) {
+        if (mcp3424Config.devices[i].i2cAddress == i2cAddress) {
+            mcp3424Config.devices[i].autoDetected = detected;
+            
+            if (detected) {
+                safePrint("MCP3424 detected at 0x");
+                safePrint(String(i2cAddress, HEX));
+                safePrint(" -> Device ");
+                safePrint(String(mcp3424Config.devices[i].deviceIndex));
+                safePrint(" (");
+                safePrint(mcp3424Config.devices[i].gasType);
+                safePrintln(")");
+            }
+            return true;
+        }
+    }
+    
+    // Device found but not in configuration - add as unknown
+    if (detected && mcp3424Config.deviceCount < 8) {
+        safePrint("Unknown MCP3424 device found at 0x");
+        safePrint(String(i2cAddress, HEX));
+        safePrintln(" - adding as UNKNOWN");
+        
+        return addMCP3424DeviceWithAddress(mcp3424Config.deviceCount, i2cAddress, "UNKNOWN", "Unknown sensor", true);
+    }
+    
+    return false;
+}
+
+// Scan I2C bus and map detected devices
+void scanAndMapMCP3424Devices() {
+    safePrintln("=== Scanning and mapping MCP3424 devices ===");
+    
+    // First, mark all devices as not detected
+    for (uint8_t i = 0; i < mcp3424Config.deviceCount; i++) {
+        mcp3424Config.devices[i].autoDetected = false;
+    }
+    
+    // Scan I2C addresses
+    for (uint8_t addr = 0x68; addr <= 0x6F; addr++) {
+        if (addr == 0x69) continue; // Skip excluded address
+        
+        Wire.beginTransmission(addr);
+        uint8_t result = Wire.endTransmission();
+        
+        if (result == 0) {
+            // Device found - update detection status
+            updateMCP3424DeviceDetection(addr, true);
+        }
+    }
+    
+    // Show summary
+    safePrintln("=== MCP3424 Detection Summary ===");
+    uint8_t detectedCount = 0;
+    for (uint8_t i = 0; i < mcp3424Config.deviceCount; i++) {
+        safePrint("Device ");
+        safePrint(String(mcp3424Config.devices[i].deviceIndex));
+        safePrint(" (0x");
+        safePrint(String(mcp3424Config.devices[i].i2cAddress, HEX));
+        safePrint(") -> ");
+        safePrint(mcp3424Config.devices[i].gasType);
+        safePrint(": ");
+        if (mcp3424Config.devices[i].autoDetected && mcp3424Config.devices[i].enabled) {
+            safePrintln("DETECTED & ENABLED");
+            detectedCount++;
+        } else if (mcp3424Config.devices[i].autoDetected && !mcp3424Config.devices[i].enabled) {
+            safePrintln("DETECTED but DISABLED");
+        } else if (!mcp3424Config.devices[i].autoDetected && mcp3424Config.devices[i].enabled) {
+            safePrintln("NOT DETECTED (enabled in config)");
+        } else {
+            safePrintln("NOT DETECTED & DISABLED");
+        }
+    }
+    
+    safePrint("Total active devices: ");
+    safePrintln(String(detectedCount));
+    safePrintln("================================");
+}
+
+// Display detailed MCP3424 mapping information
+void displayMCP3424MappingInfo() {
+    safePrintln("=== MCP3424 Mapping System Info ===");
+    safePrint("Configuration valid: ");
+    safePrintln(mcp3424Config.configValid ? "YES" : "NO");
+    safePrint("Configured devices: ");
+    safePrintln(String(mcp3424Config.deviceCount));
+    safePrintln("");
+    
+    if (mcp3424Config.deviceCount == 0) {
+        safePrintln("No devices configured!");
+        safePrintln("Run initializeDefaultMCP3424Mapping() to setup defaults");
+        return;
+    }
+    
+    safePrintln("Device mapping details:");
+    safePrintln("Dev | I2C Addr | Gas Type | Description        | Enabled | Detected");
+    safePrintln("----|----------|----------|--------------------|---------|---------");
+    
+    for (uint8_t i = 0; i < mcp3424Config.deviceCount; i++) {
+        char line[120];
+        snprintf(line, sizeof(line), 
+            " %2d | 0x%02X     | %-8s | %-18s | %-7s | %-8s",
+            mcp3424Config.devices[i].deviceIndex,
+            mcp3424Config.devices[i].i2cAddress,
+            mcp3424Config.devices[i].gasType,
+            mcp3424Config.devices[i].description,
+            mcp3424Config.devices[i].enabled ? "YES" : "NO",
+            mcp3424Config.devices[i].autoDetected ? "YES" : "NO"
+        );
+        safePrintln(line);
+    }
+    
+    safePrintln("");
+    safePrintln("Usage examples:");
+    safePrintln("- getMCP3424DeviceByGasType(\"SO2\") -> returns device index for SO2 sensor");
+    safePrintln("- getMCP3424DeviceByI2CAddress(0x6A) -> returns device index for address 0x6A");
+    safePrintln("- getMCP3424I2CAddressByDeviceIndex(4) -> returns I2C address for device 4");
+    safePrintln("- getMCP3424GasTypeByI2CAddress(0x6D) -> returns gas type for address 0x6D");
+    safePrintln("");
+    
+    // Show active gas measurements
+    safePrintln("Active gas measurements:");
+    for (uint8_t i = 0; i < mcp3424Config.deviceCount; i++) {
+        if (mcp3424Config.devices[i].enabled && mcp3424Config.devices[i].autoDetected) {
+            safePrint("- ");
+            safePrint(mcp3424Config.devices[i].gasType);
+            safePrint(" at 0x");
+            safePrint(String(mcp3424Config.devices[i].i2cAddress, HEX));
+            safePrint(" (Device ");
+            safePrint(String(mcp3424Config.devices[i].deviceIndex));
+            safePrintln(")");
+        }
+    }
+    safePrintln("===================================");
 }
 
 // Get MCP3424 value by device and channel (existing function)

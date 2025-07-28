@@ -81,14 +81,26 @@ bool initializeSHT40() {
     // Check if SHT40 is present
     Wire.beginTransmission(SHT40_DEFAULT_ADDR);
     uint8_t error = Wire.endTransmission();
-    
-    if (error != 0) {
-        safePrint("SHT40 not found at address 0x");
+    int retry = 0;
+    bool found = false;
+    for (retry = 0; retry < 5; retry++) {
+        if (error == 0) {
+            found = true;
+            break;
+        }
+        safePrint("SHT40 nie znaleziony, proba ");
+        safePrintln(String(retry + 1));
+        delay(50);
+        // Ponowne sprawdzenie obecnosci
+        Wire.beginTransmission(SHT40_DEFAULT_ADDR);
+        error = Wire.endTransmission();
+    }
+    if (!found) {
+        safePrint("SHT40 nie znaleziony pod adresem 0x");
         safePrintln(String(SHT40_DEFAULT_ADDR, HEX));
         if (i2c_semaphore) xSemaphoreGive(i2c_semaphore);
         return false;
     }
-    
     // Perform soft reset
     Wire.beginTransmission(SHT40_DEFAULT_ADDR);
     Wire.write(SHT40_SOFT_RESET);

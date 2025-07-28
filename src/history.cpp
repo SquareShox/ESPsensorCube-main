@@ -6,6 +6,7 @@
 #include <ArduinoJson.h>
 #include <time.h>
 #include <cstring>
+#include <new> // For std::nothrow
 
 // Forward declarations for safe printing functions
 void safePrint(const String& message);
@@ -77,6 +78,8 @@ HistoryManager::HistoryManager() {
     sht40History = nullptr;
     calibHistory = nullptr;
     hchoHistory = nullptr;
+    fanHistory = nullptr;
+    batteryHistory = nullptr;
 }
 
 HistoryManager::~HistoryManager() {
@@ -602,7 +605,11 @@ void HistoryManager::printMemoryUsage() const {
     safePrint(String((totalMemoryUsed * 100) / TARGET_MEMORY_BYTES));
     safePrintln("% of budget");
     
-    // Sprawdź dostępność PSRAM
+    // Sprawdź dostępność PSRAM i heap
+    safePrint("Heap free: ");
+    safePrint(String(ESP.getFreeHeap() / 1024));
+    safePrintln(" KB");
+    
     if (ESP.getPsramSize() > 0) {
         safePrint("PSRAM total: ");
         safePrint(String(ESP.getPsramSize() / 1024));
@@ -610,9 +617,26 @@ void HistoryManager::printMemoryUsage() const {
         safePrint("PSRAM free: ");
         safePrint(String(ESP.getFreePsram() / 1024));
         safePrintln(" KB");
+        safePrint("PSRAM used: ");
+        safePrint(String((ESP.getPsramSize() - ESP.getFreePsram()) / 1024));
+        safePrintln(" KB");
+        
+        // Sprawdz czy historia rzeczywiście używa PSRAM
+        size_t psramUsedByHistory = ESP.getPsramSize() - ESP.getFreePsram();
+        if (psramUsedByHistory >= totalMemoryUsed / 2) {
+            safePrintln("STATUS: Historia prawdopodobnie używa PSRAM ✓");
+        } else {
+            safePrintln("WARNING: Historia może używać heap zamiast PSRAM!");
+        }
     } else {
         safePrintln("PSRAM not available - using heap memory");
+        safePrintln("WARNING: Cala historia w heap - mozliwe problemy z pamiecia!");
     }
+    
+    // Dodatkowe informacje o alokacji
+    safePrint("Heap largest free block: ");
+    safePrint(String(ESP.getMaxAllocHeap() / 1024));
+    safePrintln(" KB");
 }
 
 void HistoryManager::printHistoryStatus() const {
@@ -707,13 +731,80 @@ void HistoryManager::printHistoryStatus() const {
     }
 }
 
+// Function to check memory allocation type
+void checkHistoryMemoryType() {
+    if (!historyManager.isInitialized()) {
+        safePrintln("History not initialized");
+        return;
+    }
+    
+    safePrintln("=== Historia Memory Allocation Check ===");
+    
+    size_t psramBefore = ESP.getFreePsram();
+    size_t heapBefore = ESP.getFreeHeap();
+    
+    // Alokuj mały blok w PSRAM i heap dla porównania
+    void* testPsram = heap_caps_malloc(1024, MALLOC_CAP_SPIRAM);
+    void* testHeap = malloc(1024);
+    
+    size_t psramAfter = ESP.getFreePsram();
+    size_t heapAfter = ESP.getFreeHeap();
+    
+    if (testPsram) {
+        safePrint("Test PSRAM allocation: ");
+        safePrint(String(psramBefore - psramAfter));
+        safePrintln(" bytes difference");
+        heap_caps_free(testPsram);
+    } else {
+        safePrintln("PSRAM test allocation failed");
+    }
+    
+    if (testHeap) {
+        safePrint("Test Heap allocation: ");
+        safePrint(String(heapBefore - heapAfter));
+        safePrintln(" bytes difference");
+        free(testHeap);
+    }
+    
+    // Pokaż informacje o pamięci historii
+    safePrint("Historia total size: ");
+    safePrint(String(historyManager.getTotalMemoryUsed() / 1024));
+    safePrintln(" KB");
+    
+    safePrint("PSRAM used total: ");
+    safePrint(String((ESP.getPsramSize() - ESP.getFreePsram()) / 1024));
+    safePrintln(" KB");
+    
+    if ((ESP.getPsramSize() - ESP.getFreePsram()) >= historyManager.getTotalMemoryUsed() / 2) {
+        safePrintln("✓ Historia prawdopodobnie używa PSRAM");
+    } else {
+        safePrintln("⚠ Historia może używać heap - sprawdź logi inicjalizacji");
+    }
+}
+
 // Global interface functions
 void initializeHistory() {
     if (!config.enableHistory) {
         safePrintln("History system disabled in configuration");
         return;
     }
-    historyManager.initialize();
+    
+    safePrintln("=== Initializing History System ===");
+    safePrint("PSRAM available: ");
+    safePrint(String(ESP.getPsramSize() / 1024));
+    safePrint(" KB, free: ");
+    safePrint(String(ESP.getFreePsram() / 1024));
+    safePrintln(" KB");
+    
+    bool success = historyManager.initialize();
+    
+    if (success) {
+        safePrintln("Historia initialized successfully");
+        // Sprawdź gdzie pamięć została alokowana
+        checkHistoryMemoryType();
+    } else {
+        safePrintln("Historia initialization FAILED");
+    }
 }
 
 void updateSensorHistory() {
@@ -762,31 +853,44 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
     
     // Check available memory before starting
     size_t freeHeap = ESP.getFreeHeap();
+    size_t freePsram = ESP.getFreePsram();
+    size_t maxAllocHeap = ESP.getMaxAllocHeap();
+    
+    safePrint("[DEBUG] getHistoricalData: Free heap: ");
+    safePrint(String(freeHeap / 1024));
+    safePrint(" KB, Free PSRAM: ");
+    safePrint(String(freePsram / 1024));
+    safePrint(" KB, Max alloc: ");
+    safePrint(String(maxAllocHeap / 1024));
+    safePrintln(" KB");
+    
     if (freeHeap < 30000) { // Need at least 30KB free
-        safePrintln("[ERROR] getHistoricalData: Low memory. Free heap: " + String(freeHeap));
+        safePrintln("[ERROR] getHistoricalData: Low heap memory. Free heap: " + String(freeHeap));
         DynamicJsonDocument doc(512);
-        doc["error"] = "Low memory";
+        doc["error"] = "Low heap memory";
         doc["data"] = JsonArray();
         doc["freeHeap"] = freeHeap;
+        doc["freePsram"] = freePsram;
         serializeJson(doc, jsonResponse);
         return 0;
     }
     
     // Create JSON document with appropriate size based on sensor type
-    size_t docSize = 4096; // Reduced base size for stability
+    size_t docSize = 3072; // Reduced base size for better stability
     if (sensor == "calibration" || sensor == "all") {
-        docSize = 6144; // Larger for calibration data
+        docSize = 4096; // Larger for calibration data
     } else if (sensor == "mcp3424") {
-        docSize = 4096; // Medium for MCP3424 with multiple devices
+        docSize = 3072; // Medium for MCP3424 with multiple devices
     }
     
     // Check memory again before creating JSON document
-    if (ESP.getFreeHeap() < docSize + 10000) {
-        safePrintln("[ERROR] getHistoricalData: Insufficient memory for JSON document. Required: " + String(docSize) + ", Free: " + String(ESP.getFreeHeap()));
+    if (maxAllocHeap < docSize + 5000) {
+        safePrintln("[ERROR] getHistoricalData: Insufficient contiguous memory for JSON. Required: " + String(docSize) + ", Available: " + String(maxAllocHeap));
         DynamicJsonDocument doc(512);
-        doc["error"] = "Insufficient memory for JSON document";
+        doc["error"] = "Insufficient contiguous memory for JSON document";
         doc["requiredSize"] = docSize;
-        doc["freeHeap"] = ESP.getFreeHeap();
+        doc["maxAllocHeap"] = maxAllocHeap;
+        doc["freeHeap"] = freeHeap;
         serializeJson(doc, jsonResponse);
         return 0;
     }
@@ -800,36 +904,7 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
     const size_t MAX_SAMPLES = 30; // Further reduced for single sensor requests
     size_t totalSamples = 0;
     // Uzyj sampleType przekazanego jako argument funkcji, nie deklaruj lokalnie
-    if (sensor == "i2c") {
-        auto* i2cHist = historyManager.getI2CHistory();
-        if (i2cHist && i2cHist->isInitialized()) {
-            HistoryEntry<I2CSensorData> buffer[MAX_SAMPLES];
-            size_t count;
-            if (sampleType == "slow") {
-                count = i2cHist->getSlowSamples(buffer, MAX_SAMPLES, fromTime, toTime);
-            } else {
-                count = i2cHist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
-            }
-            
-            for (size_t i = 0; i < count; i++) {
-                // Check memory before adding more data
-                if (ESP.getFreeHeap() < 10000) {
-                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build, stopping at sample " + String(i));
-                    break;
-                }
-                
-                JsonObject sample = dataArray.createNestedObject();
-                sample["timestamp"] = buffer[i].timestamp;
-                sample["dateTime"] = buffer[i].dateTime;
-                JsonObject data = sample.createNestedObject("data");
-                data["temperature"] = round(buffer[i].data.temperature * 10) / 10.0;
-                data["humidity"] = round(buffer[i].data.humidity * 10) / 10.0;
-                data["pressure"] = round(buffer[i].data.pressure * 10) / 10.0;
-                data["co2"] = buffer[i].data.co2;
-                totalSamples++;
-            }
-        }
-    } else if (sensor == "solar") {
+    if (sensor == "solar") {
         auto* solarHist = historyManager.getSolarHistory();
         if (solarHist && solarHist->isInitialized()) {
             HistoryEntry<SolarData> buffer[MAX_SAMPLES];
@@ -840,9 +915,10 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
                 count = solarHist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
             }
             
-            for (size_t i = 0; i < count; i++) {
+            // Dodaj próbki w odwrotnej kolejności (od najnowszych do najstarszych)
+            for (int i = count - 1; i >= 0; i--) {
                 if (ESP.getFreeHeap() < 10000) {
-                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (solar), stopping at sample " + String(i));
+                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (solar), stopping at sample " + String(count - 1 - i));
                     break;
                 }
                 JsonObject sample = dataArray.createNestedObject();
@@ -866,9 +942,10 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
                 count = sps30Hist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
             }
             
-            for (size_t i = 0; i < count; i++) {
+            // Dodaj próbki w odwrotnej kolejności (od najnowszych do najstarszych)
+            for (int i = count - 1; i >= 0; i--) {
                 if (ESP.getFreeHeap() < 10000) {
-                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (sps30), stopping at sample " + String(i));
+                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (sps30), stopping at sample " + String(count - 1 - i));
                     break;
                 }
                 JsonObject sample = dataArray.createNestedObject();
@@ -899,9 +976,10 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
                 count = powerHist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
             }
             
-            for (size_t i = 0; i < count; i++) {
+            // Dodaj próbki w odwrotnej kolejności (od najnowszych do najstarszych)
+            for (int i = count - 1; i >= 0; i--) {
                 if (ESP.getFreeHeap() < 10000) {
-                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (power), stopping at sample " + String(i));
+                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (power), stopping at sample " + String(count - 1 - i));
                     break;
                 }
                 JsonObject sample = dataArray.createNestedObject();
@@ -925,9 +1003,10 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
                 count = batteryHist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
             }
             
-            for (size_t i = 0; i < count; i++) {
+            // Dodaj próbki w odwrotnej kolejności (od najnowszych do najstarszych)
+            for (int i = count - 1; i >= 0; i--) {
                 if (ESP.getFreeHeap() < 10000) {
-                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (battery), stopping at sample " + String(i));
+                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (battery), stopping at sample " + String(count - 1 - i));
                     break;
                 }
                 JsonObject sample = dataArray.createNestedObject();
@@ -955,9 +1034,10 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
                 count = sht40Hist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
             }
             
-            for (size_t i = 0; i < count; i++) {
+            // Dodaj próbki w odwrotnej kolejności (od najnowszych do najstarszych)
+            for (int i = count - 1; i >= 0; i--) {
                 if (ESP.getFreeHeap() < 10000) {
-                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (sht40), stopping at sample " + String(i));
+                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (sht40), stopping at sample " + String(count - 1 - i));
                     break;
                 }
                 JsonObject sample = dataArray.createNestedObject();
@@ -970,7 +1050,7 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
                 totalSamples++;
             }
         }
-    } else if (sensor == "co2") {
+    } else if (sensor == "scd41") {
         auto* i2cHist = historyManager.getI2CHistory();
         if (i2cHist && i2cHist->isInitialized()) {
             HistoryEntry<I2CSensorData> buffer[MAX_SAMPLES];
@@ -981,9 +1061,10 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
                 count = i2cHist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
             }
             
-            for (size_t i = 0; i < count; i++) {
+            // Dodaj próbki w odwrotnej kolejności (od najnowszych do najstarszych)
+            for (int i = count - 1; i >= 0; i--) {
                 if (ESP.getFreeHeap() < 10000) {
-                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (co2), stopping at sample " + String(i));
+                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (co2), stopping at sample " + String(count - 1 - i));
                     break;
                 }
                 // Sprawdź czy to SCD41 data
@@ -1010,9 +1091,10 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
                 count = hchoHist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
             }
             
-            for (size_t i = 0; i < count; i++) {
+            // Dodaj próbki w odwrotnej kolejności (od najnowszych do najstarszych)
+            for (int i = count - 1; i >= 0; i--) {
                 if (ESP.getFreeHeap() < 10000) {
-                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (hcho), stopping at sample " + String(i));
+                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (hcho), stopping at sample " + String(count - 1 - i));
                     break;
                 }
                 JsonObject sample = dataArray.createNestedObject();
@@ -1035,9 +1117,10 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
                 count = fanHist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
             }
             
-            for (size_t i = 0; i < count; i++) {
+            // Dodaj próbki w odwrotnej kolejności (od najnowszych do najstarszych)
+            for (int i = count - 1; i >= 0; i--) {
                 if (ESP.getFreeHeap() < 10000) {
-                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (fan), stopping at sample " + String(i));
+                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (fan), stopping at sample " + String(count - 1 - i));
                     break;
                 }
                 JsonObject sample = dataArray.createNestedObject();
@@ -1063,9 +1146,10 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
                 count = calibHist->getFastSamples(buffer, MAX_SAMPLES, fromTime, toTime);
             }
             
-            for (size_t i = 0; i < count; i++) {
+            // Dodaj próbki w odwrotnej kolejności (od najnowszych do najstarszych)
+            for (int i = count - 1; i >= 0; i--) {
                 if (ESP.getFreeHeap() < 10000) {
-                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (calibration/" + sensor + "), stopping at sample " + String(i));
+                    safePrintln("[ERROR] getHistoricalData: Low memory during JSON build (calibration/" + sensor + "), stopping at sample " + String(count - 1 - i));
                     break;
                 }
                 

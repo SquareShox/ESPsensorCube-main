@@ -170,10 +170,13 @@ public:
     
     ~SensorHistory() {
         if (fastHistory) {
-            free(fastHistory);
+            // heap_caps_free działa zarówno dla PSRAM jak i heap
+            heap_caps_free(fastHistory);
+            fastHistory = nullptr;
         }
         if (slowHistory) {
-            free(slowHistory);
+            heap_caps_free(slowHistory);
+            slowHistory = nullptr;
         }
     }
     
@@ -319,6 +322,7 @@ void initializeHistory();
 void updateSensorHistory();
 void printHistoryMemoryUsage();
 void printHistoryStatus();
+void checkHistoryMemoryType();
 
 // Funkcje API do pobierania danych historycznych
 size_t getHistoricalData(const String& sensor, const String& timeRange, 

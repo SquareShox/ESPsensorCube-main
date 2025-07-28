@@ -9,18 +9,44 @@
 #include <ESPAsyncWebServer.h>
 #include <network_config.h>
 #include <esp_task_wdt.h>
+#include <Wire.h>
 
 // Forward declarations for safe printing functions
 void safePrint(const String& message);
 void safePrintln(const String& message);
 
-// Struktura do sledzenia klientow WebSocket
+// WebSocket Task Management
+static TaskHandle_t webSocketTaskHandle = NULL;
+static QueueHandle_t webSocketQueue = NULL;
+static SemaphoreHandle_t webSocketSemaphore = NULL;
+
+// Monitoring i resetowanie WebSocket
+static unsigned long lastWebSocketActivity = 0;
+static unsigned long lastHeapCheck = 0;
+static bool webSocketResetPending = false;
+static uint32_t webSocketResetCount = 0;
+
+// Struktura dla komunikatów WebSocket
+struct WebSocketMessage {
+    AsyncWebSocketClient* client;
+    String message;
+    uint32_t timestamp;
+};
+
+#define WEBSOCKET_QUEUE_SIZE 10
+#define WEBSOCKET_STACK_SIZE 30720  // 30KB stack dla WebSocket task
+#define WEBSOCKET_PRIORITY 2
+#define WEBSOCKET_CORE 1  // Używaj core 1
+
+// Timeouty i limity
+#define WEBSOCKET_INACTIVITY_TIMEOUT (5 * 60 * 1000)  // 5 minut
+#define HEAP_CHECK_INTERVAL (30 * 1000)               // 30 sekund
+#define MIN_HEAP_SIZE 20480                           // 20KB minimum heap
+#define CRITICAL_HEAP_SIZE 10240                      // 10KB critical heap
+
+// Struktura do sledzenia klientow WebSocket (uproszczona)
 struct WebSocketClientInfo {
     AsyncWebSocketClient* client;
-    unsigned long lastPingTime;
-    unsigned long lastPongTime;
-    bool pingSent;
-    bool isActive;
 };
 
 #define MAX_WS_CLIENTS 5
@@ -28,10 +54,7 @@ WebSocketClientInfo wsClients[MAX_WS_CLIENTS];
 int wsClientCount = 0;
 
 // Zmienne globalne dla zarzadzania pamiecia WebSocket
-unsigned long lastPingTime = 0;
-unsigned long lastCleanupTime = 0;
-unsigned long lastMemoryCheck = 0;
-unsigned long lastNativePingTime = 0;
+
 
 // External WebSocket object
 extern AsyncWebSocket ws;
@@ -88,30 +111,15 @@ extern HCHOData getHCHOFastAverage();
 extern HCHOData getHCHOSlowAverage();
 
 // WebSocket command handlers
-void handleGetStatus(AsyncWebSocketClient* client, JsonDocument& doc) {
+void handleGetStatus(AsyncWebSocketClient* client, DynamicJsonDocument& doc) {
     DynamicJsonDocument response(2048);
     response["cmd"] = "status";
-    response["t"] = millis();
+    response["timestamp"] = time(nullptr); // Epoch timestamp
     response["uptime"] = millis() / 1000;
     response["freeHeap"] = ESP.getFreeHeap();
     response["freePsram"] = ESP.getFreePsram();
     response["wifiRSSI"] = WiFi.RSSI();
     response["wifiConnected"] = WiFi.status() == WL_CONNECTED;
-    
-    // Add date and time
-    struct tm timeinfo;
-    if (getLocalTime(&timeinfo)) {
-        char timeStr[20];
-        strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
-        response["time"] = String(timeStr);
-        
-        char dateStr[20];
-        strftime(dateStr, sizeof(dateStr), "%d/%m/%Y", &timeinfo);
-        response["date"] = String(dateStr);
-    } else {
-        response["time"] = "00:00:00";
-        response["date"] = "01/01/2024";
-    }
     
     // System data
     JsonObject data = response.createNestedObject("data");
@@ -150,22 +158,7 @@ void handleGetSensorData(AsyncWebSocketClient* client, JsonDocument& doc) {
     DynamicJsonDocument response(4096);
     response["cmd"] = "sensorData";
     response["sensor"] = sensorType;
-    response["t"] = millis();
-    
-    // Add date and time
-    struct tm timeinfo;
-    if (getLocalTime(&timeinfo)) {
-        char timeStr[20];
-        strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
-        response["time"] = String(timeStr);
-        
-        char dateStr[20];
-        strftime(dateStr, sizeof(dateStr), "%d/%m/%Y", &timeinfo);
-        response["date"] = String(dateStr);
-    } else {
-        response["time"] = "00:00:00";
-        response["date"] = "01/01/2024";
-    }
+    response["timestamp"] = time(nullptr); // Epoch timestamp
     
     if (sensorType == "all") {
         // Wszystkie dane sensorów
@@ -206,14 +199,14 @@ void handleGetSensorData(AsyncWebSocketClient* client, JsonDocument& doc) {
             sps30["valid"] = true;
         }
         
-        // I2C (SCD41 CO2)
+        // SCD41 (CO2 sensor)
         if (scd41SensorStatus && i2cSensorData.valid && i2cSensorData.type == SENSOR_SCD41) {
-            JsonObject i2c = data.createNestedObject("i2c");
-            i2c["temperature"] = i2cSensorData.temperature;
-            i2c["humidity"] = i2cSensorData.humidity;
-            i2c["pressure"] = i2cSensorData.pressure;
-            i2c["co2"] = i2cSensorData.co2;
-            i2c["valid"] = true;
+            JsonObject scd41 = data.createNestedObject("scd41");
+            scd41["temperature"] = i2cSensorData.temperature;
+            scd41["humidity"] = i2cSensorData.humidity;
+            scd41["pressure"] = i2cSensorData.pressure;
+            scd41["co2"] = i2cSensorData.co2;
+            scd41["valid"] = true;
         }
         
         // MCP3424
@@ -317,7 +310,7 @@ void handleGetSensorData(AsyncWebSocketClient* client, JsonDocument& doc) {
             data["NC10"] = sps30Data.nc10;
             data["TPS"] = sps30Data.typical_particle_size;
             data["valid"] = true;
-        } else if (sensorType == "co2" && scd41SensorStatus && i2cSensorData.valid && i2cSensorData.type == SENSOR_SCD41) {
+        } else if (sensorType == "scd41" && scd41SensorStatus && i2cSensorData.valid && i2cSensorData.type == SENSOR_SCD41) {
             data["co2"] = i2cSensorData.co2;
             data["temperature"] = i2cSensorData.temperature;
             data["humidity"] = i2cSensorData.humidity;
@@ -384,7 +377,7 @@ void handleGetHistory(AsyncWebSocketClient* client, JsonDocument& doc) {
     safePrintln("History initialized: " + String(historyManager.isInitialized()));
     safePrintln("Free heap: " + String(ESP.getFreeHeap()));
     
-    DynamicJsonDocument response(2048);
+    DynamicJsonDocument response(4096);
     response["cmd"] = "history";
     response["sensor"] = sensorType;
     response["timeRange"] = timeRange;
@@ -392,27 +385,12 @@ void handleGetHistory(AsyncWebSocketClient* client, JsonDocument& doc) {
     response["fromTime"] = fromTime;
     response["toTime"] = toTime;
     response["samples"] = samples;
-    response["t"] = millis();
-    
-    // Add date and time
-    struct tm timeinfo;
-    if (getLocalTime(&timeinfo)) {
-        char timeStr[20];
-        strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
-        response["time"] = String(timeStr);
-        
-        char dateStr[20];
-        strftime(dateStr, sizeof(dateStr), "%d/%m/%Y", &timeinfo);
-        response["date"] = String(dateStr);
-    } else {
-        response["time"] = "00:00:00";
-        response["date"] = "01/01/2024";
-    }
+    response["timestamp"] = time(nullptr); // Epoch timestamp
     
 
     
     // Parse existing JSON response to check if data exists
-    DynamicJsonDocument dataDoc(4096);
+    DynamicJsonDocument dataDoc(8192);
     DeserializationError parseError = deserializeJson(dataDoc, jsonResponse);
     
     safePrintln("JSON parse error: " + String(parseError.c_str()));
@@ -457,22 +435,7 @@ void handleGetHistory(AsyncWebSocketClient* client, JsonDocument& doc) {
 void handleGetHistoryInfo(AsyncWebSocketClient* client, JsonDocument& doc) {
     DynamicJsonDocument response(2048);
     response["cmd"] = "historyInfo";
-    response["t"] = millis();
-    
-    // Add date and time
-    struct tm timeinfo;
-    if (getLocalTime(&timeinfo)) {
-        char timeStr[20];
-        strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
-        response["time"] = String(timeStr);
-        
-        char dateStr[20];
-        strftime(dateStr, sizeof(dateStr), "%d/%m/%Y", &timeinfo);
-        response["date"] = String(dateStr);
-    } else {
-        response["time"] = "00:00:00";
-        response["date"] = "01/01/2024";
-    }
+    response["timestamp"] = time(nullptr); // Epoch timestamp
     
     // Sprawdź czy historia jest włączona
     if (!config.enableHistory) {
@@ -498,9 +461,9 @@ void handleGetHistoryInfo(AsyncWebSocketClient* client, JsonDocument& doc) {
             }
             
             if (config.enableI2CSensors && historyManager.getI2CHistory()) {
-                JsonObject i2c = sensors.createNestedObject("i2c");
-                i2c["fastSamples"] = historyManager.getI2CHistory()->getFastCount();
-                i2c["slowSamples"] = historyManager.getI2CHistory()->getSlowCount();
+                JsonObject scd41 = sensors.createNestedObject("scd41");
+                scd41["fastSamples"] = historyManager.getI2CHistory()->getFastCount();
+                scd41["slowSamples"] = historyManager.getI2CHistory()->getSlowCount();
             }
             
             if (config.enableSPS30 && historyManager.getSPS30History()) {
@@ -561,22 +524,7 @@ void handleGetAverages(AsyncWebSocketClient* client, JsonDocument& doc) {
     response["cmd"] = "averages";
     response["sensor"] = sensorType;
     response["type"] = avgType;
-    response["t"] = millis(); // Timestamp w ms
-    
-    // Dodaj date i time
-    struct tm timeinfo;
-    if (getLocalTime(&timeinfo)) {
-        char timeStr[20];
-        strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
-        response["time"] = String(timeStr);
-        
-        char dateStr[20];
-        strftime(dateStr, sizeof(dateStr), "%d/%m/%Y", &timeinfo);
-        response["date"] = String(dateStr);
-    } else {
-        response["time"] = "00:00:00";
-        response["date"] = "01/01/2024";
-    }
+    response["timestamp"] = time(nullptr); // Epoch timestamp
     
     JsonObject data = response.createNestedObject("data");
     
@@ -761,73 +709,23 @@ void handleGetAverages(AsyncWebSocketClient* client, JsonDocument& doc) {
         }
     }
     
-    // if (sensorType == "mcp3424" || sensorType == "all") {
-    //     if (avgType == "fast") {
-    //         MCP3424Data avg = getMCP3424FastAverage();
-    //         if (avg.valid) {
-    //             JsonObject mcp3424 = data.createNestedObject("mcp3424");
-    //             mcp3424["enabled"] = true;
-    //             mcp3424["deviceCount"] = avg.deviceCount;
-                
-    //             JsonArray devices = mcp3424.createNestedArray("devices");
-    //             for (uint8_t device = 0; device < avg.deviceCount; device++) {
-    //                 JsonObject deviceObj = devices.createNestedObject();
-    //                 deviceObj["address"] = "0x" + String(avg.addresses[device], HEX);
-    //                 deviceObj["valid"] = avg.valid[device];
-    //                 deviceObj["resolution"] = avg.resolution;
-    //                 deviceObj["gain"] = avg.gain;
-                    
-    //                 JsonObject channels = deviceObj.createNestedObject("channels");
-    //                 // Klucze w formacie K%d_%d (numer urządzenia, numer kanału)
-    //                 for (uint8_t ch = 0; ch < 4; ch++) {
-    //                     String key_mV = "K" + String(device+1) + "_" + String(ch+1) ;
-    //                   //  String key_V = "K" + String(device+1) + "_" + String(ch+1) + "_V";
-    //                     channels[key_mV] = round(avg.channels[device][ch] * 1000 * 1000) / 1000.0;
-    //                   //  channels[key_V] = round(avg.channels[device][ch] * 1000000) / 1000000.0;
-    //                 }
-    //             }
-    //             mcp3424["valid"] = true;
-    //         }
-    //     } else {
-    //         MCP3424Data avg = getMCP3424SlowAverage();
-    //         if (avg.valid) {
-    //             JsonObject mcp3424 = data.createNestedObject("mcp3424");
-    //             mcp3424["enabled"] = true;
-    //             mcp3424["deviceCount"] = avg.deviceCount;
-                
-    //             JsonArray devices = mcp3424.createNestedArray("devices");
-    //             for (uint8_t device = 0; device < avg.deviceCount; device++) {
-    //                 JsonObject deviceObj = devices.createNestedObject();
-    //                 deviceObj["address"] = "0x" + String(avg.addresses[device], HEX);
-    //                 deviceObj["valid"] = avg.valid[device];
-    //                 deviceObj["resolution"] = avg.resolution;
-    //                 deviceObj["gain"] = avg.gain;
-                    
-    //                 JsonObject channels = deviceObj.createNestedObject("channels");
-    //                 // Klucze w formacie K%d_%d (numer urzadzenia, numer kanalu)
-    //                 for (uint8_t ch = 0; ch < 4; ch++) {
-    //                     String key_mV = "K" + String(device+1) + "_" + String(ch+1);
-    //                   //  String key_V = "K" + String(device+1) + "_" + String(ch+1) ;
-    //                     channels[key_mV] = round(avg.channels[device][ch] * 1000 * 1000) / 1000.0;
-    //                   //  channels[key_V] = round(avg.channels[device][ch] * 1000000) / 1000000.0;
-    //                 }
-    //             }
-    //             mcp3424["valid"] = true;
-    //         }
-    //     }
-    // }
-    
     // K_channels - wszystkie kanały K jako osobne klucze
     if (sensorType == "mcp3424" || sensorType == "all") {
         if (avgType == "fast") {
             MCP3424Data avg = getMCP3424FastAverage();
             if (avg.valid) {
                 JsonObject k_channels = data.createNestedObject("K_channels");
-                for (uint8_t device = 0; device < avg.deviceCount; device++) {
-                    if (avg.valid[device]) {
+                
+                // Użyj systemu mapowania adresów I2C do typów gazów
+                const char* gasTypes[] = {"NO", "O3", "NO2", "CO", "SO2", "TGS1", "TGS2", "TGS3"};
+                const char* gasNames[] = {"K1", "K2", "K3", "K4", "K5", "K6", "K7", "K8"};
+                
+                for (int i = 0; i < 8; i++) {
+                    int8_t deviceIndex = getMCP3424DeviceByGasType(gasTypes[i]);
+                    if (deviceIndex >= 0 && deviceIndex < (int)avg.deviceCount && avg.valid[deviceIndex]) {
                         for (uint8_t ch = 0; ch < 4; ch++) {
-                            String key = "K" + String(device+1) + "_" + String(ch+1);
-                            k_channels[key] = round(avg.channels[device][ch] * 1000 * 1000) / 1000.0;
+                            String key = String(gasNames[i]) + "_" + String(ch+1);
+                            k_channels[key] = avg.channels[deviceIndex][ch];
                         }
                     }
                 }
@@ -837,11 +735,17 @@ void handleGetAverages(AsyncWebSocketClient* client, JsonDocument& doc) {
             MCP3424Data avg = getMCP3424SlowAverage();
             if (avg.valid) {
                 JsonObject k_channels = data.createNestedObject("K_channels");
-                for (uint8_t device = 0; device < avg.deviceCount; device++) {
-                    if (avg.valid[device]) {
+                
+                // Użyj systemu mapowania adresów I2C do typów gazów
+                const char* gasTypes[] = {"NO", "O3", "NO2", "CO", "SO2", "TGS1", "TGS2", "TGS3"};
+                const char* gasNames[] = {"K1", "K2", "K3", "K4", "K5", "K6", "K7", "K8"};
+                
+                for (int i = 0; i < 8; i++) {
+                    int8_t deviceIndex = getMCP3424DeviceByGasType(gasTypes[i]);
+                    if (deviceIndex >= 0 && deviceIndex < (int)avg.deviceCount && avg.valid[(uint8_t)deviceIndex]) {
                         for (uint8_t ch = 0; ch < 4; ch++) {
-                            String key = "K" + String(device+1) + "_" + String(ch+1);
-                            k_channels[key] = round(avg.channels[device][ch] * 1000 * 1000) / 1000.0;
+                            String key = String(gasNames[i]) + "_" + String(ch+1);
+                            k_channels[key] = avg.channels[deviceIndex][ch];
                         }
                     }
                 }
@@ -1068,22 +972,7 @@ void handleSetConfig(AsyncWebSocketClient* client, JsonDocument& doc) {
 void handleGetConfig(AsyncWebSocketClient* client, JsonDocument& doc) {
     DynamicJsonDocument response(2048);
     response["cmd"] = "getConfig";
-    response["t"] = millis();
-    
-    // Add date and time
-    struct tm timeinfo;
-    if (getLocalTime(&timeinfo)) {
-        char timeStr[20];
-        strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
-        response["time"] = String(timeStr);
-        
-        char dateStr[20];
-        strftime(dateStr, sizeof(dateStr), "%d/%m/%Y", &timeinfo);
-        response["date"] = String(dateStr);
-    } else {
-        response["time"] = "00:00:00";
-        response["date"] = "01/01/2024";
-    }
+    response["timestamp"] = time(nullptr); // Epoch timestamp
     
     JsonObject configObj = response.createNestedObject("config");
     configObj["enableWiFi"] = config.enableWiFi;
@@ -1118,347 +1007,288 @@ void handleGetConfig(AsyncWebSocketClient* client, JsonDocument& doc) {
     client->text(responseStr);
 }
 
-void handleSystemCommand(AsyncWebSocketClient* client, JsonDocument& doc) {
-    String command = doc["command"] | "";
-    
-    DynamicJsonDocument response(1024);
-    response["cmd"] = "system";
-    response["command"] = command;
-    response["t"] = millis();
-    
-    // Add date and time
-    struct tm timeinfo;
-    if (getLocalTime(&timeinfo)) {
-        char timeStr[20];
-        strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
-        response["time"] = String(timeStr);
-        
-        char dateStr[20];
-        strftime(dateStr, sizeof(dateStr), "%d/%m/%Y", &timeinfo);
-        response["date"] = String(dateStr);
-    } else {
-        response["time"] = "00:00:00";
-        response["date"] = "01/01/2024";
-    }
-    
-    if (command == "restart") {
-        response["success"] = true;
-        response["message"] = "System restarting...";
-        String responseStr;
-        serializeJson(response, responseStr);
-        client->text(responseStr);
-        
-        // Restart po krótkim opóźnieniu
-        delay(1000);
-        ESP.restart();
-        
-    } else if (command == "reset") {
-        response["success"] = true;
-        response["message"] = "System resetting...";
-        String responseStr;
-        serializeJson(response, responseStr);
-        client->text(responseStr);
-        
-        // Reset po krótkim opóźnieniu
-        delay(1000);
-        ESP.restart();
-        
-    } else if (command == "memory") {
-        response["success"] = true;
-        response["freeHeap"] = ESP.getFreeHeap();
-        response["freePsram"] = ESP.getFreePsram();
-        response["psramSize"] = ESP.getPsramSize();
-        response["uptime"] = millis() / 1000;
-        
-    } else if (command == "lowPowerOn") {
-        config.lowPowerMode = true;
-        response["success"] = true;
-        response["message"] = "Low power mode enabled";
-        response["lowPowerMode"] = true;
-        
-    } else if (command == "lowPowerOff") {
-        config.lowPowerMode = false;
-        response["success"] = true;
-        response["message"] = "Low power mode disabled";
-        response["lowPowerMode"] = false;
-        
-    } else if (command == "pushbulletTest") {
-        if (config.enablePushbullet && strlen(config.pushbulletToken) > 0) {
-            // Send test notification
-            sendPushbulletNotification("🧪 Test Notification", "This is a test notification from ESP32 Sensor Cube\nTime: " + getFormattedTime() + "\nUptime: " + getUptimeString());
-            
-            response["success"] = true;
-            response["message"] = "Test notification sent";
-        } else {
-            response["success"] = false;
-            response["message"] = "Pushbullet not configured";
-        }
-        
-    } else if (command == "pushbulletBatteryTest") {
-        if (config.enablePushbullet && strlen(config.pushbulletToken) > 0) {
-            // Send battery critical test notification
-            sendBatteryCriticalNotification();
-            
-            response["success"] = true;
-            response["message"] = "Battery critical test notification sent";
-        } else {
-            response["success"] = false;
-            response["message"] = "Pushbullet not configured";
-        }
-        
-    } else if (command == "getNetworkConfig") {
-        response["success"] = true;
-        response["cmd"] = "networkConfig";
-        
-        // Add network configuration data
-        response["useDHCP"] = networkConfig.useDHCP;
-        response["staticIP"] = networkConfig.staticIP;
-        response["gateway"] = networkConfig.gateway;
-        response["subnet"] = networkConfig.subnet;
-        response["dns1"] = networkConfig.dns1;
-        response["dns2"] = networkConfig.dns2;
-        response["configValid"] = networkConfig.configValid;
-        
-        // Add current WiFi status
-        response["currentIP"] = WiFi.localIP().toString();
-        response["currentSSID"] = WiFi.SSID();
-        response["wifiConnected"] = WiFi.status() == WL_CONNECTED;
-        response["wifiSignal"] = WiFi.RSSI();
-        
-        // Add WiFi credentials (if available)
-        char ssid[32], password[64];
-        if (loadWiFiConfig(ssid, password, sizeof(ssid), sizeof(password))) {
-            response["wifiSSID"] = ssid;
-            response["wifiPassword"] = password;
-        }
-        
-    } else if (command == "testWiFi") {
-        response["success"] = true;
-        response["cmd"] = "testWiFi";
-        response["wifiConnected"] = WiFi.status() == WL_CONNECTED;
-        response["ssid"] = WiFi.SSID();
-        response["rssi"] = WiFi.RSSI();
-        response["localIP"] = WiFi.localIP().toString();
-    } else if (command == "getMCP3424Config") {
-        // Get current MCP3424 configuration
-        response["success"] = true;
-        response["cmd"] = "mcp3424Config";
-        
-        // Manually serialize MCP3424Config to JSON
-        JsonObject configObj = response.createNestedObject("config");
-        configObj["deviceCount"] = mcp3424Config.deviceCount;
-        configObj["configValid"] = mcp3424Config.configValid;
-        
-        JsonArray devices = configObj.createNestedArray("devices");
-        for (uint8_t i = 0; i < mcp3424Config.deviceCount; i++) {
-            JsonObject device = devices.createNestedObject();
-            device["deviceIndex"] = mcp3424Config.devices[i].deviceIndex;
-            device["gasType"] = mcp3424Config.devices[i].gasType;
-            device["description"] = mcp3424Config.devices[i].description;
-            device["enabled"] = mcp3424Config.devices[i].enabled;
-        }
-        
-    } else if (command == "applyNetworkConfig") {
-        if (applyNetworkConfig()) {
-            response["success"] = true;
-            response["message"] = "Network configuration applied successfully";
-            response["cmd"] = "applyNetworkConfig";
-        } else {
-            response["success"] = false;
-            response["error"] = "Failed to apply network configuration";
-            response["cmd"] = "applyNetworkConfig";
-        }
-        
-    } else if (command == "resetNetworkConfig") {
-        if (deleteAllConfig()) {
-            response["success"] = true;
-            response["message"] = "All network configuration reset";
-            response["cmd"] = "resetNetworkConfig";
-        } else {
-            response["success"] = false;
-            response["error"] = "Failed to reset network configuration";
-            response["cmd"] = "resetNetworkConfig";
-        }
-        
-    } else if (command == "getMCP3424Config") {
-        response["success"] = true;
-        response["cmd"] = "mcp3424Config";
-        response["config"] = getMCP3424ConfigJson();
-        
-    } else if (command == "setMCP3424Config") {
-        // Parse MCP3424 configuration from JSON
-        if (doc.containsKey("devices")) {
-            JsonArray devices = doc["devices"];
-            mcp3424Config.deviceCount = 0;
-            
-            for (JsonObject device : devices) {
-                if (mcp3424Config.deviceCount < 8) {
-                    MCP3424DeviceAssignment& newDevice = mcp3424Config.devices[mcp3424Config.deviceCount];
-                    newDevice.deviceIndex = device["deviceIndex"] | 0;
-                    strlcpy(newDevice.gasType, device["gasType"] | "", sizeof(newDevice.gasType));
-                    strlcpy(newDevice.description, device["description"] | "", sizeof(newDevice.description));
-                    newDevice.enabled = device["enabled"] | true;
-                    mcp3424Config.deviceCount++;
-                }
-            }
-            
-            if (saveMCP3424Config(mcp3424Config)) {
-                response["success"] = true;
-                response["message"] = "MCP3424 configuration saved";
-            } else {
-                response["success"] = false;
-                response["error"] = "Failed to save MCP3424 configuration";
-            }
-        } else {
-            response["success"] = false;
-            response["error"] = "No devices provided";
-        }
-        
-    } else if (command == "resetMCP3424Config") {
-        initializeDefaultMCP3424Mapping();
-        if (saveMCP3424Config(mcp3424Config)) {
-            response["success"] = true;
-            response["message"] = "MCP3424 configuration reset to defaults";
-        } else {
-            response["success"] = false;
-            response["error"] = "Failed to save default MCP3424 configuration";
-        }
-    } else if (command == "getMCP3424Config") {
-        // Get current MCP3424 configuration
-        response["cmd"] = "mcp3424Config";
-        response["success"] = true;
-        
-        // Manually serialize MCP3424Config to JSON
-        JsonObject configObj = response.createNestedObject("config");
-        configObj["deviceCount"] = mcp3424Config.deviceCount;
-        configObj["configValid"] = mcp3424Config.configValid;
-        
-        JsonArray devices = configObj.createNestedArray("devices");
-        for (uint8_t i = 0; i < mcp3424Config.deviceCount; i++) {
-            JsonObject device = devices.createNestedObject();
-            device["deviceIndex"] = mcp3424Config.devices[i].deviceIndex;
-            device["gasType"] = mcp3424Config.devices[i].gasType;
-            device["description"] = mcp3424Config.devices[i].description;
-            device["enabled"] = mcp3424Config.devices[i].enabled;
-        }
-        
-    } else if (command == "wifi") {
-        response["success"] = true;
-        response["connected"] = WiFi.status() == WL_CONNECTED;
-        response["ssid"] = WiFi.SSID();
-        response["rssi"] = WiFi.RSSI();
-        response["localIP"] = WiFi.localIP().toString();
-        
-    } else if (command == "fan_speed") {
-        if (!config.enableFan) {
-            response["success"] = false;
-            response["error"] = "Fan control is DISABLED in configuration";
-        } else {
-            int speed = doc["value"] | 0;
-            if (speed >= 0 && speed <= 100) {
-                setFanSpeed(speed);
-                response["success"] = true;
-                response["message"] = "Fan speed set to " + String(speed) + "%";
-                response["speed"] = speed;
-            } else {
-                response["success"] = false;
-                response["error"] = "Invalid speed value (0-100): " + String(speed);
-            }
-        }
-        
-    } else if (command == "fan_on") {
-        if (!config.enableFan) {
-            response["success"] = false;
-            response["error"] = "Fan control is DISABLED in configuration";
-        } else {
-            setFanSpeed(50); // Default 50% speed
-            response["success"] = true;
-            response["message"] = "Fan turned ON at 50% speed";
-            response["speed"] = 50;
-        }
-        
-    } else if (command == "fan_off") {
-        if (!config.enableFan) {
-            response["success"] = false;
-            response["error"] = "Fan control is DISABLED in configuration";
-        } else {
-            setFanSpeed(0);
-            response["success"] = true;
-            response["message"] = "Fan turned OFF";
-            response["speed"] = 0;
-        }
-        
-    } else if (command == "gline_on") {
-        if (!config.enableFan) {
-            response["success"] = false;
-            response["error"] = "Fan control is DISABLED in configuration";
-        } else {
-            setGLine(true);
-            response["success"] = true;
-            response["message"] = "GLine router ENABLED";
-        }
-        
-    } else if (command == "gline_off") {
-        if (!config.enableFan) {
-            response["success"] = false;
-            response["error"] = "Fan control is DISABLED in configuration";
-        } else {
-            setGLine(false);
-            response["success"] = true;
-            response["message"] = "GLine router DISABLED";
-        }
-        
-    } else if (command == "fan_status") {
-        response["success"] = true;
-        response["enabled"] = config.enableFan && isFanEnabled();
-        response["dutyCycle"] = config.enableFan ? getFanDutyCycle() : 0;
-        response["rpm"] = config.enableFan ? getFanRPM() : 0;
-        response["glineEnabled"] = config.enableFan && isGLineEnabled();
-        response["pwmValue"] = config.enableFan ? map(getFanDutyCycle(), 0, 100, 0, 255) : 0;
-        
-    } else {
-        response["success"] = false;
-        response["error"] = "Unknown command: " + command;
-    }
-    
-    String responseStr;
-    serializeJson(response, responseStr);
-    client->text(responseStr);
-}
+
 
 
 
 // Główna funkcja obsługi WebSocket
 void handleWebSocketMessage(AsyncWebSocketClient* client, void* arg, uint8_t* data, size_t len) {
+    // Aktualizuj czas ostatniej aktywności
+    lastWebSocketActivity = millis();
+    
+    // Sprawdź czy WebSocket task jest inicjalizowany
+    if (!webSocketTaskHandle || !webSocketQueue) {
+        safePrintln("WebSocket: Task system not initialized, falling back to direct processing");
+        
+        // Fallback do bezpośredniego przetwarzania w przypadku problemów z task
+        String message = String((char*)data, len);
+        
+        DynamicJsonDocument doc(2048);
+        DeserializationError error = deserializeJson(doc, message);
+        
+        if (!error) {
+            // Wywołaj stary handler bezpośrednio
+            handleWebSocketMessageInTask(client, doc);
+        } else {
+            DynamicJsonDocument errorResponse(256);
+            errorResponse["error"] = "Invalid JSON format";
+            errorResponse["fallback"] = true;
+            
+            String errorStr;
+            serializeJson(errorResponse, errorStr);
+            client->text(errorStr);
+        }
+        return;
+    }
+    
+    // Sprawdź czy kolejka nie jest pełna
+    if (uxQueueSpacesAvailable(webSocketQueue) == 0) {
+        safePrintln("WebSocket: Queue full, dropping message");
+        
+        DynamicJsonDocument errorResponse(256);
+        errorResponse["error"] = "Server busy - queue full";
+        errorResponse["queueSize"] = WEBSOCKET_QUEUE_SIZE;
+        
+        String errorStr;
+        serializeJson(errorResponse, errorStr);
+        client->text(errorStr);
+        return;
+    }
+    
+    // Konwertuj dane na string
     String message = String((char*)data, len);
     
-    // Sprawdź dostępną pamięć
-    if (ESP.getFreeHeap() < 10000) {
-        safePrintln("WebSocket: Low memory in message handler: " + String(ESP.getFreeHeap()));
-        DynamicJsonDocument errorResponse(1024);
-        errorResponse["error"] = "Low memory";
-        errorResponse["freeHeap"] = ESP.getFreeHeap();
-        String errorStr;
-        serializeJson(errorResponse, errorStr);
-        client->text(errorStr);
+    // Wyślij do WebSocket task
+    if (!sendToWebSocketTask(client, message)) {
+        // Fallback jeśli wysyłanie nie powiodło się
+        safePrintln("WebSocket: Failed to send to task, using fallback");
         
-        // Wymus czyszczenie pamieci
-        cleanupWebSocketMemory();
-        return;
+        DynamicJsonDocument doc(2048);
+        DeserializationError error = deserializeJson(doc, message);
+        
+        if (!error) {
+            handleWebSocketMessageInTask(client, doc);
+        }
     }
-    
-    // Parse JSON
-    DynamicJsonDocument doc(2048);
-    DeserializationError error = deserializeJson(doc, message);
-    
-    if (error) {
-        DynamicJsonDocument errorResponse(1024);
-        errorResponse["error"] = "Invalid JSON: " + String(error.c_str());
-        String errorStr;
-        serializeJson(errorResponse, errorStr);
-        client->text(errorStr);
-        return;
+}
+
+// Funkcja dodawania klienta do sledzenia
+void addWebSocketClient(AsyncWebSocketClient* client) {
+    if (wsClientCount < MAX_WS_CLIENTS) {
+        wsClients[wsClientCount].client = client;
+        wsClientCount++;
+        safePrintln("WebSocket: Client added to tracking, total: " + String(wsClientCount));
     }
+}
+
+// Funkcja usuwania klienta ze sledzenia
+void removeWebSocketClient(AsyncWebSocketClient* client) {
+    for (int i = 0; i < wsClientCount; i++) {
+        if (wsClients[i].client == client) {
+            // Przesun pozostale klienty
+            for (int j = i; j < wsClientCount - 1; j++) {
+                wsClients[j] = wsClients[j + 1];
+            }
+            wsClientCount--;
+            safePrintln("WebSocket: Client removed from tracking, remaining: " + String(wsClientCount));
+            break;
+        }
+    }
+}
+
+// Funkcja aktualizacji stanu klienta (uproszczona)
+void updateClientPongTime(AsyncWebSocketClient* client) {
+    // Funkcja zachowana dla kompatybilności z event handlerami
+    // Natywny ping/pong jest obsługiwany przez bibliotekę AsyncWebSocket
+}
+
+// Funkcja wysylania natywnego ping WebSocket
+void sendNativePing(AsyncWebSocketClient* client) {
+    if (client && client->status() == 1) { // WS_CONNECTED = 1
+        client->ping();
+    }
+}
+
+
+
+
+
+
+
+
+
+// Funkcja inicjalizacji WebSocket
+void initializeWebSocket(AsyncWebSocket& ws) {
+    ws.onEvent([](AsyncWebSocket* server, AsyncWebSocketClient* client, AwsEventType type, void* arg, uint8_t* data, size_t len) {
+        if (type == WS_EVT_CONNECT) {
+            safePrintln("WebSocket client connected");
+            
+            // Dodaj klienta do sledzenia
+            addWebSocketClient(client);
+            
+            // Sprawdz pamiec przed wyslaniem powitalnej wiadomosci
+            if (ESP.getFreeHeap() > 15000) {
+                // Wyślij powitalną wiadomość
+                DynamicJsonDocument welcome(512);   
+                welcome["cmd"] = "welcome";
+                welcome["message"] = "WebSocket connected";
+                welcome["uptime"] = millis() / 1000;
+                welcome["version"] = "1.0";
+                welcome["freeHeap"] = ESP.getFreeHeap();
+                
+                String welcomeStr;
+                serializeJson(welcome, welcomeStr);
+                client->text(welcomeStr);
+            } else {
+                safePrintln("WebSocket: Low memory, skipping welcome message");
+            }
+            
+        } else if (type == WS_EVT_DISCONNECT) {
+            safePrintln("WebSocket client disconnected");
+            
+            // Usun klienta ze sledzenia
+            removeWebSocketClient(client);
+            
+            // Sprawdź pamięć po rozłączeniu
+            if (ESP.getFreeHeap() < MIN_HEAP_SIZE) {
+                safePrintln("WebSocket: Low memory after disconnect - scheduling reset");
+                webSocketResetPending = true;
+            }
+            
+            // Zaloguj liczbe pozostalych klientow
+            safePrintln("WebSocket: Remaining clients: " + String(server->count()));
+            
+        } else if (type == WS_EVT_PONG) {
+            // Klient odpowiedzial na ping
+            safePrintln("WebSocket: Pong received from client");
+            updateClientPongTime(client);
+            
+        } else if (type == WS_EVT_ERROR) {
+            safePrintln("WebSocket: Error event");
+            removeWebSocketClient(client);
+            
+        } else if (type == WS_EVT_DATA) {
+            // Aktualizuj czas aktywnosci klienta
+            updateClientPongTime(client);
+            
+            // Sprawdz pamiec przed przetwarzaniem wiadomosci
+            if (ESP.getFreeHeap() > 10000) {
+                handleWebSocketMessage(client, arg, data, len);
+            } else {
+                safePrintln("WebSocket: Low memory, skipping message processing");
+                
+                // Wyslij blad pamieci do klienta
+                DynamicJsonDocument errorResponse(256);
+                errorResponse["error"] = "Low memory";
+                errorResponse["freeHeap"] = ESP.getFreeHeap();
+                String errorStr;
+                serializeJson(errorResponse, errorStr);
+                client->text(errorStr);
+            }
+        }
+    });
+    
+    safePrintln("WebSocket initialized with native ping/pong management");
+}
+
+// Funkcja do wysyłania danych do wszystkich klientów WebSocket
+
+
+
+
+
+
+
+// Główny task WebSocket do przetwarzania komunikatów
+void webSocketTask(void* parameters) {
+    safePrintln("WebSocket Task: Started with " + String(WEBSOCKET_STACK_SIZE) + " bytes stack");
+    
+    WebSocketMessage msg;
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xFrequency = pdMS_TO_TICKS(100); // 100ms cycle
+    
+    // Inicjalizuj timery
+    lastWebSocketActivity = millis();
+    lastHeapCheck = millis();
+    
+    while (true) {
+        // Sprawdź czy jest oczekujący reset
+        if (webSocketResetPending) {
+            resetWebSocket();
+        }
+        
+        // Sprawdź heap i aktywność co 100ms
+        checkHeapAndReset();
+        checkWebSocketActivity();
+        
+        // Monitor stack usage
+        UBaseType_t stackHighWaterMark = uxTaskGetStackHighWaterMark(NULL);
+        if (stackHighWaterMark < 512) { // Mniej niż 512 bytes pozostało
+            safePrintln("WebSocket Task: WARNING - Low stack space: " + String(stackHighWaterMark) + " bytes remaining");
+        }
+        
+        // Sprawdź dostępną RAM przed przetwarzaniem
+        uint32_t freeHeap = ESP.getFreeHeap();
+        if (freeHeap < MIN_HEAP_SIZE) {
+            safePrintln("WebSocket Task: Low memory (" + String(freeHeap) + " bytes), skipping processing");
+            vTaskDelayUntil(&xLastWakeTime, xFrequency * 5); // Dłuższe opóźnienie przy niskiej pamięci
+            continue;
+        }
+        
+        // Odbierz komunikat z kolejki (z timeout)
+        if (xQueueReceive(webSocketQueue, &msg, pdMS_TO_TICKS(50)) == pdTRUE) {
+            // Sprawdź czy komunikat nie jest za stary
+            if ((millis() - msg.timestamp) > 5000) {
+                safePrintln("WebSocket Task: Dropping old message (" + 
+                           String(millis() - msg.timestamp) + "ms old)");
+                continue;
+            }
+            
+            // Sprawdź czy klient nadal jest połączony
+            if (!msg.client || msg.client->status() != WS_CONNECTED) {
+                safePrintln("WebSocket Task: Client disconnected, dropping message");
+                continue;
+            }
+            
+            // Zaktualizuj czas ostatniej aktywności
+            lastWebSocketActivity = millis();
+            
+            // Przetwórz komunikat JSON
+            DynamicJsonDocument doc(2048);
+            DeserializationError error = deserializeJson(doc, msg.message);
+            
+            if (error) {
+                safePrintln("WebSocket Task: JSON parse error: " + String(error.c_str()));
+                
+                DynamicJsonDocument errorResponse(256);
+                errorResponse["error"] = "Invalid JSON format";
+                errorResponse["code"] = "PARSE_ERROR";
+                
+                String errorStr;
+                serializeJson(errorResponse, errorStr);
+                msg.client->text(errorStr);
+                continue;
+            }
+            
+            // Obsłuż komunikat w kontekście task
+            handleWebSocketMessageInTask(msg.client, doc);
+            
+        } else {
+            // Timeout - sprawdź stan systemu
+            if (freeHeap < CRITICAL_HEAP_SIZE) {
+                safePrintln("WebSocket Task: Critical heap detected during idle");
+                webSocketResetPending = true;
+            }
+        }
+        
+        // Regularne opóźnienie
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+    }
+}
+
+// Handler komunikatów WebSocket w kontekście task
+void handleWebSocketMessageInTask(AsyncWebSocketClient* client, DynamicJsonDocument& doc) {
+    safePrintln("WebSocket Task: Processing command in dedicated task context");
     
     // Sprawdź komendę
     String cmd = doc["cmd"] | "";
@@ -1477,27 +1307,24 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, void* arg, uint8_t* da
         handleSetConfig(client, doc);
     } else if (cmd == "getConfig") {
         handleGetConfig(client, doc);
-    } else if (cmd == "system") {
-        handleSystemCommand(client, doc);
     } else if (cmd == "pingpong") {
-        // Natywne ping/pong jest obsługiwane przez WebSocket framework
-        // Ta komenda jest zachowana dla kompatybilności z frontendem
+        // Ping/pong w task context
         DynamicJsonDocument response(256);
         response["cmd"] = "pingpong";
         response["command"] = "pong";
-        response["timestamp"] = millis();
+        response["timestamp"] = time(nullptr); // Epoch timestamp
         response["freeHeap"] = ESP.getFreeHeap();
+        response["taskStack"] = uxTaskGetStackHighWaterMark(NULL);
         
         String responseStr;
         serializeJson(response, responseStr);
         client->text(responseStr);
     } else if (cmd == "getNetworkConfig") {
-        // Handle network config request
+        // Inline network config handler
         DynamicJsonDocument response(2048);
         response["success"] = true;
         response["cmd"] = "networkConfig";
         
-        // Add network configuration data
         response["useDHCP"] = networkConfig.useDHCP;
         response["staticIP"] = networkConfig.staticIP;
         response["gateway"] = networkConfig.gateway;
@@ -1506,13 +1333,11 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, void* arg, uint8_t* da
         response["dns2"] = networkConfig.dns2;
         response["configValid"] = networkConfig.configValid;
         
-        // Add current WiFi status
         response["currentIP"] = WiFi.localIP().toString();
         response["currentSSID"] = WiFi.SSID();
         response["wifiConnected"] = WiFi.status() == WL_CONNECTED;
         response["wifiSignal"] = WiFi.RSSI();
         
-        // Add WiFi credentials (if available)
         char ssid[32], password[64];
         if (loadWiFiConfig(ssid, password, sizeof(ssid), sizeof(password))) {
             response["wifiSSID"] = ssid;
@@ -1522,9 +1347,8 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, void* arg, uint8_t* da
         String responseStr;
         serializeJson(response, responseStr);
         client->text(responseStr);
-        
     } else if (cmd == "setWiFiConfig") {
-        // Handle WiFi config save
+        // Inline WiFi config handler
         String ssid = doc["ssid"] | "";
         String password = doc["password"] | "";
         
@@ -1547,9 +1371,8 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, void* arg, uint8_t* da
         String responseStr;
         serializeJson(response, responseStr);
         client->text(responseStr);
-        
     } else if (cmd == "setNetworkConfig") {
-        // Handle network config save
+        // Inline network config handler
         DynamicJsonDocument response(1024);
         response["cmd"] = "setNetworkConfig";
         
@@ -1571,7 +1394,6 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, void* arg, uint8_t* da
         String responseStr;
         serializeJson(response, responseStr);
         client->text(responseStr);
-        
     } else if (cmd == "testWiFi") {
         // Handle WiFi test
         DynamicJsonDocument response(1024);
@@ -1626,22 +1448,7 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, void* arg, uint8_t* da
         DynamicJsonDocument response(4096);
         response["cmd"] = "sensorKeys";
         response["success"] = true;
-        response["t"] = millis(); // Timestamp w ms
-        
-        // Dodaj date i time
-        struct tm timeinfo;
-        if (getLocalTime(&timeinfo)) {
-            char timeStr[20];
-            strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
-            response["time"] = String(timeStr);
-            
-            char dateStr[20];
-            strftime(dateStr, sizeof(dateStr), "%d/%m/%Y", &timeinfo);
-            response["date"] = String(dateStr);
-        } else {
-            response["time"] = "00:00:00";
-            response["date"] = "01/01/2024";
-        }
+        response["timestamp"] = time(nullptr); // Epoch timestamp
         
         JsonObject data = response.createNestedObject("data");
         
@@ -1774,16 +1581,313 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, void* arg, uint8_t* da
         for (uint8_t i = 0; i < mcp3424Config.deviceCount; i++) {
             JsonObject device = devices.createNestedObject();
             device["deviceIndex"] = mcp3424Config.devices[i].deviceIndex;
+            device["i2cAddress"] = mcp3424Config.devices[i].i2cAddress;
             device["gasType"] = mcp3424Config.devices[i].gasType;
             device["description"] = mcp3424Config.devices[i].description;
             device["enabled"] = mcp3424Config.devices[i].enabled;
-            safePrintln("Device " + String(i) + ": " + mcp3424Config.devices[i].gasType);
+            device["autoDetected"] = mcp3424Config.devices[i].autoDetected;
+            safePrintln("Device " + String(i) + ": " + mcp3424Config.devices[i].gasType + " @ 0x" + String(mcp3424Config.devices[i].i2cAddress, HEX));
         }
         
         String responseStr;
         serializeJson(response, responseStr);
         safePrintln("Sending MCP3424 config response: " + responseStr);
         client->text(responseStr);
+        
+    } else if (cmd == "scanI2CAddresses") {
+        // I2C scan command
+        DynamicJsonDocument response(1024);
+        response["cmd"] = "i2cScanResult";
+        response["timestamp"] = time(nullptr);
+        
+        JsonArray foundAddresses = response.createNestedArray("foundAddresses");
+        int foundCount = 0;
+        
+        // Scan I2C addresses typical for MCP3424 (0x68-0x6F)
+        safePrintln("WebSocket: Starting I2C scan for MCP3424 devices...");
+        for (uint8_t addr = 0x68; addr <= 0x6F; addr++) {
+            if (addr == 0x69) continue; // Skip excluded address
+            
+            Wire.beginTransmission(addr);
+            uint8_t result = Wire.endTransmission();
+            
+            if (result == 0) {
+                // Device found
+                foundAddresses.add(addr);
+                foundCount++;
+                safePrintln("I2C device found at 0x" + String(addr, HEX));
+            }
+        }
+        
+        response["success"] = true;
+        response["message"] = "I2C scan completed. Found " + String(foundCount) + " devices.";
+        response["foundCount"] = foundCount;
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+        
+    } else if (cmd == "getWebSocketStatus") {
+        // Komenda diagnostyczna
+        DynamicJsonDocument response(1024);
+        response["cmd"] = "webSocketStatus";
+        response["success"] = true;
+        response["status"] = getWebSocketStatus();
+        response["timestamp"] = time(nullptr); // Epoch timestamp
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+    } else if (cmd == "forceWebSocketReset") {
+        // Komenda do ręcznego resetowania
+        String reason = doc["reason"] | "Manual reset from client";
+        forceWebSocketReset(reason);
+        
+        DynamicJsonDocument response(256);
+        response["cmd"] = "webSocketResetScheduled";
+        response["success"] = true;
+        response["reason"] = reason;
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+    } else if (cmd == "restart" || cmd == "reset") {
+        // System restart/reset commands
+        DynamicJsonDocument response(512);
+        response["cmd"] = cmd;
+        response["success"] = true;
+        response["message"] = "System " + cmd + "ing...";
+        response["timestamp"] = time(nullptr); // Epoch timestamp
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+        
+        delay(1000);
+        ESP.restart();
+        
+    } else if (cmd == "memory") {
+        // Memory status command
+        DynamicJsonDocument response(512);
+        response["cmd"] = "memory";
+        response["success"] = true;
+        response["freeHeap"] = ESP.getFreeHeap();
+        response["freePsram"] = ESP.getFreePsram();
+        response["psramSize"] = ESP.getPsramSize();
+        response["uptime"] = millis() / 1000;
+        response["timestamp"] = time(nullptr); // Epoch timestamp
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+        
+    } else if (cmd == "lowPowerOn" || cmd == "lowPowerOff") {
+        // Low power mode commands
+        config.lowPowerMode = (cmd == "lowPowerOn");
+        
+        DynamicJsonDocument response(512);
+        response["cmd"] = cmd;
+        response["success"] = true;
+        response["message"] = String("Low power mode ") + (config.lowPowerMode ? "enabled" : "disabled");
+        response["lowPowerMode"] = config.lowPowerMode;
+        response["timestamp"] = time(nullptr); // Epoch timestamp
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+        
+    } else if (cmd == "pushbulletTest") {
+        // Pushbullet test notification
+        DynamicJsonDocument response(512);
+        response["cmd"] = "pushbulletTest";
+        response["timestamp"] = time(nullptr); // Epoch timestamp
+        
+        if (config.enablePushbullet && strlen(config.pushbulletToken) > 0) {
+            sendPushbulletNotification("🧪 Test Notification", "This is a test notification from ESP32 Sensor Cube\nTime: " + getFormattedTime() + "\nUptime: " + getUptimeString());
+            response["success"] = true;
+            response["message"] = "Test notification sent";
+        } else {
+            response["success"] = false;
+            response["message"] = "Pushbullet not configured";
+        }
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+        
+    } else if (cmd == "pushbulletBatteryTest") {
+        // Pushbullet battery test notification
+        DynamicJsonDocument response(512);
+        response["cmd"] = "pushbulletBatteryTest";
+        response["timestamp"] = time(nullptr); // Epoch timestamp
+        
+        if (config.enablePushbullet && strlen(config.pushbulletToken) > 0) {
+            sendBatteryCriticalNotification();
+            digitalWrite(OFF_PIN, HIGH);
+            response["success"] = true;
+            response["message"] = "Battery critical test notification sent";
+        } else {
+            response["success"] = false;
+            response["message"] = "Pushbullet not configured";
+        }
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+        
+    } else if (cmd == "wifi") {
+        // WiFi status command
+        DynamicJsonDocument response(512);
+        response["cmd"] = "wifi";
+        response["success"] = true;
+        response["connected"] = WiFi.status() == WL_CONNECTED;
+        response["ssid"] = WiFi.SSID();
+        response["rssi"] = WiFi.RSSI();
+        response["localIP"] = WiFi.localIP().toString();
+        response["timestamp"] = time(nullptr); // Epoch timestamp
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+        
+    } else if (cmd == "fan_speed" || cmd == "fan_on" || cmd == "fan_off" || 
+               cmd == "gline_on" || cmd == "gline_off" || cmd == "sleep" || 
+               cmd == "sleep_stop" || cmd == "wake") {
+        // Fan control commands
+        DynamicJsonDocument response(1024);
+        response["cmd"] = cmd;
+        response["timestamp"] = time(nullptr); // Epoch timestamp
+        
+        if (!config.enableFan) {
+            response["success"] = false;
+            response["error"] = "Fan control is DISABLED in configuration";
+        } else {
+            String value = "";
+            if (cmd == "fan_speed") {
+                value = String(doc["value"] | 0);
+            } else if (cmd == "sleep") {
+                unsigned long delaySec = doc["delay"] | 0;
+                unsigned long durationSec = doc["duration"] | 0;
+                value = String(delaySec) + " " + String(durationSec);
+            }
+            
+            if (processFanCommand(cmd, value)) {
+                response["success"] = true;
+                if (cmd == "fan_speed") {
+                    response["speed"] = value.toInt();
+                    response["message"] = "Fan speed set to " + value + "%";
+                } else if (cmd == "fan_on") {
+                    response["message"] = "Fan turned ON at 50% speed";
+                    response["speed"] = 50;
+                } else if (cmd == "fan_off") {
+                    response["message"] = "Fan turned OFF";
+                    response["speed"] = 0;
+                } else if (cmd == "gline_on") {
+                    response["message"] = "GLine router ENABLED";
+                } else if (cmd == "gline_off") {
+                    response["message"] = "GLine router DISABLED";
+                } else if (cmd == "sleep") {
+                    unsigned long delaySec = doc["delay"] | 0;
+                    unsigned long durationSec = doc["duration"] | 0;
+                    response["message"] = "Sleep mode scheduled: " + String(delaySec) + "s delay, " + String(durationSec) + "s duration";
+                    response["delay"] = delaySec;
+                    response["duration"] = durationSec;
+                } else if (cmd == "sleep_stop" || cmd == "wake") {
+                    response["message"] = "Sleep mode stopped";
+                }
+            } else {
+                response["success"] = false;
+                response["error"] = "Failed to execute fan command: " + cmd;
+            }
+        }
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+        
+    } else if (cmd == "fan_status") {
+        // Fan status command
+        DynamicJsonDocument response(1024);
+        response["cmd"] = "fan_status";
+        response["success"] = true;
+        response["enabled"] = config.enableFan && isFanEnabled();
+        response["dutyCycle"] = config.enableFan ? getFanDutyCycle() : 0;
+        response["rpm"] = config.enableFan ? getFanRPM() : 0;
+        response["glineEnabled"] = config.enableFan && isGLineEnabled();
+        response["pwmValue"] = config.enableFan ? map(getFanDutyCycle(), 0, 100, 0, 255) : 0;
+        response["timestamp"] = time(nullptr); // Epoch timestamp
+        
+        // Add sleep mode information
+        if (config.enableFan) {
+            FanStatus fanStatus = getFanStatus();
+            response["sleepMode"] = fanStatus.sleepMode;
+            response["sleepStartTime"] = fanStatus.sleepStartTime;
+            response["sleepDuration"] = fanStatus.sleepDuration;
+            response["sleepEndTime"] = fanStatus.sleepEndTime;
+        }
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+        
+    } else if (cmd == "setMCP3424Config") {
+        // MCP3424 configuration setting
+        DynamicJsonDocument response(1024);
+        response["cmd"] = "setMCP3424Config";
+        response["timestamp"] = time(nullptr); // Epoch timestamp
+        
+        if (doc.containsKey("devices")) {
+            JsonArray devices = doc["devices"];
+            mcp3424Config.deviceCount = 0;
+            
+            for (JsonObject device : devices) {
+                if (mcp3424Config.deviceCount < 8) {
+                    MCP3424DeviceAssignment& newDevice = mcp3424Config.devices[mcp3424Config.deviceCount];
+                    newDevice.deviceIndex = device["deviceIndex"] | 0;
+                    newDevice.i2cAddress = device["i2cAddress"] | (0x68 + mcp3424Config.deviceCount);
+                    strlcpy(newDevice.gasType, device["gasType"] | "", sizeof(newDevice.gasType));
+                    strlcpy(newDevice.description, device["description"] | "", sizeof(newDevice.description));
+                    newDevice.enabled = device["enabled"] | true;
+                    newDevice.autoDetected = device["autoDetected"] | false;
+                    mcp3424Config.deviceCount++;
+                }
+            }
+            
+            if (saveMCP3424Config(mcp3424Config)) {
+                response["success"] = true;
+                response["message"] = "MCP3424 configuration saved";
+            } else {
+                response["success"] = false;
+                response["error"] = "Failed to save MCP3424 configuration";
+            }
+        } else {
+            response["success"] = false;
+            response["error"] = "No devices provided";
+        }
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+        
+    } else if (cmd == "resetMCP3424Config") {
+        // MCP3424 configuration reset
+        DynamicJsonDocument response(512);
+        response["cmd"] = "resetMCP3424Config";
+        response["timestamp"] = time(nullptr); // Epoch timestamp
+        
+        initializeDefaultMCP3424Mapping();
+        if (saveMCP3424Config(mcp3424Config)) {
+            response["success"] = true;
+            response["message"] = "MCP3424 configuration reset to defaults";
+        } else {
+            response["success"] = false;
+            response["error"] = "Failed to save default MCP3424 configuration";
+        }
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+        
     } else {
         DynamicJsonDocument errorResponse(1024);
         errorResponse["error"] = "Unknown command: " + cmd;
@@ -1792,366 +1896,226 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, void* arg, uint8_t* da
         client->text(errorStr);
     }
     
-    // Sprawdz pamiec po przetworzeniu wiadomosci
-    if (ESP.getFreeHeap() < 15000) {
-       // safePrintln("WebSocket: Low memory after message processing: " + String(ESP.getFreeHeap()));
-        cleanupWebSocketMemory();
+    // Sprawdź pamięć po przetworzeniu wiadomości
+    if (ESP.getFreeHeap() < CRITICAL_HEAP_SIZE) {
+        safePrintln("WebSocket: Critical memory after message processing - scheduling reset");
+        webSocketResetPending = true;
     }
 }
 
-// Funkcja dodawania klienta do sledzenia
-void addWebSocketClient(AsyncWebSocketClient* client) {
-    if (wsClientCount < MAX_WS_CLIENTS) {
-        wsClients[wsClientCount].client = client;
-        wsClients[wsClientCount].lastPingTime = 0;
-        wsClients[wsClientCount].lastPongTime = millis();
-        wsClients[wsClientCount].pingSent = false;
-        wsClients[wsClientCount].isActive = true;
-        wsClientCount++;
-        safePrintln("WebSocket: Client added to tracking, total: " + String(wsClientCount));
-    }
-}
-
-// Funkcja usuwania klienta ze sledzenia
-void removeWebSocketClient(AsyncWebSocketClient* client) {
-    for (int i = 0; i < wsClientCount; i++) {
-        if (wsClients[i].client == client) {
-            // Przesun pozostale klienty
-            for (int j = i; j < wsClientCount - 1; j++) {
-                wsClients[j] = wsClients[j + 1];
-            }
-            wsClientCount--;
-            safePrintln("WebSocket: Client removed from tracking, remaining: " + String(wsClientCount));
-            break;
-        }
-    }
-}
-
-// Funkcja aktualizacji czasu pong dla klienta
-void updateClientPongTime(AsyncWebSocketClient* client) {
-    for (int i = 0; i < wsClientCount; i++) {
-        if (wsClients[i].client == client) {
-            wsClients[i].lastPongTime = millis();
-            wsClients[i].pingSent = false;
-            wsClients[i].isActive = true;
-            break;
-        }
-    }
-}
-
-// Funkcja wysylania natywnego ping WebSocket
-void sendNativePing(AsyncWebSocketClient* client) {
-    if (client && client->status() == 1) { // WS_CONNECTED = 1
-        client->ping();
-      //  safePrintln("WebSocket: Native ping sent to client");
-    }
-}
-
-// Funkcja sprawdzania i czyszczenia nieaktywnych klientow
-void cleanupInactiveClients() {
-    unsigned long currentTime = millis();
-    const unsigned long PING_TIMEOUT = 30000; // 30 sekund
-    const unsigned long PONG_TIMEOUT = 10000; // 10 sekund
-    
-    for (int i = wsClientCount - 1; i >= 0; i--) {
-        if (!wsClients[i].isActive) continue;
-        
-        // Sprawdz czy klient odpowiada na ping
-        if (wsClients[i].pingSent && (currentTime - wsClients[i].lastPingTime > PONG_TIMEOUT)) {
-            safePrintln("WebSocket: Client timeout - no pong response");
-            wsClients[i].client->close();
-            wsClients[i].isActive = false;
-            removeWebSocketClient(wsClients[i].client);
-            continue;
-        }
-        
-        // Sprawdz czy klient jest aktywny
-        if (currentTime - wsClients[i].lastPongTime > PING_TIMEOUT) {
-            if (!wsClients[i].pingSent) {
-                // Wyslij ping
-                sendNativePing(wsClients[i].client);
-                wsClients[i].lastPingTime = currentTime;
-                wsClients[i].pingSent = true;
-              //  safePrintln("WebSocket: Sending ping to inactive client");
-            }
-        }
-    }
-}
-
-// Funkcja wysylania natywnego ping WebSocket (zachowana dla kompatybilnosci)
-void sendPingToClient(AsyncWebSocketClient* client) {
-    sendNativePing(client);
-}
-
-// Funkcja sprawdzania polaczen WebSocket
-void checkWebSocketConnections() {
-    unsigned long currentTime = millis();
-    
-    // Sprawdz pamiec co 30 sekund
-    if (currentTime - lastMemoryCheck > 30000) {
-        lastMemoryCheck = currentTime;
-        
-        uint32_t freeHeap = ESP.getFreeHeap();
-      //  safePrintln("WebSocket memory check - Free heap: " + String(freeHeap) + " bytes");
-        
-        // Jezeli pamiec jest niska, wymus czyszczenie
-        if (freeHeap < 30000) {
-            safePrintln("WebSocket: Low memory detected, forcing cleanup");
-            cleanupWebSocketMemory();
-        }
+// Funkcja do wysyłania komunikatu do WebSocket task
+bool sendToWebSocketTask(AsyncWebSocketClient* client, const String& message) {
+    if (!webSocketQueue || !client) {
+        safePrintln("WebSocket Task: Queue or client is null");
+        return false;
     }
     
-    // Sprawdz nieaktywne klienty co 15 sekund
-    if (currentTime - lastNativePingTime > 15000) {
-        lastNativePingTime = currentTime;
-        cleanupInactiveClients();
+    // Sprawdź czy kolejka nie jest pełna
+    if (uxQueueSpacesAvailable(webSocketQueue) == 0) {
+        safePrintln("WebSocket Task: Queue is full, dropping message");
+        return false;
     }
     
-    // Czyszczenie pamieci co 5 minut
-    if (currentTime - lastCleanupTime > 300000) {
-        lastCleanupTime = currentTime;
-        safePrintln("WebSocket: Periodic memory cleanup");
-        cleanupWebSocketMemory();
-    }
-}
-
-// Funkcja czyszczenia pamieci WebSocket
-void cleanupWebSocketMemory() {
-    safePrintln("WebSocket: Starting memory cleanup");
+    // Utwórz komunikat
+    WebSocketMessage msg;
+    msg.client = client;
+    msg.message = message;
+    msg.timestamp = millis();
     
-    uint32_t freeHeapBefore = ESP.getFreeHeap();
-    
-    // Sprawdz nieaktywne klienty i wymus czyszczenie
-    cleanupInactiveClients();
-    
-    // Sprawdz czy klienci odpowiadaja
-    safePrintln("WebSocket: Tracked clients: " + String(wsClientCount) + ", Total clients: " + String(ws.count()));
-    
-    // Użyj inteligentnego czyszczenia pamięci
-    intelligentMemoryCleanup();
-    
-    uint32_t freeHeapAfter = ESP.getFreeHeap();
-    int32_t recovered = (int32_t)freeHeapAfter - (int32_t)freeHeapBefore;
-    
-    safePrintln("WebSocket: Memory cleanup completed. Before: " + String(freeHeapBefore) + 
-                " bytes, After: " + String(freeHeapAfter) + " bytes, Recovered: " + String(recovered) + " bytes");
-    
-    // Jezeli pamiec nadal jest niska, zaloguj ostrzezenie
-    if (freeHeapAfter < 20000) {
-        safePrintln("WebSocket: WARNING - Memory still low after cleanup!");
-        safePrintln("WebSocket: Consider running MEMORY_EMERGENCY command for aggressive cleanup");
-    }
-}
-
-// Funkcja inicjalizacji WebSocket
-void initializeWebSocket(AsyncWebSocket& ws) {
-    ws.onEvent([](AsyncWebSocket* server, AsyncWebSocketClient* client, AwsEventType type, void* arg, uint8_t* data, size_t len) {
-        if (type == WS_EVT_CONNECT) {
-            safePrintln("WebSocket client connected");
-            
-            // Dodaj klienta do sledzenia
-            addWebSocketClient(client);
-            
-            // Sprawdz pamiec przed wyslaniem powitalnej wiadomosci
-            if (ESP.getFreeHeap() > 15000) {
-                // Wyślij powitalną wiadomość
-                DynamicJsonDocument welcome(512);   
-                welcome["cmd"] = "welcome";
-                welcome["message"] = "WebSocket connected";
-                welcome["uptime"] = millis() / 1000;
-                welcome["version"] = "1.0";
-                welcome["freeHeap"] = ESP.getFreeHeap();
-                
-                String welcomeStr;
-                serializeJson(welcome, welcomeStr);
-                client->text(welcomeStr);
-            } else {
-                safePrintln("WebSocket: Low memory, skipping welcome message");
-            }
-            
-        } else if (type == WS_EVT_DISCONNECT) {
-            safePrintln("WebSocket client disconnected");
-            
-            // Usun klienta ze sledzenia
-            removeWebSocketClient(client);
-            
-            // Wymus czyszczenie pamieci po rozlaczeniu
-            if (ESP.getFreeHeap() < 40000) {
-                safePrintln("WebSocket: Forcing memory cleanup after disconnect");
-                cleanupWebSocketMemory();
-            }
-            
-            // Zaloguj liczbe pozostalych klientow
-            safePrintln("WebSocket: Remaining clients: " + String(server->count()));
-            
-        } else if (type == WS_EVT_PONG) {
-            // Klient odpowiedzial na ping
-            safePrintln("WebSocket: Pong received from client");
-            updateClientPongTime(client);
-            
-        } else if (type == WS_EVT_ERROR) {
-            safePrintln("WebSocket: Error event");
-            removeWebSocketClient(client);
-            
-        } else if (type == WS_EVT_DATA) {
-            // Aktualizuj czas aktywnosci klienta
-            updateClientPongTime(client);
-            
-            // Sprawdz pamiec przed przetwarzaniem wiadomosci
-            if (ESP.getFreeHeap() > 10000) {
-                handleWebSocketMessage(client, arg, data, len);
-            } else {
-                safePrintln("WebSocket: Low memory, skipping message processing");
-                
-                // Wyslij blad pamieci do klienta
-                DynamicJsonDocument errorResponse(256);
-                errorResponse["error"] = "Low memory";
-                errorResponse["freeHeap"] = ESP.getFreeHeap();
-                String errorStr;
-                serializeJson(errorResponse, errorStr);
-                client->text(errorStr);
-            }
-        }
-    });
-    
-    safePrintln("WebSocket initialized with native ping/pong management");
-}
-
-// Funkcja do wysyłania danych do wszystkich klientów WebSocket
-
-// ==============================================
-// ZAAWANSOWANE CZYSZCZENIE PAMIECI
-// ==============================================
-
-void forceGarbageCollection() {
-    safePrintln("WebSocket: Starting forced garbage collection");
-    
-    uint32_t heap_before = ESP.getFreeHeap();
-    uint32_t internal_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-    uint32_t spiram_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-    
-    // 1. Sprawdz integralnosc heap
-    bool integrity_ok = heap_caps_check_integrity_all(false);
-    if (!integrity_ok) {
-        safePrintln("ALERT: Heap corruption detected during cleanup!");
-    }
-    
-    // 2. Wymus defragmentacje przez wielokrotne alokacje/dealokacje
-    const int NUM_ATTEMPTS = 5;
-    const size_t BLOCK_SIZES[] = {64, 128, 256, 512, 1024};
-    
-    for (int attempt = 0; attempt < NUM_ATTEMPTS; attempt++) {
-        void* ptrs[20];
-        int allocated = 0;
-        
-        // Alokuj bloki różnej wielkości
-        for (int i = 0; i < 20; i++) {
-            size_t size = BLOCK_SIZES[i % 5];
-            ptrs[i] = heap_caps_malloc(size, MALLOC_CAP_INTERNAL);
-            if (ptrs[i]) {
-                allocated++;
-                // Wypelnij losowymi danymi aby wymusic fizyczne uzycie
-                memset(ptrs[i], (uint8_t)(i + attempt), size);
-            }
-        }
-        
-        // Zwolnij w odwrotnej kolejności
-        for (int i = allocated - 1; i >= 0; i--) {
-            if (ptrs[i]) {
-                heap_caps_free(ptrs[i]);
-                ptrs[i] = nullptr;
-            }
-        }
-        
-        // Mikro-delay między próbami
-        delayMicroseconds(100);
-    }
-    
-    // 3. Arduino/FreeRTOS cleanup
-    yield();
-    vTaskDelay(pdMS_TO_TICKS(1)); // FreeRTOS task switch
-    
-    // 4. WebSocket specific cleanup
-    cleanupInactiveClients();
-    
-    // 5. Wymus czyszczenie TCP/IP bufferów
-    WiFi.printDiag(Serial); // To może wymusić czyszczenie WiFi bufferów
-    
-    uint32_t heap_after = ESP.getFreeHeap();
-    uint32_t internal_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-    uint32_t spiram_after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-    
-    int32_t heap_recovered = (int32_t)heap_after - (int32_t)heap_before;
-    int32_t internal_recovered = (int32_t)internal_after - (int32_t)internal_before;
-    int32_t spiram_recovered = (int32_t)spiram_after - (int32_t)spiram_before;
-    
-    safePrintln("Forced GC Results:");
-    safePrintln("- Total heap recovered: " + String(heap_recovered) + " bytes");
-    safePrintln("- Internal recovered: " + String(internal_recovered) + " bytes");
-    safePrintln("- SPIRAM recovered: " + String(spiram_recovered) + " bytes");
-    safePrintln("- Final free heap: " + String(heap_after) + " bytes");
-    
-    if (heap_recovered > 1000) {
-        safePrintln("SUCCESS: Significant memory recovered!");
-    } else if (heap_recovered > 0) {
-        safePrintln("INFO: Some memory recovered");
+    // Wyślij do kolejki
+    if (xQueueSend(webSocketQueue, &msg, pdMS_TO_TICKS(100)) == pdTRUE) {
+        return true;
     } else {
-        safePrintln("WARNING: No memory recovered - possible leak");
+        safePrintln("WebSocket Task: Failed to send message to queue");
+        return false;
     }
 }
 
-void intelligentMemoryCleanup() {
-    uint32_t free_heap = ESP.getFreeHeap();
-    uint32_t min_free = ESP.getMinFreeHeap();
-    
-    safePrintln("Starting intelligent memory cleanup");
-    safePrintln("Current free: " + String(free_heap) + ", Min ever: " + String(min_free));
-    
-    // Determine cleanup strategy based on memory state
-    if (free_heap < 20000) {
-        safePrintln("CRITICAL: Very low memory - aggressive cleanup");
-        forceGarbageCollection();
-        cleanupInactiveClients();
-        
-        // Emergency: close all WebSocket connections if still critical
-        if (ESP.getFreeHeap() < 15000) {
-            safePrintln("EMERGENCY: Closing all WebSocket connections");
-            ws.closeAll();
-            vTaskDelay(pdMS_TO_TICKS(100));
-        }
-        
-    } else if (free_heap < 40000) {
-        safePrintln("LOW: Moderate cleanup needed");
-        cleanupInactiveClients();
-        
-        // Light defragmentation
-        void* temp = heap_caps_malloc(1024, MALLOC_CAP_INTERNAL);
-        if (temp) {
-            heap_caps_free(temp);
-        }
-        yield();
-        
-    } else {
-        safePrintln("NORMAL: Light maintenance cleanup");
-        cleanupInactiveClients();
-        yield();
+// Inicjalizacja WebSocket task system
+bool initializeWebSocketTask() {
+    // Utwórz kolejkę
+    webSocketQueue = xQueueCreate(WEBSOCKET_QUEUE_SIZE, sizeof(WebSocketMessage));
+    if (!webSocketQueue) {
+        safePrintln("WebSocket Task: Failed to create queue");
+        return false;
     }
     
-    uint32_t final_free = ESP.getFreeHeap();
-    safePrintln("Cleanup completed - Final free: " + String(final_free) + " bytes");
+    // Utwórz semaphore
+    webSocketSemaphore = xSemaphoreCreateMutex();
+    if (!webSocketSemaphore) {
+        safePrintln("WebSocket Task: Failed to create semaphore");
+        vQueueDelete(webSocketQueue);
+        return false;
+    }
+    
+    // Utwórz task
+    BaseType_t result = xTaskCreatePinnedToCore(
+        webSocketTask,           // Funkcja task
+        "WebSocketTask",         // Nazwa task
+        WEBSOCKET_STACK_SIZE,    // Rozmiar stack
+        NULL,                    // Parametry
+        WEBSOCKET_PRIORITY,      // Priorytet
+        &webSocketTaskHandle,    // Handle task
+        WEBSOCKET_CORE           // Core CPU
+    );
+    
+    if (result != pdPASS) {
+        safePrintln("WebSocket Task: Failed to create task");
+        vQueueDelete(webSocketQueue);
+        vSemaphoreDelete(webSocketSemaphore);
+        return false;
+    }
+    
+    safePrintln("WebSocket Task system initialized successfully");
+    safePrintln("- Queue size: " + String(WEBSOCKET_QUEUE_SIZE));
+    safePrintln("- Stack size: " + String(WEBSOCKET_STACK_SIZE) + " bytes");
+    safePrintln("- Priority: " + String(WEBSOCKET_PRIORITY));
+    safePrintln("- CPU Core: " + String(WEBSOCKET_CORE));
+    
+    return true;
 }
 
-// Funkcja do wywołania z main.cpp jako komenda Serial
-void performEmergencyCleanup() {
-    safePrintln("=== EMERGENCY MEMORY CLEANUP ===");
-    forceGarbageCollection();
-    intelligentMemoryCleanup();
+// Funkcja zatrzymania WebSocket task system
+void stopWebSocketTask() {
+    if (webSocketTaskHandle) {
+        vTaskDelete(webSocketTaskHandle);
+        webSocketTaskHandle = NULL;
+    }
     
-    // Final report
-    safePrintln("=== CLEANUP SUMMARY ===");
-    safePrintln("Free heap: " + String(ESP.getFreeHeap()) + " bytes");
-    safePrintln("Free internal: " + String(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)) + " bytes");
-    safePrintln("Free SPIRAM: " + String(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)) + " bytes");
-    safePrintln("Largest block: " + String(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)) + " bytes");
+    if (webSocketQueue) {
+        vQueueDelete(webSocketQueue);
+        webSocketQueue = NULL;
+    }
+    
+    if (webSocketSemaphore) {
+        vSemaphoreDelete(webSocketSemaphore);
+        webSocketSemaphore = NULL;
+    }
+    
+    safePrintln("WebSocket Task system stopped");
 }
+
+// Funkcja sprawdzania heap i resetowania WebSocket
+void checkHeapAndReset() {
+    uint32_t freeHeap = ESP.getFreeHeap();
+    unsigned long currentTime = millis();
+    
+    // Sprawdź heap tylko co 30 sekund
+    if (currentTime - lastHeapCheck < HEAP_CHECK_INTERVAL) {
+        return;
+    }
+    lastHeapCheck = currentTime;
+    
+    // Krytycznie niski heap - natychmiastowy reset
+    if (freeHeap < CRITICAL_HEAP_SIZE) {
+        safePrintln("WebSocket: CRITICAL heap (" + String(freeHeap) + 
+                   " bytes) - forcing immediate reset");
+        webSocketResetPending = true;
+        return;
+    }
+    
+    // Niski heap - ostrzeżenie i przygotowanie do reset
+    if (freeHeap < MIN_HEAP_SIZE) {
+        safePrintln("WebSocket: Low heap (" + String(freeHeap) + 
+                   " bytes) - preparing for reset");
+        
+        // Synchronizuj licznik klientów WebSocket
+        if (wsClientCount != ws.count()) {
+            wsClientCount = ws.count();
+        }
+        
+        // Jeśli nadal niski heap, zaplanuj reset
+        if (ESP.getFreeHeap() < MIN_HEAP_SIZE) {
+            webSocketResetPending = true;
+        }
+    }
+}
+
+// Funkcja sprawdzania aktywności WebSocket
+void checkWebSocketActivity() {
+    unsigned long currentTime = millis();
+    
+    // Sprawdź czy są aktywni klienci
+    if (ws.count() == 0) {
+        lastWebSocketActivity = currentTime; // Resetuj timer jeśli brak klientów
+        return;
+    }
+    
+    // Sprawdź timeout nieaktywności
+    if (lastWebSocketActivity > 0 && 
+        (currentTime - lastWebSocketActivity) > WEBSOCKET_INACTIVITY_TIMEOUT) {
+        
+        safePrintln("WebSocket: No activity for " + 
+                   String((currentTime - lastWebSocketActivity) / 1000) + 
+                   " seconds - scheduling reset");
+        webSocketResetPending = true;
+    }
+}
+
+// Funkcja resetowania WebSocket
+void resetWebSocket() {
+    safePrintln("WebSocket: Starting reset process (count: " + String(webSocketResetCount + 1) + ")");
+    
+    uint32_t heapBefore = ESP.getFreeHeap();
+    
+    // Zamknij wszystkie połączenia
+    ws.cleanupClients();
+    
+    // Wyczyść dane klientów
+    wsClientCount = 0;
+    memset(wsClients, 0, sizeof(wsClients));
+    
+    // Krótkie opóźnienie dla stabilizacji
+    delay(100);
+    
+    // Wyczyść kolejkę WebSocket task
+    if (webSocketQueue) {
+        WebSocketMessage msg;
+        while (xQueueReceive(webSocketQueue, &msg, 0) == pdTRUE) {
+            // Usuń wszystkie oczekujące komunikaty
+        }
+    }
+    
+    uint32_t heapAfter = ESP.getFreeHeap();
+    webSocketResetCount++;
+    webSocketResetPending = false;
+    lastWebSocketActivity = millis();
+    
+    safePrintln("WebSocket: Reset completed. Heap before: " + String(heapBefore) + 
+               " bytes, after: " + String(heapAfter) + " bytes, recovered: " + 
+               String((int32_t)heapAfter - (int32_t)heapBefore) + " bytes");
+}
+
+// Funkcja do ręcznego resetowania WebSocket (dla zewnętrznych wywołań)
+void forceWebSocketReset(const String& reason) {
+    safePrintln("WebSocket: Force reset requested - " + reason);
+    webSocketResetPending = true;
+}
+
+// Funkcja sprawdzania statusu WebSocket
+String getWebSocketStatus() {
+    uint32_t freeHeap = ESP.getFreeHeap();
+    unsigned long timeSinceActivity = millis() - lastWebSocketActivity;
+    
+    String status = "WebSocket Status:\n";
+    status += "- Active clients: " + String(ws.count()) + "\n";
+    status += "- Tracked clients: " + String(wsClientCount) + "\n";
+    status += "- Free heap: " + String(freeHeap) + " bytes\n";
+    status += "- Time since activity: " + String(timeSinceActivity / 1000) + " seconds\n";
+    status += "- Reset count: " + String(webSocketResetCount) + "\n";
+    status += "- Reset pending: " + String(webSocketResetPending ? "YES" : "NO") + "\n";
+    
+    if (webSocketQueue) {
+        status += "- Queue messages: " + String(uxQueueMessagesWaiting(webSocketQueue)) + "/" + String(WEBSOCKET_QUEUE_SIZE) + "\n";
+    }
+    
+    if (webSocketTaskHandle) {
+        UBaseType_t stackHighWaterMark = uxTaskGetStackHighWaterMark(webSocketTaskHandle);
+        status += "- Task stack remaining: " + String(stackHighWaterMark) + " bytes\n";
+    }
+    
+    return status;
+}
+
+
 
