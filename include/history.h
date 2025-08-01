@@ -7,6 +7,7 @@
 #include <config.h>
 #include <time.h>
 #include <cstring>
+#include <esp_heap_caps.h> // For PSRAM allocation
 
 // Forward declaration
 void getFormattedDateTime(char* buffer, size_t bufferSize);
@@ -181,17 +182,33 @@ public:
     }
     
     bool initialize() {
-        // Alokuj w PSRAM jeśli dostępny
-        fastHistory = (HistoryEntry<T>*)ps_malloc(FAST_SIZE * sizeof(HistoryEntry<T>));
-        slowHistory = (HistoryEntry<T>*)ps_malloc(SLOW_SIZE * sizeof(HistoryEntry<T>));
+        // Alokuj w PSRAM jeśli dostępny, inaczej fallback do heap
+        size_t fastSize = FAST_SIZE * sizeof(HistoryEntry<T>);
+        size_t slowSize = SLOW_SIZE * sizeof(HistoryEntry<T>);
         
-        if (!fastHistory || !slowHistory) {
-            // Fallback do zwykłej pamięci
-            if (fastHistory) free(fastHistory);
-            if (slowHistory) free(slowHistory);
+        if (ESP.getPsramSize() > 0) {
+            // Próbuj PSRAM
+            fastHistory = (HistoryEntry<T>*)heap_caps_malloc(fastSize, MALLOC_CAP_SPIRAM);
+            slowHistory = (HistoryEntry<T>*)heap_caps_malloc(slowSize, MALLOC_CAP_SPIRAM);
             
-            fastHistory = (HistoryEntry<T>*)malloc(FAST_SIZE * sizeof(HistoryEntry<T>));
-            slowHistory = (HistoryEntry<T>*)malloc(SLOW_SIZE * sizeof(HistoryEntry<T>));
+            if (fastHistory && slowHistory) {
+                Serial.println("✓ SensorHistory allocated in PSRAM (" + String(fastSize + slowSize) + " bytes)");
+            } else {
+                // Cleanup partial allocation
+                if (fastHistory) heap_caps_free(fastHistory);
+                if (slowHistory) heap_caps_free(slowHistory);
+                fastHistory = nullptr;
+                slowHistory = nullptr;
+            }
+        }
+        
+        // Fallback to heap if PSRAM failed or unavailable
+        if (!fastHistory || !slowHistory) {
+            fastHistory = (HistoryEntry<T>*)malloc(fastSize);
+            slowHistory = (HistoryEntry<T>*)malloc(slowSize);
+            if (fastHistory && slowHistory) {
+                Serial.println("⚠ SensorHistory allocated in heap (" + String(fastSize + slowSize) + " bytes)");
+            }
         }
         
         initialized = (fastHistory != nullptr && slowHistory != nullptr);
@@ -324,9 +341,9 @@ void printHistoryMemoryUsage();
 void printHistoryStatus();
 void checkHistoryMemoryType();
 
-// Funkcje API do pobierania danych historycznych
+// Funkcje API do pobierania danych historycznych z pakietowaniem
 size_t getHistoricalData(const String& sensor, const String& timeRange, 
                         String& jsonResponse, unsigned long fromTime = 0, unsigned long toTime = 0,
-                        const String& sampleType = "fast");
+                        const String& sampleType = "fast", int packetIndex = 0, int packetSize = 20);
 
 #endif // HISTORY_H 

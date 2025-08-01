@@ -74,6 +74,17 @@ Adafruit_INA219 ina219(INA219_DEFAULT_ADDR);
 // SCD41 sensor instance using Sensirion library
 SensirionI2cScd4x scd41;
 
+// Auto-retry timers for failed sensors (2 minutes = 120000ms)
+#define SENSOR_RETRY_INTERVAL_MS 120000
+static unsigned long lastSHT30RetryTime = 0;
+static unsigned long lastBME280RetryTime = 0;
+static unsigned long lastSCD41RetryTime = 0;
+static unsigned long lastSHT40RetryTime = 0;
+static unsigned long lastSPS30RetryTime = 0;
+static unsigned long lastMCP3424RetryTime = 0;
+static unsigned long lastADS1110RetryTime = 0;
+static unsigned long lastINA219RetryTime = 0;
+
 void initializeI2C() {
     Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
     // Set pull-up resistors
@@ -151,16 +162,56 @@ void initializeI2C() {
             initializeDefaultMCP3424Mapping();
         }
         
-        // Scan and map devices using the new system
-        scanAndMapMCP3424Devices();
+        // Scan and map devices using the new system with retry mechanism
+        safePrintln("=== Starting MCP3424 scan with retry mechanism ===");
+        bool scanSuccess = false;
+        for (int attempt = 1; attempt <= 5; attempt++) {
+            safePrintln("MCP3424 scan attempt " + String(attempt) + "/5");
+            scanAndMapMCP3424Devices();
+            
+            // Count detected devices from ALL 8 devices (not just deviceCount)
+            uint8_t detectedCount = 0;
+            for (uint8_t i = 0; i < 8; i++) {
+                if (mcp3424Config.devices[i].autoDetected && mcp3424Config.devices[i].enabled) {
+                    safePrint("Count: Device ");
+                    safePrint(String(i));
+                    safePrint(" detected & enabled -> ");
+                    safePrintln(mcp3424Config.devices[i].gasType);
+                    detectedCount++;
+                }
+            }
+            
+            safePrintln("Detected " + String(detectedCount) + " MCP3424 devices");
+            if (detectedCount > 0) {
+                scanSuccess = true;
+                safePrintln("MCP3424 scan successful on attempt " + String(attempt));
+                break;
+            }
+            
+            if (attempt < 5) {
+                safePrintln("No devices found, waiting 500ms before retry...");
+                delay(500);
+            }
+        }
+        
+        if (!scanSuccess) {
+            safePrintln("WARNING: No MCP3424 devices found after 5 attempts");
+        }
         
         // Initialize MCP3424 devices based on detected addresses
         mcp3424Data.deviceCount = 0;
         
-        for (uint8_t i = 0; i < mcp3424Config.deviceCount; i++) {
+        for (uint8_t i = 0; i < 8; i++) {
             if (mcp3424Config.devices[i].autoDetected && mcp3424Config.devices[i].enabled) {
                 uint8_t addr = mcp3424Config.devices[i].i2cAddress;
                 uint8_t deviceIndex = mcp3424Config.devices[i].deviceIndex;
+                
+                safePrint("Init: Device ");
+                safePrint(String(i));
+                safePrint(" detected & enabled -> ");
+                safePrint(mcp3424Config.devices[i].gasType);
+                safePrint(" @ 0x");
+                safePrintln(String(addr, HEX));
                 
                 if (mcp3424Data.deviceCount < MAX_MCP3424_DEVICES) {
                     safePrint("Initializing MCP3424 device ");
@@ -183,6 +234,15 @@ void initializeI2C() {
                     mcp3424Data.deviceCount++;
                 }
             }
+        }
+        
+        safePrintln("Final mcp3424Data.deviceCount: " + String(mcp3424Data.deviceCount));
+        
+        // Save MCP3424 config after successful scan to preserve autoDetected status
+        if (saveMCP3424Config(mcp3424Config)) {
+            safePrintln("MCP3424 config saved with detection status");
+        } else {
+            safePrintln("WARNING: Failed to save MCP3424 config");
         }
         
         if (mcp3424Data.deviceCount > 0) {
@@ -270,11 +330,179 @@ bool initializeI2CSensor(I2CSensorType sensorType) {
     return (result == 0);
 }
 
+// Function to retry initialization of failed I2C sensors
+void retryFailedI2CSensors() {
+    unsigned long currentTime = millis();
+    
+    // Check and retry SHT30 if failed and 2 minutes passed
+    if (config.enableSHT30 && !sht30SensorStatus && 
+        (currentTime - lastSHT30RetryTime >= SENSOR_RETRY_INTERVAL_MS)) {
+        safePrintln("Retrying SHT30 initialization...");
+        if (initializeI2CSensor(SENSOR_SHT30)) {
+            sht30SensorStatus = true;
+            i2cSensorData.type = SENSOR_SHT30;
+            safePrintln("SHT30 retry successful!");
+        } else {
+            safePrintln("SHT30 retry failed");
+        }
+        lastSHT30RetryTime = currentTime;
+    }
+    
+    // Check and retry BME280 if failed and 2 minutes passed
+    if (config.enableBME280 && !bme280SensorStatus && 
+        (currentTime - lastBME280RetryTime >= SENSOR_RETRY_INTERVAL_MS)) {
+        safePrintln("Retrying BME280 initialization...");
+        if (initializeI2CSensor(SENSOR_BME280)) {
+            bme280SensorStatus = true;
+            if (!sht30SensorStatus) {
+                i2cSensorData.type = SENSOR_BME280;
+            }
+            safePrintln("BME280 retry successful!");
+        } else {
+            safePrintln("BME280 retry failed");
+        }
+        lastBME280RetryTime = currentTime;
+    }
+    
+    // Check and retry SCD41 if failed and 2 minutes passed
+    if (config.enableSCD41 && !scd41SensorStatus && 
+        (currentTime - lastSCD41RetryTime >= SENSOR_RETRY_INTERVAL_MS)) {
+        safePrintln("Retrying SCD41 initialization...");
+        if (initializeI2CSensor(SENSOR_SCD41) && initializeSCD41()) {
+            scd41SensorStatus = true;
+            if (!sht30SensorStatus && !bme280SensorStatus) {
+                i2cSensorData.type = SENSOR_SCD41;
+            }
+            safePrintln("SCD41 retry successful!");
+        } else {
+            safePrintln("SCD41 retry failed");
+        }
+        lastSCD41RetryTime = currentTime;
+    }
+    
+    // Check and retry SHT40 if failed and 2 minutes passed
+    if (config.enableSHT40 && !sht40SensorStatus && 
+        (currentTime - lastSHT40RetryTime >= SENSOR_RETRY_INTERVAL_MS)) {
+        safePrintln("Retrying SHT40 initialization...");
+        if (initializeI2CSensor(SENSOR_SHT40) && initializeSHT40()) {
+            sht40SensorStatus = true;
+            safePrintln("SHT40 retry successful!");
+        } else {
+            safePrintln("SHT40 retry failed");
+        }
+        lastSHT40RetryTime = currentTime;
+    }
+    
+    // Check and retry SPS30 if failed and 2 minutes passed
+    if (config.enableSPS30 && !sps30SensorStatus && 
+        (currentTime - lastSPS30RetryTime >= SENSOR_RETRY_INTERVAL_MS)) {
+        safePrintln("Retrying SPS30 initialization...");
+        if (initializeI2CSensor(SENSOR_SPS30) && initializeSPS30()) {
+            sps30SensorStatus = true;
+            safePrintln("SPS30 retry successful!");
+        } else {
+            safePrintln("SPS30 retry failed");
+        }
+        lastSPS30RetryTime = currentTime;
+    }
+    
+    // Check and retry MCP3424 if failed and 2 minutes passed
+    if (config.enableMCP3424 && !mcp3424SensorStatus && 
+        (currentTime - lastMCP3424RetryTime >= SENSOR_RETRY_INTERVAL_MS)) {
+        safePrintln("Retrying MCP3424 initialization...");
+        
+        // Reload MCP3424 config and scan for devices
+        extern MCP3424Config mcp3424Config;
+        if (!loadMCP3424Config(mcp3424Config) || !mcp3424Config.configValid) {
+            safePrintln("Loading default MCP3424 mapping for retry...");
+            initializeDefaultMCP3424Mapping();
+        }
+        
+        scanAndMapMCP3424Devices();
+        
+        // Reinitialize devices based on scan results
+        mcp3424Data.deviceCount = 0;
+        for (uint8_t i = 0; i < 8; i++) {
+            if (mcp3424Config.devices[i].autoDetected && mcp3424Config.devices[i].enabled) {
+                uint8_t addr = mcp3424Config.devices[i].i2cAddress;
+                if (mcp3424Data.deviceCount < MAX_MCP3424_DEVICES) {
+                    mcp3424_devices[mcp3424Data.deviceCount] = new MCP342x(addr);
+                    mcp3424Data.addresses[mcp3424Data.deviceCount] = addr;
+                    mcp3424Data.valid[mcp3424Data.deviceCount] = false;
+                    mcp3424Data.deviceCount++;
+                }
+            }
+        }
+        
+        safePrintln("Retry final mcp3424Data.deviceCount: " + String(mcp3424Data.deviceCount));
+        
+        // Save MCP3424 config after retry scan to preserve autoDetected status
+        if (saveMCP3424Config(mcp3424Config)) {
+            safePrintln("MCP3424 config saved after retry");
+        } else {
+            safePrintln("WARNING: Failed to save MCP3424 config after retry");
+        }
+        
+        if (mcp3424Data.deviceCount > 0) {
+            mcp3424SensorStatus = true;
+            safePrintln("MCP3424 retry successful!");
+        } else {
+            safePrintln("MCP3424 retry failed - no devices found");
+        }
+        lastMCP3424RetryTime = currentTime;
+    }
+    
+    // Check and retry ADS1110 if failed and 2 minutes passed
+    if (config.enableADS1110 && !ads1110SensorStatus && 
+        (currentTime - lastADS1110RetryTime >= SENSOR_RETRY_INTERVAL_MS)) {
+        safePrintln("Retrying ADS1110 initialization...");
+        if (initializeI2CSensor(SENSOR_ADS1110)) {
+            ads1110SensorStatus = true;
+            ads1110Data.dataRate = 15;
+            ads1110Data.gain = 1;
+            safePrintln("ADS1110 retry successful!");
+        } else {
+            safePrintln("ADS1110 retry failed");
+        }
+        lastADS1110RetryTime = currentTime;
+    }
+    
+    // Check and retry INA219 if failed and 2 minutes passed
+    if (config.enableINA219 && !ina219SensorStatus && 
+        (currentTime - lastINA219RetryTime >= SENSOR_RETRY_INTERVAL_MS)) {
+        safePrintln("Retrying INA219 initialization...");
+        if (initializeI2CSensor(SENSOR_INA219)) {
+            ina219SensorStatus = true;
+            ina219.begin();
+            ina219.setCalibration_32V_2A();
+            safePrintln("INA219 retry successful!");
+        } else {
+            safePrintln("INA219 retry failed");
+        }
+        lastINA219RetryTime = currentTime;
+    }
+    
+    // Update overall I2C status
+    i2cSensorStatus = sht30SensorStatus || bme280SensorStatus || scd41SensorStatus ||
+                     sht40SensorStatus || sps30SensorStatus || mcp3424SensorStatus || 
+                     ads1110SensorStatus || ina219SensorStatus;
+}
+
 void readI2CSensors() {
-    if (!config.enableI2CSensors || !i2cSensorStatus) return;
+    if (!config.enableI2CSensors) return;
     
     static unsigned long lastReadTime = 0;
+    static unsigned long lastRetryTime = 0;
     unsigned long currentTime = millis();
+    
+    // Try to retry failed sensors every 10 seconds (check if 2 minutes passed since last retry)
+    if (currentTime - lastRetryTime >= 10000) { // Check every 10 seconds
+        retryFailedI2CSensors();
+        lastRetryTime = currentTime;
+    }
+    
+    // Early exit if no sensors are working at all
+    if (!i2cSensorStatus) return;
 
     if (config.enableMCP3424) {
        // Always call readMCP3424 to trigger conversions
@@ -410,7 +638,7 @@ void readBatteryVoltage() {
     if (currentTime - lastReadTimeBat >= 10000) { // Read every 10 seconds
         lastReadTimeBat = currentTime;
         
-        safePrintln("=== Battery Voltage Reading ===");
+       // safePrintln("=== Battery Voltage Reading ===");
         
         if (ads1110SensorStatus) {
             ads1110SensorStatus = readADS1110(ads1110Data);
@@ -445,7 +673,7 @@ void readBatteryVoltage() {
         
         
         
-        safePrintln("=== End Battery Reading ===");
+       // safePrintln("=== End Battery Reading ===");
     }
 }
 

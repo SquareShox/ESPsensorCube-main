@@ -325,10 +325,35 @@ const char *mcp3424_config_html = R"rawliteral(
         <li><strong>Channel 1:</strong> Auxiliary Electrode (AUX)</li>
         <li><strong>Channel 2:</strong> Temperature (TEMP) / TGS C3</li>
         <li><strong>Channel 3:</strong> Supply Voltage (VCC) / TGS C4</li>
-        <li><strong>Adresy I2C:</strong> 0x68-0x6F (domyślnie: Device 0=0x68, Device 1=0x6A, itd.)</li>
+        <li><strong>Adresy I2C:</strong> 0x68-0x6F (domyślnie: Device 0=0x68, Device 1=0x6A, Device 7=0x69)</li>
         <li><strong>Walidacja:</strong> Każdy adres I2C i typ gazu musi być unikalny</li>
         <li><strong>Status adresów:</strong> Zielone = znaleziono, Pomarańczowe = nie znaleziono, Czerwone = błąd</li>
       </ul>
+    </div>
+
+    <!-- Current Status Section -->
+    <div class="config-section">
+      <div class="section-title">
+        <div class="section-icon">📊</div>
+        Status Aktualnych Urządzeń
+      </div>
+      
+      <div id="status-info" style="background: #f8f9fa; padding: 15px; border-radius: 10px; margin-bottom: 20px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+          <div>
+            <strong>Przypisane urządzenia:</strong>
+            <div id="assigned-devices" style="color: #007bff;">Ładowanie...</div>
+          </div>
+          <div>
+            <strong>Wykryte urządzenia:</strong>
+            <div id="detected-devices" style="color: #28a745;">Nieznane (wykonaj skanowanie)</div>
+          </div>
+          <div>
+            <strong>Status konfiguracji:</strong>
+            <div id="config-status" style="color: #6c757d;">Ładowanie...</div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Device Configuration Section -->
@@ -387,7 +412,13 @@ function connectWebSocket() {
       
       if (data.cmd === "mcp3424Config") {
         console.log('MCP3424 config received:', data.config);
-        updateMCP3424ConfigDisplay(data.config);
+        if (data.success !== false) {
+          updateMCP3424ConfigDisplay(data.config);
+        } else {
+          console.error('MCP3424 config error:', data.error);
+          showAlert('Błąd ładowania konfiguracji MCP3424: ' + (data.error || 'Nieznany błąd'), 'error');
+          updateMCP3424ConfigDisplay({ devices: [] });
+        }
       } else if (data.cmd === "i2cScanResult") {
         console.log('I2C scan result received:', data);
         if (data.success) {
@@ -423,6 +454,10 @@ function connectWebSocket() {
 
 
 function loadMCP3424Config() {
+  // Immediately show loading status
+  document.getElementById('assigned-devices').innerHTML = '<span style="color: #6c757d;">Ładowanie...</span>';
+  document.getElementById('config-status').innerHTML = '<span style="color: #6c757d;">Ładowanie...</span>';
+  
   if (ws && ws.readyState === WebSocket.OPEN) {
     console.log('Requesting MCP3424 config...');
     ws.send(JSON.stringify({cmd: "getMCP3424Config"}));
@@ -444,6 +479,8 @@ function loadMCP3424Config() {
 
 function updateMCP3424ConfigDisplay(config) {
   console.log('Updating MCP3424 display with config:', config);
+  console.log('Config devices:', config ? config.devices : 'no config');
+  
   currentConfig = config || { devices: [] };
   const grid = document.getElementById('device-grid');
   grid.innerHTML = '';
@@ -451,15 +488,43 @@ function updateMCP3424ConfigDisplay(config) {
   // Create device cards for all 8 possible devices
   for (let i = 0; i < 8; i++) {
     const device = config && config.devices ? config.devices.find(d => d.deviceIndex === i) : null;
+    console.log(`Device ${i}:`, device ? device : 'not found in config');
     const card = createDeviceCard(i, device);
     grid.appendChild(card);
   }
   
-  // Show success message if we have data
+  // Update status display
+  updateStatusDisplay(config);
+  
+  // Show detailed status message
   if (config && config.devices && config.devices.length > 0) {
-    showAlert(`Załadowano ${config.devices.length} urządzeń`, 'success');
+    const enabledCount = config.devices.filter(d => d.enabled).length;
+    const autoDetectedCount = config.devices.filter(d => d.autoDetected).length;
+    showAlert(`Załadowano ${config.devices.length} urządzeń (aktywne: ${enabledCount}, auto-wykryte: ${autoDetectedCount})`, 'success');
   } else {
     showAlert('Brak danych konfiguracyjnych - załadowano domyślną konfigurację', 'info');
+  }
+}
+
+function updateStatusDisplay(config) {
+  const assignedElement = document.getElementById('assigned-devices');
+  const configStatusElement = document.getElementById('config-status');
+  
+  if (config && config.devices && config.devices.length > 0) {
+    const enabledDevices = config.devices.filter(d => d.enabled);
+    const assignedTypes = enabledDevices.map(d => `${d.gasType} (0x${d.i2cAddress.toString(16).toUpperCase()})`);
+    
+    assignedElement.innerHTML = enabledDevices.length > 0 ? 
+      assignedTypes.join('<br>') : 
+      '<span style="color: #dc3545;">Brak przypisanych urządzeń</span>';
+      
+    const validConfig = config.configValid !== false;
+    configStatusElement.innerHTML = validConfig ? 
+      '<span style="color: #28a745;">✓ Konfiguracja poprawna</span>' :
+      '<span style="color: #dc3545;">⚠ Błędy w konfiguracji</span>';
+  } else {
+    assignedElement.innerHTML = '<span style="color: #6c757d;">Brak danych</span>';
+    configStatusElement.innerHTML = '<span style="color: #6c757d;">Nieznany</span>';
   }
 }
 
@@ -478,7 +543,7 @@ function createDeviceCard(deviceIndex, deviceData) {
   ];
   
   // Default I2C addresses for MCP3424 (0x68-0x6F)
-  const defaultAddresses = [0x68, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x70];
+  const defaultAddresses = [0x68, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x69];
   const currentAddress = deviceData ? deviceData.i2cAddress : defaultAddresses[deviceIndex];
   
   card.innerHTML = `
@@ -531,20 +596,27 @@ function createDeviceCard(deviceIndex, deviceData) {
 }
 
 function updateDeviceConfig(deviceIndex) {
+  console.log('=== updateDeviceConfig() called for device', deviceIndex, '===');
+  
   const gasType = document.getElementById(`gas-type-${deviceIndex}`).value;
   const description = document.getElementById(`description-${deviceIndex}`).value;
   const enabled = document.getElementById(`enabled-${deviceIndex}`).checked;
+  
+  console.log('Form values:', {gasType, description, enabled});
   
   // Parse I2C address
   let i2cAddress = 0x68; // default
   const addressInput = document.getElementById(`i2c-address-${deviceIndex}`);
   const addressValue = addressInput.value.trim();
   
+  console.log('Address input value:', addressValue);
+  
   if (addressValue) {
     // Validate I2C address format
     const addressMatch = addressValue.match(/^0x([0-9A-Fa-f]{2})$/);
     if (addressMatch) {
       i2cAddress = parseInt(addressMatch[1], 16);
+      console.log('Parsed I2C address:', i2cAddress);
       // Validate range (0x68-0x6F typical for MCP3424)
       if (i2cAddress < 0x68 || i2cAddress > 0x6F) {
         showAlert(`Adres I2C 0x${i2cAddress.toString(16).toUpperCase()} jest poza typowym zakresem MCP3424 (0x68-0x6F)`, 'warning');
@@ -562,23 +634,30 @@ function updateDeviceConfig(deviceIndex) {
     }
   } else {
     // Use default address based on device index
-    const defaultAddresses = [0x68, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x70];
+    const defaultAddresses = [0x68, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x69];
     i2cAddress = defaultAddresses[deviceIndex];
     addressInput.value = `0x${i2cAddress.toString(16).toUpperCase()}`;
     addressInput.classList.remove('found', 'not-found', 'invalid');
+    console.log('Using default address:', i2cAddress);
   }
+  
+  console.log('currentConfig before update:', currentConfig);
   
   // Update current config
   let device = currentConfig.devices.find(d => d.deviceIndex === deviceIndex);
   if (!device) {
     device = { deviceIndex: deviceIndex };
     currentConfig.devices.push(device);
+    console.log('Created new device object for index', deviceIndex);
   }
   
   device.i2cAddress = i2cAddress;
   device.gasType = gasType;
   device.description = description;
   device.enabled = enabled;
+  
+  console.log('Updated device:', device);
+  console.log('currentConfig after update:', currentConfig);
   
   // Update card appearance
   const card = document.querySelector(`#gas-type-${deviceIndex}`).closest('.device-card');
@@ -590,10 +669,24 @@ function updateDeviceConfig(deviceIndex) {
 }
 
 function saveMCP3424Config() {
-  // Filter out empty devices
-  const devices = currentConfig.devices.filter(d => d.gasType && d.gasType.trim() !== '');
+  console.log('=== saveMCP3424Config() called ===');
+  
+  // Filter out empty devices and only send enabled ones to reduce JSON size
+  const devices = currentConfig.devices.filter(d => d.gasType && d.gasType.trim() !== '' && d.enabled);
+  console.log('Filtered enabled devices:', devices.length, devices);
+  
+  // Check JSON message size
+  const testMessage = JSON.stringify({cmd: "setMCP3424Config", devices: devices});
+  console.log('JSON message size:', testMessage.length, 'bytes');
+  
+  // Warning if message is large
+  if (testMessage.length > 1500) {
+    console.warn('Large JSON message detected:', testMessage.length, 'bytes');
+    showAlert(`Duża wiadomość JSON (${testMessage.length} bytes). Może wystąpić problem z przesyłaniem.`, 'warning');
+  }
   
   if (devices.length === 0) {
+    console.log('No devices selected, showing error');
     showAlert('Wybierz przynajmniej jedno urządzenie!', 'error');
     return;
   }
@@ -601,7 +694,9 @@ function saveMCP3424Config() {
   // Check for duplicate gas types
   const gasTypes = devices.map(d => d.gasType);
   const uniqueGasTypes = [...new Set(gasTypes)];
+  console.log('Gas types validation:', gasTypes, 'unique:', uniqueGasTypes);
   if (gasTypes.length !== uniqueGasTypes.length) {
+    console.log('Duplicate gas types found');
     showAlert('Każdy typ gazu może być przypisany tylko do jednego urządzenia!', 'error');
     return;
   }
@@ -609,7 +704,9 @@ function saveMCP3424Config() {
   // Check for duplicate I2C addresses
   const addresses = devices.map(d => d.i2cAddress);
   const uniqueAddresses = [...new Set(addresses)];
+  console.log('I2C addresses validation:', addresses, 'unique:', uniqueAddresses);
   if (addresses.length !== uniqueAddresses.length) {
+    console.log('Duplicate I2C addresses found');
     showAlert('Każdy adres I2C może być przypisany tylko do jednego urządzenia!', 'error');
     return;
   }
@@ -617,18 +714,25 @@ function saveMCP3424Config() {
   // Validate I2C addresses are in valid range
   for (const device of devices) {
     if (device.i2cAddress < 0x68 || device.i2cAddress > 0x6F) {
+      console.log('Invalid I2C address:', device.i2cAddress, 'for device:', device.deviceIndex);
       showAlert(`Adres I2C 0x${device.i2cAddress.toString(16).toUpperCase()} dla urządzenia ${device.deviceIndex} jest poza typowym zakresem MCP3424 (0x68-0x6F)`, 'error');
       return;
     }
   }
   
+  console.log('All validation passed, preparing to send WebSocket command');
+  console.log('WebSocket state:', ws ? ws.readyState : 'no ws', 'OPEN =', WebSocket.OPEN);
+  
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
+    const command = {
       cmd: "setMCP3424Config",
       devices: devices
-    }));
+    };
+    console.log('Sending WebSocket command:', command);
+    ws.send(JSON.stringify(command));
     showAlert('Konfiguracja MCP3424 wysłana...', 'info');
   } else {
+    console.log('WebSocket not available, state:', ws ? ws.readyState : 'no ws');
     showAlert('Brak połączenia WebSocket!', 'error');
   }
 }
@@ -654,6 +758,15 @@ function scanI2CAddresses() {
 }
 
 function updateWithFoundAddresses(foundAddresses) {
+  // Update detected devices status
+  const detectedElement = document.getElementById('detected-devices');
+  if (foundAddresses && foundAddresses.length > 0) {
+    const detectedList = foundAddresses.map(addr => `0x${addr.toString(16).toUpperCase()}`);
+    detectedElement.innerHTML = detectedList.join(', ');
+  } else {
+    detectedElement.innerHTML = '<span style="color: #dc3545;">Brak wykrytych urządzeń</span>';
+  }
+  
   // Update device cards with found addresses
   for (let i = 0; i < 8; i++) {
     const addressInput = document.getElementById(`i2c-address-${i}`);
@@ -717,7 +830,7 @@ function autoAssignAddresses() {
     return;
   }
   
-  const defaultAddresses = [0x68, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x70];
+  const defaultAddresses = [0x68, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x69];
   let assignedCount = 0;
 
   for (let i = 0; i < 8 && assignedCount < lastScanResults.length; i++) {

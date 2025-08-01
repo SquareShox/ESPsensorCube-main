@@ -9,8 +9,8 @@
 #define WIFI_TIMEOUT 20000
 #define CONNECTION_TIMEOUT (20 * 60 * 1000) // 20 minutes
 
-#define FIRMWARE_VERSION "1.0.0"
-#define DEVICE_ID "DAC-001"
+#define FIRMWARE_VERSION "1.0.2"
+#define DEVICE_ID "SCUBE-001"
 
 // Pin Definitions
 #define WS2812_PIN 21
@@ -91,6 +91,7 @@ struct FeatureConfig {
     bool lowPowerMode = false;    // Low power mode - disable LED and other power-consuming features
     bool enablePushbullet = true; // Enable Pushbullet notifications
     char pushbulletToken[64] = "o.vLzQdigI51uIXuohHUyxBfocSk5fYCPP"; // Pushbullet access token
+    char DeviceID[32] = "SCUBE-001"; // Device identifier
 };
 
 // Network Configuration Structure

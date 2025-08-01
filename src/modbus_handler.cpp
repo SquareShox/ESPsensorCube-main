@@ -19,12 +19,16 @@ unsigned int modbusRegistersIPS[REG_COUNT_IPS];
 unsigned long lastModbusActivity = 0;
 bool hasHadModbusActivity = false;
 
+// Network flag for display
+extern bool turnOnNetwork;
+
 // Moving average control (enum defined in header)
 DataType currentDataType = DATA_FAST_AVG;
 
 // External sensor data and status
 extern HCHOData hchoData;
 extern bool hchoSensorStatus;
+extern BatteryData batteryData;
 
 // External time functions
 extern bool isTimeSet();
@@ -99,18 +103,18 @@ void initializeModbus() {
     }
     
     // Print register layout
-    safePrintln("Register Layout:");
-    safePrint("Solar:    0-"); safePrintln(String(REG_COUNT_SOLAR-1));
-    safePrint("OPCN3:    "); safePrint(String(REG_COUNT_SOLAR)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3-1));
-    safePrint("I2C:      "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C-1));
-    safePrint("IPS:      "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS-1));
-    safePrint("MCP3424:  "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424-1));
-    safePrint("ADS1110:  "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110-1));
-    safePrint("INA219:   "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219-1));
-    safePrint("SPS30:    "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30-1));
-    safePrint("SHT40:    "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30 + REG_COUNT_SHT40-1));
-    safePrint("HCHO:     "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30 + REG_COUNT_SHT40)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30 + REG_COUNT_SHT40 + REG_COUNT_HCHO-1));
-    safePrint("Calibration: "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30 + REG_COUNT_SHT40 + REG_COUNT_HCHO)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30 + REG_COUNT_SHT40 + REG_COUNT_HCHO + REG_COUNT_CALIBRATION-1));
+    // safePrintln("Register Layout:");
+    // safePrint("Solar:    0-"); safePrintln(String(REG_COUNT_SOLAR-1));
+    // safePrint("OPCN3:    "); safePrint(String(REG_COUNT_SOLAR)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3-1));
+    // safePrint("I2C:      "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C-1));
+    // safePrint("IPS:      "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS-1));
+    // safePrint("MCP3424:  "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424-1));
+    // safePrint("ADS1110:  "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110-1));
+    // safePrint("INA219:   "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219-1));
+    // safePrint("SPS30:    "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30-1));
+    // safePrint("SHT40:    "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30 + REG_COUNT_SHT40-1));
+    // safePrint("HCHO:     "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30 + REG_COUNT_SHT40)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30 + REG_COUNT_SHT40 + REG_COUNT_HCHO-1));
+    // safePrint("Calibration: "); safePrint(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30 + REG_COUNT_SHT40 + REG_COUNT_HCHO)); safePrint("-"); safePrintln(String(REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30 + REG_COUNT_SHT40 + REG_COUNT_HCHO + REG_COUNT_CALIBRATION-1));
 
     
     // Initialize activity tracking - give 15 minutes grace period at startup
@@ -204,16 +208,16 @@ void updateModbusOPCN3Registers() {
         }
         
         // Debug: Print bin counts every 10 seconds
-        static unsigned long lastBinPrint = 0;
-        if (millis() - lastBinPrint > 10000) {
-            lastBinPrint = millis();
-            safePrint("OPCN3 Bin Counts: ");
-            for (int i = 0; i < 24; i++) {
-                safePrint(String(opcn3Data.binCounts[i]));
-                if (i < 23) safePrint(",");
-            }
-            safePrintln("");
-        }
+        // static unsigned long lastBinPrint = 0;
+        // if (millis() - lastBinPrint > 10000) {
+        //     lastBinPrint = millis();
+        //     safePrint("OPCN3 Bin Counts: ");
+        //     for (int i = 0; i < 24; i++) {
+        //         safePrint(String(opcn3Data.binCounts[i]));
+        //         if (i < 23) safePrint(",");
+        //     }
+        //     safePrintln("");
+        // }
         
         // Time to cross values
         modbusRegistersOPCN3[30] = opcn3Data.bin1TimeToCross;
@@ -287,12 +291,16 @@ void updateModbusI2CRegisters() {
                 mb.setHreg(baseReg + 10, (uint16_t)(day * 100 + month)); // Date as DDMM
                 mb.setHreg(baseReg + 11, (uint16_t)year); // Year
                 mb.setHreg(baseReg + 12, (uint16_t)getEpochTime()); // Epoch time (lower 16 bits)
+                //network on flag 
+                mb.setHreg(baseReg + 13, turnOnNetwork ? 1 : 0);
             } else {
                 // Fallback if getLocalTime fails
                 mb.setHreg(baseReg + 9, 1200); // 12:00
                 mb.setHreg(baseReg + 10, 1801);  // 18/01 (dzisiejszy dzien)
                 mb.setHreg(baseReg + 11, 2024); // 2024
                 mb.setHreg(baseReg + 12, 0); // No epoch time
+                mb.setHreg(baseReg + 13, turnOnNetwork ? 1 : 0); // No network on flag
+                //write netowrk data to modbus like netw
             }
         } else {
             // Default time and date if time not synchronized
@@ -300,10 +308,11 @@ void updateModbusI2CRegisters() {
             mb.setHreg(baseReg + 10, 1801);  // 18/01 (dzisiejszy dzien)
             mb.setHreg(baseReg + 11, 2024); // 2024
             mb.setHreg(baseReg + 12, 0); // No epoch time
+            mb.setHreg(baseReg + 13, turnOnNetwork ? 1 : 0); // No network on flag
         }
     } else {
         // Clear data registers if invalid
-        for (int i = 4; i < 13; i++) {
+        for (int i = 4; i < 14; i++) {
             mb.setHreg(baseReg + i, 0);
         }
     }
@@ -443,7 +452,7 @@ void updateModbusINA219Registers() {
             dataToUse = getINA219SlowAverage();
             break;
     }
-    
+   
     // Use registers after ADS1110 data for INA219 data
     int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110;
     
@@ -466,9 +475,16 @@ void updateModbusINA219Registers() {
         // Power (mW precision)
         mb.setHreg(baseReg + 7, (uint16_t)(dataToUse.power));
         mb.setHreg(baseReg + 8, (uint16_t)((millis() - dataToUse.lastUpdate) / 1000)); // Age in seconds
+        //use battery data
+     
+        mb.setHreg(baseReg + 9, batteryData.isBatteryPowered ? 1 : 0);
+        mb.setHreg(baseReg + 10, batteryData.lowBattery ? 1 : 0);
+        mb.setHreg(baseReg + 11, batteryData.criticalBattery ? 1 : 0);
+    
+   
     } else {
         // Clear data registers if invalid
-        for (int i = 4; i < 9; i++) {
+        for (int i = 4; i < 12; i++) {
             mb.setHreg(baseReg + i, 0);
         }
     }
@@ -498,14 +514,14 @@ void updateModbusSPS30Registers() {
     }
     
     // Debug output every 30 seconds
-    static unsigned long lastSPS30ModbusDebug = 0;
-    if (millis() - lastSPS30ModbusDebug > 30000) {
-        lastSPS30ModbusDebug = millis();
-        safePrint("Updating SPS30 Modbus registers - Status: ");
-        safePrint(sps30SensorStatus ? "OK" : "ERROR");
-        safePrint(", Valid: ");
-        safePrintln(dataToUse.valid ? "true" : "false");
-    }
+    // static unsigned long lastSPS30ModbusDebug = 0;
+    // if (millis() - lastSPS30ModbusDebug > 30000) {
+    //     lastSPS30ModbusDebug = millis();
+    //     safePrint("Updating SPS30 Modbus registers - Status: ");
+    //     safePrint(sps30SensorStatus ? "OK" : "ERROR");
+    //     safePrint(", Valid: ");
+    //     safePrintln(dataToUse.valid ? "true" : "false");
+    // }
     
     // Use registers after INA219 data for SPS30 data
     int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219;
@@ -690,23 +706,23 @@ void updateModbusSHT40Registers() {
     
     // Debug output every 30 seconds
     static unsigned long lastSHT40ModbusDebug = 0;
-    if (millis() - lastSHT40ModbusDebug > 30000) {
-        lastSHT40ModbusDebug = millis();
-        safePrint("Updating SHT40 Modbus registers - Status: ");
-        safePrint(sht40SensorStatus ? "OK" : "ERROR");
-        safePrint(", Valid: ");
-        safePrint(dataToUse.valid ? "true" : "false");
-        if (dataToUse.valid) {
-            safePrint(", Temp: ");
-            safePrint(String(dataToUse.temperature, 2));
-            safePrint("°C, Hum: ");
-            safePrint(String(dataToUse.humidity, 2));
-            safePrint("%, Press: ");
-            safePrint(String(dataToUse.pressure, 2));
-            safePrint(" kPa");
-        }
-        safePrintln("");
-    }
+    // if (millis() - lastSHT40ModbusDebug > 30000) {
+    //     lastSHT40ModbusDebug = millis();
+    //     safePrint("Updating SHT40 Modbus registers - Status: ");
+    //     safePrint(sht40SensorStatus ? "OK" : "ERROR");
+    //     safePrint(", Valid: ");
+    //     safePrint(dataToUse.valid ? "true" : "false");
+    //     if (dataToUse.valid) {
+    //         safePrint(", Temp: ");
+    //         safePrint(String(dataToUse.temperature, 2));
+    //         safePrint("°C, Hum: ");
+    //         safePrint(String(dataToUse.humidity, 2));
+    //         safePrint("%, Press: ");
+    //         safePrint(String(dataToUse.pressure, 2));
+    //         safePrint(" kPa");
+    //     }
+    //     safePrintln("");
+    // }
 }
 
 void updateModbusHCHORegisters() {
@@ -751,20 +767,20 @@ void updateModbusHCHORegisters() {
     }
     
     // Debug output every 30 seconds
-    static unsigned long lastHCHOModbusDebug = 0;
-    if (millis() - lastHCHOModbusDebug > 30000) {
-        lastHCHOModbusDebug = millis();
-        safePrint("Updating HCHO Modbus registers - Status: ");
-        safePrint(hchoSensorStatus ? "OK" : "ERROR");
-        safePrint(", Valid: ");
-        safePrint(dataToUse.valid ? "true" : "false");
-        if (dataToUse.valid) {
-            safePrint(", HCHO: ");
-            safePrint(String(dataToUse.hcho, 3));
-            safePrint(" mg/m³");
-        }
-        safePrintln("");
-    }
+    // static unsigned long lastHCHOModbusDebug = 0;
+    // if (millis() - lastHCHOModbusDebug > 30000) {
+    //     lastHCHOModbusDebug = millis();
+    //     safePrint("Updating HCHO Modbus registers - Status: ");
+    //     safePrint(hchoSensorStatus ? "OK" : "ERROR");
+    //     safePrint(", Valid: ");
+    //     safePrint(dataToUse.valid ? "true" : "false");
+    //     if (dataToUse.valid) {
+    //         safePrint(", HCHO: ");
+    //         safePrint(String(dataToUse.hcho, 3));
+    //         safePrint(" mg/m³");
+    //     }
+    //     safePrintln("");
+    // }
 }
 
 void updateModbusCalibrationRegisters() {
@@ -854,13 +870,13 @@ void processModbusTask() {
         
         if (firstActivity) {
             firstActivity = false;
-            safePrintln("First Modbus activity detected!");
+          //  safePrintln("First Modbus activity detected!");
         }
         
         // Log activity every 30 seconds
         if (millis() - lastActivityLog > 30000) {
             lastActivityLog = millis();
-            safePrintln("Modbus activity detected - updating timestamp");
+          //  safePrintln("Modbus activity detected - updating timestamp");
            // Serial2.println("Modbus activity detected - updating timestamp");
         }
     }

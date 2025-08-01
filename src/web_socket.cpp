@@ -34,7 +34,7 @@ struct WebSocketMessage {
 };
 
 #define WEBSOCKET_QUEUE_SIZE 10
-#define WEBSOCKET_STACK_SIZE 30720  // 30KB stack dla WebSocket task
+#define WEBSOCKET_STACK_SIZE 40960  // 40KB stack
 #define WEBSOCKET_PRIORITY 2
 #define WEBSOCKET_CORE 1  // Używaj core 1
 
@@ -75,6 +75,9 @@ extern HCHOData hchoData;
 extern FeatureConfig config;
 extern CalibrationConfig calibConfig;
 
+// External network flag
+extern bool turnOnNetwork;
+
 // External sensor status flags
 extern bool solarSensorStatus;
 extern bool opcn3SensorStatus;
@@ -109,6 +112,8 @@ extern CalibratedSensorData getCalibratedFastAverage();
 extern CalibratedSensorData getCalibratedSlowAverage();
 extern HCHOData getHCHOFastAverage();
 extern HCHOData getHCHOSlowAverage();
+extern FanData getFANFastAverage();
+extern FanData getFANSlowAverage();
 
 // WebSocket command handlers
 void handleGetStatus(AsyncWebSocketClient* client, DynamicJsonDocument& doc) {
@@ -340,38 +345,252 @@ void handleGetSensorData(AsyncWebSocketClient* client, JsonDocument& doc) {
     client->text(responseStr);
 }
 
+// Struktura do przechowywania informacji o automatycznym wysyłaniu pakietów
+struct AutoPacketSender {
+    AsyncWebSocketClient* client;
+    String sensorType;
+    String timeRange;
+    String sampleType;
+    unsigned long fromTime;
+    unsigned long toTime;
+    int packetSize;
+    int currentPacket;
+    int totalPackets;
+    unsigned long lastSendTime;
+};
+
+// Globalny storage dla automatycznych wysyłek (max 5 jednocześnie)
+#define MAX_AUTO_SENDERS 5
+AutoPacketSender autoSenders[MAX_AUTO_SENDERS];
+int autoSenderCount = 0;
+
+// Funkcja do automatycznego wysyłania wszystkich pakietów
+void sendHistoryPacketsAutomatically(AsyncWebSocketClient* client, const String& sensorType, 
+                                   const String& timeRange, const String& sampleType,
+                                   unsigned long fromTime, unsigned long toTime, int packetSize) {
+    safePrintln("Starting automatic packet sending for " + sensorType);
+    safePrintln("[DEBUG] Auto params: timeRange=" + timeRange + " from=" + String(fromTime) + " to=" + String(toTime) + " packetSize=" + String(packetSize));
+    
+    // Najpierw pobierz pierwszy pakiet aby sprawdzić łączną liczbę pakietów
+    String jsonResponse;
+    size_t samples = getHistoricalData(sensorType, timeRange, jsonResponse, fromTime, toTime, sampleType, 0, packetSize);
+    
+    safePrintln("[DEBUG] First packet response: " + String(samples) + " samples, " + String(jsonResponse.length()) + " bytes");
+    
+    // Parse response to get total packets info
+    DynamicJsonDocument responseDoc(12288); // Zwiększ bufor dla większych odpowiedzi
+    DeserializationError parseError = deserializeJson(responseDoc, jsonResponse);
+    
+    if (parseError) {
+        safePrintln("Auto packet sender: JSON parse error for first packet: " + String(parseError.c_str()));
+        safePrintln("JSON size: " + String(jsonResponse.length()) + " bytes");
+        safePrintln("JSON preview: " + jsonResponse.substring(0, 200));
+        return;
+    }
+    
+    // Debug: sprawdź zawartość JSON przed kopiowaniem metadanych
+    safePrintln("[DEBUG] JSON keys: hasData=" + String(responseDoc.containsKey("data")) + 
+               " hasTotalSamples=" + String(responseDoc.containsKey("totalSamples")) +
+               " hasTotalPackets=" + String(responseDoc.containsKey("totalPackets")));
+    
+    if (responseDoc.containsKey("totalSamples")) {
+        safePrintln("[DEBUG] Raw totalSamples type: " + String(responseDoc["totalSamples"].is<int>() ? "int" : "other"));
+        safePrintln("[DEBUG] Raw totalSamples value: " + String(responseDoc["totalSamples"].as<int>()));
+    }
+    
+    int totalPackets = responseDoc["totalPackets"] | 1;
+    
+    // Wyślij pierwszy pakiet
+    DynamicJsonDocument response(12288); // Zwiększ rozmiar bufora
+    response["cmd"] = "history";
+    response["sensor"] = sensorType;
+    response["timeRange"] = timeRange;
+    response["sampleType"] = sampleType;
+    response["fromTime"] = fromTime;
+    response["toTime"] = toTime;
+    response["samples"] = samples;
+    response["timestamp"] = time(nullptr);
+    response["autoMode"] = true; // Oznacz że to automatyczny tryb
+    
+    // Copy data from parsed response
+    if (responseDoc.containsKey("data")) {
+        response["data"] = responseDoc["data"];
+        response["totalSamples"] = responseDoc["totalSamples"];
+        response["totalAvailableSamples"] = responseDoc["totalAvailableSamples"];
+        response["packetIndex"] = responseDoc["packetIndex"];
+        response["packetSize"] = responseDoc["packetSize"];
+        response["totalPackets"] = responseDoc["totalPackets"];
+        response["hasMorePackets"] = responseDoc["hasMorePackets"];
+        response["success"] = responseDoc["success"];
+        if (responseDoc.containsKey("error")) {
+            response["error"] = responseDoc["error"];
+        }
+        
+        // Debug: sprawdź czy metadane są kopiowane
+        safePrintln("[DEBUG] History: totalSamples=" + String(responseDoc["totalSamples"] | 0) + 
+                   " totalPackets=" + String(responseDoc["totalPackets"] | 0));
+    } else {
+        safePrintln("[ERROR] Auto packet: No data field in parsed response");
+    }
+    
+    String responseStr;
+    serializeJson(response, responseStr);
+    client->text(responseStr);
+    
+    safePrintln("Sent packet 0/" + String(totalPackets) + " for " + sensorType);
+    safePrintln("[DEBUG] Auto mode: totalPackets=" + String(totalPackets) + " autoSenderCount=" + String(autoSenderCount));
+    
+    // Jeśli są więcej pakietów, dodaj do kolejki automatycznego wysyłania
+    if (totalPackets > 1 && autoSenderCount < MAX_AUTO_SENDERS) {
+        AutoPacketSender& sender = autoSenders[autoSenderCount];
+        sender.client = client;
+        sender.sensorType = sensorType;
+        sender.timeRange = timeRange;
+        sender.sampleType = sampleType;
+        sender.fromTime = fromTime;
+        sender.toTime = toTime;
+        sender.packetSize = packetSize;
+        sender.currentPacket = 1; // Następny pakiet do wysłania
+        sender.totalPackets = totalPackets;
+        sender.lastSendTime = millis();
+        
+        autoSenderCount++;
+        safePrintln("Added to auto sender queue. Will send " + String(totalPackets - 1) + " more packets");
+    }
+}
+
+// Funkcja do przetwarzania kolejki automatycznych wysyłek (wywoływana periodycznie)
+void processAutoPacketSenders() {
+    unsigned long currentTime = millis();
+    
+    for (int i = 0; i < autoSenderCount; i++) {
+        AutoPacketSender& sender = autoSenders[i];
+        
+        // Sprawdź czy klient nadal jest połączony
+        if (!sender.client || sender.client->status() != WS_CONNECTED) {
+            // Usuń z kolejki
+            for (int j = i; j < autoSenderCount - 1; j++) {
+                autoSenders[j] = autoSenders[j + 1];
+            }
+            autoSenderCount--;
+            i--; // Sprawdź ten sam index ponownie
+            continue;
+        }
+        
+        // Sprawdź czy czas na wysłanie kolejnego pakietu (co 100ms)
+        if (currentTime - sender.lastSendTime >= 100) {
+            if (sender.currentPacket < sender.totalPackets) {
+                // Wyślij kolejny pakiet
+                String jsonResponse;
+                size_t samples = getHistoricalData(sender.sensorType, sender.timeRange, jsonResponse, 
+                                                 sender.fromTime, sender.toTime, sender.sampleType, 
+                                                 sender.currentPacket, sender.packetSize);
+                
+                // Parse and send packet
+                DynamicJsonDocument responseDoc(12288);
+                DeserializationError parseError = deserializeJson(responseDoc, jsonResponse);
+                
+                if (!parseError && responseDoc.containsKey("data")) {
+                    DynamicJsonDocument response(12288); // Zwiększ rozmiar bufora
+                    response["cmd"] = "history";
+                    response["sensor"] = sender.sensorType;
+                    response["timeRange"] = sender.timeRange;
+                    response["sampleType"] = sender.sampleType;
+                    response["fromTime"] = sender.fromTime;
+                    response["toTime"] = sender.toTime;
+                    response["samples"] = samples;
+                    response["timestamp"] = time(nullptr);
+                    response["autoMode"] = true;
+                    
+                    // Copy data
+                    response["data"] = responseDoc["data"];
+                    response["totalSamples"] = responseDoc["totalSamples"];
+                    response["totalAvailableSamples"] = responseDoc["totalAvailableSamples"];
+                    response["packetIndex"] = responseDoc["packetIndex"];
+                    response["packetSize"] = responseDoc["packetSize"];
+                    response["totalPackets"] = responseDoc["totalPackets"];
+                    response["hasMorePackets"] = responseDoc["hasMorePackets"];
+                    response["success"] = responseDoc["success"];
+                    
+                    String responseStr;
+                    serializeJson(response, responseStr);
+                    sender.client->text(responseStr);
+                    
+                    safePrintln("Auto sent packet " + String(sender.currentPacket) + "/" + String(sender.totalPackets) + " for " + sender.sensorType + " (" + String(responseStr.length()) + " bytes)");
+                } else {
+                    safePrintln("[ERROR] Auto packet parse failed or no data for packet " + String(sender.currentPacket) + " sensor " + sender.sensorType);
+                }
+                
+                sender.currentPacket++;
+                sender.lastSendTime = currentTime;
+            } else {
+                // Wszystkie pakiety wysłane, usuń z kolejki
+                safePrintln("Auto packet sending completed for " + sender.sensorType);
+                for (int j = i; j < autoSenderCount - 1; j++) {
+                    autoSenders[j] = autoSenders[j + 1];
+                }
+                autoSenderCount--;
+                i--; // Sprawdź ten sam index ponownie
+            }
+        }
+    }
+}
+
 void handleGetHistory(AsyncWebSocketClient* client, JsonDocument& doc) {
     String sensorType = doc["sensor"] | "";
     String timeRange = doc["timeRange"] | "1h";
-    String sampleType = doc["sampleType"] | "fast"; // Nowy parametr
+    String sampleType = doc["sampleType"] | "fast";
     unsigned long fromTime = doc["fromTime"] | 0;
     unsigned long toTime = doc["toTime"] | 0;
+    int packetIndex = doc["packetIndex"] | -1; // -1 = automatyczne dzielenie na pakiety
+    int packetSize = doc["packetSize"] | 20;   // Rozmiar pakietu
+    bool autoSendAllPackets = (packetIndex == -1); // Automatyczne wysyłanie wszystkich pakietów
     
-    // Konwersja timeRange na timestampy (epoch milliseconds)
-    if (fromTime == 0 && toTime == 0) {
+    // Konwersja timeRange na timestampy (epoch seconds) - TYLKO gdy brak fromTime/toTime
+    if ((fromTime == 0 && toTime == 0) && timeRange != "custom") {
         unsigned long now = 0;
         if (time(nullptr) > 8 * 3600 * 2) { // Jeśli czas jest zsynchronizowany
-            now = time(nullptr) * 1000; // Konwertuj na milisekundy
+            now = time(nullptr); // Używaj sekund, nie milisekund!
         } else {
-            now = millis(); // Fallback do millis()
+            now = millis() / 1000; // Fallback do sekund
         }
         
         if (timeRange == "1h") {
-            fromTime = now - (60 * 60 * 1000); // 1 godzina
+            fromTime = now - (60 * 60); // 1 godzina w sekundach
         } else if (timeRange == "6h") {
-            fromTime = now - (6 * 60 * 60 * 1000); // 6 godzin
+            fromTime = now - (6 * 60 * 60); // 6 godzin w sekundach
         } else if (timeRange == "24h") {
-            fromTime = now - (24 * 60 * 60 * 1000); // 24 godziny
+            fromTime = now - (24 * 60 * 60); // 24 godziny w sekundach
+        } else if (timeRange == "7d") {
+            fromTime = now - (7 * 24 * 60 * 60); // 7 dni w sekundach
         } else {
-            fromTime = now - (60 * 60 * 1000); // domyślnie 1h
+            fromTime = now - (60 * 60); // domyślnie 1h w sekundach
         }
         toTime = now;
+        
+        safePrintln("[DEBUG] Auto timeRange " + timeRange + ": from=" + String(fromTime) + " to=" + String(toTime));
+    } else if (timeRange == "custom" && (fromTime != 0 || toTime != 0)) {
+        safePrintln("[DEBUG] Custom timeRange: from=" + String(fromTime) + " to=" + String(toTime));
+    } else {
+        safePrintln("[WARNING] Invalid time parameters or mixed timeRange+fromTime: timeRange=" + timeRange + " fromTime=" + String(fromTime) + " toTime=" + String(toTime));
+        // Jeśli użytkownik podał fromTime/toTime, wymuś timeRange="custom"
+        if (fromTime != 0 || toTime != 0) {
+            timeRange = "custom";
+            safePrintln("[FIX] Forced timeRange to 'custom' due to fromTime/toTime");
+        }
+    }
+    
+    // Jeśli automatyczne dzielenie, najpierw pobierz informacje o łącznej liczbie próbek
+    if (autoSendAllPackets) {
+        packetIndex = 0; // Zacznij od pierwszego pakietu
+        sendHistoryPacketsAutomatically(client, sensorType, timeRange, sampleType, fromTime, toTime, packetSize);
+        return;
     }
     
     String jsonResponse;
-    size_t samples = getHistoricalData(sensorType, timeRange, jsonResponse, fromTime, toTime, sampleType);
+    size_t samples = getHistoricalData(sensorType, timeRange, jsonResponse, fromTime, toTime, sampleType, packetIndex, packetSize);
     
-    safePrintln("History request: " + sensorType + " " + timeRange + " " + sampleType + " samples: " + String(samples));
+    safePrintln("History request: " + sensorType + " " + timeRange + " " + sampleType + " packet: " + String(packetIndex) + "/" + String(packetSize) + " samples: " + String(samples));
     safePrintln("JSON response length: " + String(jsonResponse.length()));
     safePrintln("History enabled: " + String(config.enableHistory));
     safePrintln("History initialized: " + String(historyManager.isInitialized()));
@@ -713,7 +932,8 @@ void handleGetAverages(AsyncWebSocketClient* client, JsonDocument& doc) {
     if (sensorType == "mcp3424" || sensorType == "all") {
         if (avgType == "fast") {
             MCP3424Data avg = getMCP3424FastAverage();
-            if (avg.valid) {
+            
+            if (avg.deviceCount > 0) {
                 JsonObject k_channels = data.createNestedObject("K_channels");
                 
                 // Użyj systemu mapowania adresów I2C do typów gazów
@@ -722,10 +942,35 @@ void handleGetAverages(AsyncWebSocketClient* client, JsonDocument& doc) {
                 
                 for (int i = 0; i < 8; i++) {
                     int8_t deviceIndex = getMCP3424DeviceByGasType(gasTypes[i]);
-                    if (deviceIndex >= 0 && deviceIndex < (int)avg.deviceCount && avg.valid[deviceIndex]) {
-                        for (uint8_t ch = 0; ch < 4; ch++) {
-                            String key = String(gasNames[i]) + "_" + String(ch+1);
-                            k_channels[key] = avg.channels[deviceIndex][ch];
+                    
+                    // Fallback: jeśli gasType mapping nie działa, użyj deviceIndex bezpośrednio
+                    if (deviceIndex == -1 && i < (int)avg.deviceCount && avg.valid[i]) {
+                        deviceIndex = i;
+                    }
+                    
+                    if (deviceIndex >= 0 && deviceIndex < (int)avg.deviceCount) {
+                        if (avg.valid[deviceIndex]) {
+                            // Find actual device index in config based on I2C address
+                            uint8_t i2cAddress = avg.addresses[deviceIndex];
+                            int actualDeviceIndex = -1;
+                            
+                            // Search for this I2C address in MCP3424 config to get device index
+                            extern MCP3424Config mcp3424Config;
+                            for (int d = 0; d < 8; d++) {
+                                if (mcp3424Config.devices[d].i2cAddress == i2cAddress) {
+                                    actualDeviceIndex = d;
+                                    break;
+                                }
+                            }
+                            
+                            // K number = device index + 1 (Device 0->K1, Device 4->K5, Device 6->K7)
+                            uint8_t kNumber = (actualDeviceIndex >= 0) ? (actualDeviceIndex + 1) : (deviceIndex + 1);
+                            
+                            for (uint8_t ch = 0; ch < 4; ch++) {
+                                String key = "K" + String(kNumber) + "_" + String(ch+1);
+                                float value = avg.channels[deviceIndex][ch];
+                                k_channels[key] = value;
+                            }
                         }
                     }
                 }
@@ -733,7 +978,8 @@ void handleGetAverages(AsyncWebSocketClient* client, JsonDocument& doc) {
             }
         } else {
             MCP3424Data avg = getMCP3424SlowAverage();
-            if (avg.valid) {
+            
+            if (avg.deviceCount > 0) {
                 JsonObject k_channels = data.createNestedObject("K_channels");
                 
                 // Użyj systemu mapowania adresów I2C do typów gazów
@@ -742,14 +988,182 @@ void handleGetAverages(AsyncWebSocketClient* client, JsonDocument& doc) {
                 
                 for (int i = 0; i < 8; i++) {
                     int8_t deviceIndex = getMCP3424DeviceByGasType(gasTypes[i]);
-                    if (deviceIndex >= 0 && deviceIndex < (int)avg.deviceCount && avg.valid[(uint8_t)deviceIndex]) {
-                        for (uint8_t ch = 0; ch < 4; ch++) {
-                            String key = String(gasNames[i]) + "_" + String(ch+1);
-                            k_channels[key] = avg.channels[deviceIndex][ch];
+                    
+                    // Fallback: jeśli gasType mapping nie działa, użyj deviceIndex bezpośrednio
+                    if (deviceIndex == -1 && i < (int)avg.deviceCount && avg.valid[i]) {
+                        deviceIndex = i;
+                    }
+                    
+                    if (deviceIndex >= 0 && deviceIndex < (int)avg.deviceCount) {
+                        if (avg.valid[deviceIndex]) {
+                            // Find actual device index in config based on I2C address
+                            uint8_t i2cAddress = avg.addresses[deviceIndex];
+                            int actualDeviceIndex = -1;
+                            
+                            // Search for this I2C address in MCP3424 config to get device index
+                            extern MCP3424Config mcp3424Config;
+                            for (int d = 0; d < 8; d++) {
+                                if (mcp3424Config.devices[d].i2cAddress == i2cAddress) {
+                                    actualDeviceIndex = d;
+                                    break;
+                                }
+                            }
+                            
+                            // K number = device index + 1 (Device 0->K1, Device 4->K5, Device 6->K7)
+                            uint8_t kNumber = (actualDeviceIndex >= 0) ? (actualDeviceIndex + 1) : (deviceIndex + 1);
+                            
+                            for (uint8_t ch = 0; ch < 4; ch++) {
+                                String key = "K" + String(kNumber) + "_" + String(ch+1);
+                                float value = avg.channels[deviceIndex][ch];
+                                k_channels[key] = value;
+                            }
                         }
                     }
                 }
                 k_channels["valid"] = true;
+            }
+        }
+    }
+
+    //fan 
+    if (sensorType == "fan" || sensorType == "all") {
+        if (avgType == "fast") {
+            FanData avg = getFANFastAverage();
+            if (avg.valid) {
+                JsonObject fan = data.createNestedObject("fan");
+                fan["dutyCycle"] = getFanDutyCycle();
+                fan["rpm"] = getFanRPM();
+                fan["enabled"] = avg.enabled;
+                fan["glineEnabled"] = avg.glineEnabled;
+                fan["valid"] = true;
+            }
+        } else {
+            FanData avg = getFANSlowAverage();
+            if (avg.valid) {
+                JsonObject fan = data.createNestedObject("fan");
+                fan["dutyCycle"] = getFanDutyCycle();
+                fan["rpm"] = getFanRPM();
+                fan["enabled"] = avg.enabled;
+                fan["glineEnabled"] = avg.glineEnabled;
+                fan["valid"] = true;
+            }
+        }
+    }
+    
+    // Calibrated sensor data
+    if (sensorType == "calibrated" || sensorType == "all") {
+        if (avgType == "fast") {
+            CalibratedSensorData avg = getCalibratedFastAverage();
+            if (avg.valid) {
+                JsonObject calibrated = data.createNestedObject("calibrated");
+                
+                // B4 temperatures (K1-K5)
+               
+                
+                // Gases in ug/m3
+                calibrated["CO"] = avg.CO;
+                calibrated["NO"] = avg.NO;
+                calibrated["NO2"] = avg.NO2;
+                calibrated["O3"] = avg.O3;
+                calibrated["SO2"] = avg.SO2;
+                calibrated["H2S"] = avg.H2S;
+                calibrated["NH3"] = avg.NH3;
+                
+                // Gases in ppb
+                calibrated["CO_ppb"] = avg.CO_ppb;
+                calibrated["NO_ppb"] = avg.NO_ppb;
+                calibrated["NO2_ppb"] = avg.NO2_ppb;
+                calibrated["O3_ppb"] = avg.O3_ppb;
+                calibrated["SO2_ppb"] = avg.SO2_ppb;
+                calibrated["H2S_ppb"] = avg.H2S_ppb;
+                calibrated["NH3_ppb"] = avg.NH3_ppb;
+                
+                // TGS sensors
+                calibrated["TGS02"] = avg.TGS02;
+                calibrated["TGS03"] = avg.TGS03;
+                calibrated["TGS12"] = avg.TGS12;
+                calibrated["TGS02_ohm"] = avg.TGS02_ohm;
+                calibrated["TGS03_ohm"] = avg.TGS03_ohm;
+                calibrated["TGS12_ohm"] = avg.TGS12_ohm;
+                
+                // HCHO and PID
+                calibrated["HCHO"] = avg.HCHO;
+                calibrated["PID"] = avg.PID;
+                calibrated["PID_mV"] = avg.PID_mV;
+                
+                // VOC
+                calibrated["VOC"] = avg.VOC;
+                calibrated["VOC_ppb"] = avg.VOC_ppb;
+                
+                calibrated["valid"] = true;
+            }
+        } else {
+            CalibratedSensorData avg = getCalibratedSlowAverage();
+            if (avg.valid) {
+                JsonObject calibrated = data.createNestedObject("calibrated");
+                
+                // B4 temperatures (K1-K5)
+                
+                
+                // Gases in ug/m3
+                calibrated["CO"] = avg.CO;
+                calibrated["NO"] = avg.NO;
+                calibrated["NO2"] = avg.NO2;
+                calibrated["O3"] = avg.O3;
+                calibrated["SO2"] = avg.SO2;
+                calibrated["H2S"] = avg.H2S;
+                calibrated["NH3"] = avg.NH3;
+                
+                // Gases in ppb
+                calibrated["CO_ppb"] = avg.CO_ppb;
+                calibrated["NO_ppb"] = avg.NO_ppb;
+                calibrated["NO2_ppb"] = avg.NO2_ppb;
+                calibrated["O3_ppb"] = avg.O3_ppb;
+                calibrated["SO2_ppb"] = avg.SO2_ppb;
+                calibrated["H2S_ppb"] = avg.H2S_ppb;
+                calibrated["NH3_ppb"] = avg.NH3_ppb;
+                
+                // TGS sensors
+                calibrated["TGS02"] = avg.TGS02;
+                calibrated["TGS03"] = avg.TGS03;
+                calibrated["TGS12"] = avg.TGS12;
+                calibrated["TGS02_ohm"] = avg.TGS02_ohm;
+                calibrated["TGS03_ohm"] = avg.TGS03_ohm;
+                calibrated["TGS12_ohm"] = avg.TGS12_ohm;
+                
+                // HCHO and PID
+                calibrated["HCHO"] = avg.HCHO;
+                calibrated["PID"] = avg.PID;
+                calibrated["PID_mV"] = avg.PID_mV;
+                
+                // VOC
+                calibrated["VOC"] = avg.VOC;
+                calibrated["VOC_ppb"] = avg.VOC_ppb;
+                
+                calibrated["valid"] = true;
+            }
+        }
+    }
+    
+    // ADS1110 ADC converter
+    if (sensorType == "ads1110" || sensorType == "all") {
+        if (avgType == "fast") {
+            ADS1110Data avg = getADS1110FastAverage();
+            if (avg.valid) {
+                JsonObject ads1110 = data.createNestedObject("ads1110");
+                ads1110["voltage"] = avg.voltage;
+                ads1110["dataRate"] = avg.dataRate;
+                ads1110["gain"] = avg.gain;
+                ads1110["valid"] = true;
+            }
+        } else {
+            ADS1110Data avg = getADS1110SlowAverage();
+            if (avg.valid) {
+                JsonObject ads1110 = data.createNestedObject("ads1110");
+                ads1110["voltage"] = avg.voltage;
+                ads1110["dataRate"] = avg.dataRate;
+                ads1110["gain"] = avg.gain;
+                ads1110["valid"] = true;
             }
         }
     }
@@ -769,6 +1183,17 @@ void handleGetAverages(AsyncWebSocketClient* client, JsonDocument& doc) {
             battery["offPinState"] = digitalRead(OFF_PIN);
             battery["valid"] = true;
         }
+    }
+    
+    // System status (always included in "all")
+    if (sensorType == "system" || sensorType == "all") {
+        JsonObject system = data.createNestedObject("system");
+        system["uptime"] = millis()/1000;
+        system["freeHeap"] = ESP.getFreeHeap();
+        system["wifiSignal"] = WiFi.RSSI();
+        system["ntpTime"] = getFormattedTime();
+        system["DeviceID"] = config.DeviceID; // Add DeviceID from config
+        system["valid"] = true;
     }
     
     String responseStr;
@@ -961,8 +1386,50 @@ void handleSetConfig(AsyncWebSocketClient* client, JsonDocument& doc) {
         }
     }
     
-    response["success"] = true;
-    response["message"] = "Configuration updated";
+    if (doc.containsKey("DeviceID")) {
+        strncpy(config.DeviceID, doc["DeviceID"] | "SCUBE-001", sizeof(config.DeviceID) - 1);
+        config.DeviceID[sizeof(config.DeviceID) - 1] = '\0';
+        response["DeviceID"] = config.DeviceID;
+        
+        // Save configuration to file
+        if (saveSystemConfig(config)) {
+            response["success"] = true;
+            response["message"] = "Device ID saved";
+        } else {
+            response["success"] = false;
+            response["error"] = "Failed to save configuration";
+        }
+    }
+    
+    // Save system configuration to file if any changes were made
+    if (doc.containsKey("enableWiFi") || doc.containsKey("enableHistory") || 
+        doc.containsKey("useAveragedData") || doc.containsKey("enableModbus") ||
+        doc.containsKey("enableSolarSensor") || doc.containsKey("enableSPS30") ||
+        doc.containsKey("enableSHT40") || doc.containsKey("enableHCHO") ||
+        doc.containsKey("enableINA219") || doc.containsKey("enableSHT30") ||
+        doc.containsKey("enableBME280") || doc.containsKey("enableSCD41") ||
+        doc.containsKey("enableI2CSensors") || doc.containsKey("enableMCP3424") ||
+        doc.containsKey("enableADS1110") || doc.containsKey("enableOPCN3Sensor") ||
+        doc.containsKey("enableIPS") || doc.containsKey("enableIPSDebug") ||
+        doc.containsKey("enableWebServer") || doc.containsKey("enableFan") ||
+        doc.containsKey("autoReset") || doc.containsKey("lowPowerMode") ||
+        doc.containsKey("DeviceID")) {
+        
+        if (saveSystemConfig(config)) {
+            response["success"] = true;
+            response["message"] = "Configuration updated and saved";
+            response["savedToFile"] = true;
+            safePrintln("SUCCESS: System config saved to file");
+        } else {
+            response["success"] = false;
+            response["error"] = "Configuration updated in memory but failed to save to file";
+            response["savedToFile"] = false;
+            safePrintln("ERROR: Failed to save system config to file");
+        }
+    } else {
+        response["success"] = true;
+        response["message"] = "Configuration updated";
+    }
     
     String responseStr;
     serializeJson(response, responseStr);
@@ -999,6 +1466,7 @@ void handleGetConfig(AsyncWebSocketClient* client, JsonDocument& doc) {
     configObj["lowPowerMode"] = config.lowPowerMode;
     configObj["enablePushbullet"] = config.enablePushbullet;
     configObj["pushbulletToken"] = config.pushbulletToken;
+    configObj["DeviceID"] = config.DeviceID;
     
     response["success"] = true;
     
@@ -1023,7 +1491,7 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, void* arg, uint8_t* da
         // Fallback do bezpośredniego przetwarzania w przypadku problemów z task
         String message = String((char*)data, len);
         
-        DynamicJsonDocument doc(2048);
+        DynamicJsonDocument doc(4096); // Zwiększony buffer dla MCP3424 config
         DeserializationError error = deserializeJson(doc, message);
         
         if (!error) {
@@ -1063,11 +1531,25 @@ void handleWebSocketMessage(AsyncWebSocketClient* client, void* arg, uint8_t* da
         // Fallback jeśli wysyłanie nie powiodło się
         safePrintln("WebSocket: Failed to send to task, using fallback");
         
-        DynamicJsonDocument doc(2048);
+        DynamicJsonDocument doc(4096); // Zwiększony buffer dla MCP3424 config
         DeserializationError error = deserializeJson(doc, message);
         
         if (!error) {
             handleWebSocketMessageInTask(client, doc);
+        } else {
+            safePrintln("WebSocket: JSON parse error: " + String(error.c_str()));
+            safePrintln("Problematic message: '" + message + "'");
+            safePrintln("Message length: " + String(message.length()));
+            
+            DynamicJsonDocument errorResponse(256);
+            errorResponse["error"] = "Invalid JSON format";
+            errorResponse["fallback"] = true;
+            errorResponse["details"] = String(error.c_str());
+            errorResponse["messageLength"] = message.length();
+            
+            String errorStr;
+            serializeJson(errorResponse, errorStr);
+            client->text(errorStr);
         }
     }
 }
@@ -1253,16 +1735,20 @@ void webSocketTask(void* parameters) {
             // Zaktualizuj czas ostatniej aktywności
             lastWebSocketActivity = millis();
             
-            // Przetwórz komunikat JSON
-            DynamicJsonDocument doc(2048);
+            // Przetwórz komunikat JSON - zwiększony buffer dla MCP3424 config (8 devices = ~1KB)
+            DynamicJsonDocument doc(4096);
             DeserializationError error = deserializeJson(doc, msg.message);
             
             if (error) {
                 safePrintln("WebSocket Task: JSON parse error: " + String(error.c_str()));
+                safePrintln("Problematic message: '" + msg.message + "'");
+                safePrintln("Message length: " + String(msg.message.length()));
                 
                 DynamicJsonDocument errorResponse(256);
                 errorResponse["error"] = "Invalid JSON format";
                 errorResponse["code"] = "PARSE_ERROR";
+                errorResponse["details"] = String(error.c_str());
+                errorResponse["messageLength"] = msg.message.length();
                 
                 String errorStr;
                 serializeJson(errorResponse, errorStr);
@@ -1280,6 +1766,9 @@ void webSocketTask(void* parameters) {
                 webSocketResetPending = true;
             }
         }
+        
+        // Przetwórz automatyczne wysyłanie pakietów
+        processAutoPacketSenders();
         
         // Regularne opóźnienie
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
@@ -1341,7 +1830,8 @@ void handleWebSocketMessageInTask(AsyncWebSocketClient* client, DynamicJsonDocum
         char ssid[32], password[64];
         if (loadWiFiConfig(ssid, password, sizeof(ssid), sizeof(password))) {
             response["wifiSSID"] = ssid;
-            response["wifiPassword"] = password;
+            // Nie zwracamy hasła ze względów bezpieczeństwa
+            response["wifiPasswordSet"] = (strlen(password) > 0);
         }
         
         String responseStr;
@@ -1356,6 +1846,15 @@ void handleWebSocketMessageInTask(AsyncWebSocketClient* client, DynamicJsonDocum
         response["cmd"] = "setWiFiConfig";
         
         if (ssid.length() > 0) {
+            // Jeśli hasło jest puste, zachowaj istniejące hasło
+            if (password.length() == 0) {
+                char currentSsid[32], currentPassword[64];
+                if (loadWiFiConfig(currentSsid, currentPassword, sizeof(currentSsid), sizeof(currentPassword))) {
+                    password = String(currentPassword);
+                    safePrintln("WiFi: Keeping existing password for SSID: " + ssid);
+                }
+            }
+            
             if (saveWiFiConfig(ssid.c_str(), password.c_str())) {
                 response["success"] = true;
                 response["message"] = "WiFi configuration saved";
@@ -1371,6 +1870,23 @@ void handleWebSocketMessageInTask(AsyncWebSocketClient* client, DynamicJsonDocum
         String responseStr;
         serializeJson(response, responseStr);
         client->text(responseStr);
+    } else if (cmd == "setNetworkFlag") {
+        // Handle network flag setting
+        bool enabled = doc["enabled"] | false;
+        turnOnNetwork = enabled;
+        
+        DynamicJsonDocument response(512);
+        response["cmd"] = "setNetworkFlag";
+        response["success"] = true;
+        response["enabled"] = enabled;
+        response["message"] = enabled ? "Network flag enabled" : "Network flag disabled";
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+        
+        safePrintln("Network flag set to: " + String(enabled ? "ON" : "OFF"));
+        
     } else if (cmd == "setNetworkConfig") {
         // Inline network config handler
         DynamicJsonDocument response(1024);
@@ -1449,6 +1965,11 @@ void handleWebSocketMessageInTask(AsyncWebSocketClient* client, DynamicJsonDocum
         response["cmd"] = "sensorKeys";
         response["success"] = true;
         response["timestamp"] = time(nullptr); // Epoch timestamp
+        //heap
+        // response["freeHeap"] = ESP.getFreeHeap();
+        // //wifi
+        // response["wifiSignal"] = WiFi.RSSI();
+      
         
         JsonObject data = response.createNestedObject("data");
         
@@ -1506,10 +2027,10 @@ void handleWebSocketMessageInTask(AsyncWebSocketClient* client, DynamicJsonDocum
         }
         
         // MCP3424 - wszystkie urządzenia z kluczami K1_1, K1_2, etc.
-        JsonObject mcp3424 = data.createNestedObject("mcp3424");
-        mcp3424["enabled"] = "MCP3424_ENABLED";
-        mcp3424["deviceCount"] = "MCP3424_DEVICE_COUNT";
-        mcp3424["valid"] = "MCP3424_VALID";
+        // JsonObject mcp3424 = data.createNestedObject("mcp3424");
+        // mcp3424["enabled"] = "MCP3424_ENABLED";
+        // mcp3424["deviceCount"] = "MCP3424_DEVICE_COUNT";
+        // mcp3424["valid"] = "MCP3424_VALID";
         
         // JsonArray devices = mcp3424.createNestedArray("devices");
         // for (uint8_t device = 0; device < 8; device++) { // Wszystkie możliwe urządzenia
@@ -1539,14 +2060,7 @@ void handleWebSocketMessageInTask(AsyncWebSocketClient* client, DynamicJsonDocum
             }
         }
         
-        // Fan control system
-        JsonObject fan = data.createNestedObject("fan");
-        fan["enabled"] = "FAN_ENABLED";
-        fan["dutyCycle"] = "FAN_DUTY_CYCLE";
-        fan["rpm"] = "FAN_RPM";
-        fan["glineEnabled"] = "FAN_GLINE_ENABLED";
-        fan["pwmValue"] = "FAN_PWM_VALUE";
-        fan["valid"] = "FAN_VALID";
+
         
         // Battery monitoring
         JsonObject battery = data.createNestedObject("battery");
@@ -1559,14 +2073,84 @@ void handleWebSocketMessageInTask(AsyncWebSocketClient* client, DynamicJsonDocum
         battery["lowBattery"] = "BATTERY_LOW_BATTERY";
         battery["criticalBattery"] = "BATTERY_CRITICAL_BATTERY";
         battery["offPinState"] = "BATTERY_OFF_PIN_STATE";
+//sleep time
+        // Calibrated sensor data keys
+        JsonObject calibrated = data.createNestedObject("calibrated");
+        calibrated["valid"] = "CALIBRATED_VALID";
+        
+        // Gases in ug/m3
+        calibrated["CO"] = "CALIBRATED_CO";
+        calibrated["NO"] = "CALIBRATED_NO";
+        calibrated["NO2"] = "CALIBRATED_NO2";
+        calibrated["O3"] = "CALIBRATED_O3";
+        calibrated["SO2"] = "CALIBRATED_SO2";
+        calibrated["H2S"] = "CALIBRATED_H2S";
+        calibrated["NH3"] = "CALIBRATED_NH3";
+        
+        // Gases in ppb
+        calibrated["CO_ppb"] = "CALIBRATED_CO_PPB";
+        calibrated["NO_ppb"] = "CALIBRATED_NO_PPB";
+        calibrated["NO2_ppb"] = "CALIBRATED_NO2_PPB";
+        calibrated["O3_ppb"] = "CALIBRATED_O3_PPB";
+        calibrated["SO2_ppb"] = "CALIBRATED_SO2_PPB";
+        calibrated["H2S_ppb"] = "CALIBRATED_H2S_PPB";
+        calibrated["NH3_ppb"] = "CALIBRATED_NH3_PPB";
+        
+        // TGS sensors
+        calibrated["TGS02"] = "CALIBRATED_TGS02";
+        calibrated["TGS03"] = "CALIBRATED_TGS03";
+        calibrated["TGS12"] = "CALIBRATED_TGS12";
+        calibrated["TGS02_ohm"] = "CALIBRATED_TGS02_OHM";
+        calibrated["TGS03_ohm"] = "CALIBRATED_TGS03_OHM";
+        calibrated["TGS12_ohm"] = "CALIBRATED_TGS12_OHM";
+        
+        // HCHO and PID
+        calibrated["HCHO"] = "CALIBRATED_HCHO";
+        calibrated["PID"] = "CALIBRATED_PID";
+        calibrated["PID_mV"] = "CALIBRATED_PID_MV";
+        
+        // VOC
+        calibrated["VOC"] = "CALIBRATED_VOC";
+        calibrated["VOC_ppb"] = "CALIBRATED_VOC_PPB";
+        
+        // ADS1110 ADC converter
+        JsonObject ads1110 = data.createNestedObject("ads1110");
+        ads1110["valid"] = "ADS1110_VALID";
+        ads1110["voltage"] = "ADS1110_VOLTAGE";
+        ads1110["dataRate"] = "ADS1110_DATA_RATE";
+        ads1110["gain"] = "ADS1110_GAIN";
+        
+        // Fan control system (updated from existing fan section)
+        JsonObject fan = data.createNestedObject("fan");
+        fan["valid"] = "FAN_VALID";
+        fan["dutyCycle"] = "FAN_DUTY_CYCLE";
+        fan["rpm"] = "FAN_RPM";
+        fan["enabled"] = "FAN_ENABLED";
+        fan["glineEnabled"] = "FAN_GLINE_ENABLED";
+        
+        // System status
+        JsonObject system = data.createNestedObject("system");
+        system["valid"] = "SYSTEM_VALID";
+        system["uptime"] = "SYSTEM_UPTIME";
+        system["freeHeap"] = "SYSTEM_FREE_HEAP";
+        system["wifiSignal"] = "SYSTEM_WIFI_SIGNAL";
+        system["ntpTime"] = "SYSTEM_NTP_TIME";
         
         String responseStr;
         serializeJson(response, responseStr);
         client->text(responseStr);
         
     } else if (cmd == "getMCP3424Config") {
-        // Handle MCP3424 config request directly
-        safePrintln("WebSocket: getMCP3424Config requested");
+        // Handle MCP3424 config request - reload from LittleFS first
+        safePrintln("WebSocket: getMCP3424Config requested - reloading from LittleFS");
+        
+        // Reload config from file to ensure latest data
+        if (!loadMCP3424Config(mcp3424Config)) {
+            safePrintln("Failed to load MCP3424 config from LittleFS, using current memory");
+        } else {
+            safePrintln("MCP3424 config reloaded successfully from LittleFS");
+        }
+        
         DynamicJsonDocument response(2048);
         response["cmd"] = "mcp3424Config";
         response["success"] = true;
@@ -1578,15 +2162,20 @@ void handleWebSocketMessageInTask(AsyncWebSocketClient* client, DynamicJsonDocum
         
         JsonArray devices = configObj.createNestedArray("devices");
         safePrintln("MCP3424 config: deviceCount = " + String(mcp3424Config.deviceCount));
-        for (uint8_t i = 0; i < mcp3424Config.deviceCount; i++) {
+        
+        // ALWAYS return all 8 devices for frontend UI (not just enabled ones)
+        for (uint8_t i = 0; i < 8; i++) {
             JsonObject device = devices.createNestedObject();
-            device["deviceIndex"] = mcp3424Config.devices[i].deviceIndex;
+            device["deviceIndex"] = i;
             device["i2cAddress"] = mcp3424Config.devices[i].i2cAddress;
             device["gasType"] = mcp3424Config.devices[i].gasType;
             device["description"] = mcp3424Config.devices[i].description;
             device["enabled"] = mcp3424Config.devices[i].enabled;
             device["autoDetected"] = mcp3424Config.devices[i].autoDetected;
-            safePrintln("Device " + String(i) + ": " + mcp3424Config.devices[i].gasType + " @ 0x" + String(mcp3424Config.devices[i].i2cAddress, HEX));
+            
+            safePrintln("Device " + String(i) + ": '" + String(mcp3424Config.devices[i].gasType) + 
+                       "' @ 0x" + String(mcp3424Config.devices[i].i2cAddress, HEX) + 
+                       " (enabled: " + String(mcp3424Config.devices[i].enabled ? "true" : "false") + ")");
         }
         
         String responseStr;
@@ -1758,19 +2347,60 @@ void handleWebSocketMessageInTask(AsyncWebSocketClient* client, DynamicJsonDocum
         response["cmd"] = cmd;
         response["timestamp"] = time(nullptr); // Epoch timestamp
         
+        safePrintln("=== Fan command received: " + cmd + " ===");
+        safePrintln("config.enableFan = " + String(config.enableFan ? "true" : "false"));
+        
         if (!config.enableFan) {
             response["success"] = false;
             response["error"] = "Fan control is DISABLED in configuration";
+            safePrintln("Fan control DISABLED - returning error");
         } else {
             String value = "";
             if (cmd == "fan_speed") {
-                value = String(doc["value"] | 0);
+                safePrintln("=== Processing fan_speed command ===");
+                
+                // Debug: print raw JSON
+                String rawJson;
+                serializeJson(doc, rawJson);
+                safePrintln("Raw JSON received: " + rawJson);
+                
+                // Check if value field exists and what type it is
+                if (doc.containsKey("value")) {
+                    safePrintln("Value field exists");
+                    if (doc["value"].is<int>()) {
+                        safePrintln("Value is integer");
+                    } else if (doc["value"].is<const char*>()) {
+                        safePrintln("Value is string");
+                    } else if (doc["value"].is<float>()) {
+                        safePrintln("Value is float");
+                    } else {
+                        safePrintln("Value is unknown type");
+                    }
+                } else {
+                    safePrintln("Value field does NOT exist");
+                }
+                
+                // Try different parsing methods
+                int receivedValue1 = doc["value"] | 0;  // Original method
+                int receivedValue2 = doc["value"].as<int>();  // Direct cast
+                String valueStr = doc["value"].as<String>();  // As string first
+                int receivedValue3 = valueStr.toInt();  // String to int
+                
+                safePrintln("Method 1 (| 0): " + String(receivedValue1));
+                safePrintln("Method 2 (.as<int>()): " + String(receivedValue2));
+                safePrintln("Method 3 (string->int): " + String(receivedValue3));
+                safePrintln("Value as string: '" + valueStr + "'");
+                
+                value = String(receivedValue1);
+                safePrintln("Fan speed command: received value=" + String(receivedValue1) + ", parsed value=" + value);
+                safePrintln("Original JSON: value field exists=" + String(doc.containsKey("value") ? "true" : "false"));
             } else if (cmd == "sleep") {
                 unsigned long delaySec = doc["delay"] | 0;
                 unsigned long durationSec = doc["duration"] | 0;
                 value = String(delaySec) + " " + String(durationSec);
             }
             
+            safePrintln("Calling processFanCommand with cmd=" + cmd + ", value=" + value);
             if (processFanCommand(cmd, value)) {
                 response["success"] = true;
                 if (cmd == "fan_speed") {
@@ -1838,18 +2468,31 @@ void handleWebSocketMessageInTask(AsyncWebSocketClient* client, DynamicJsonDocum
         
         if (doc.containsKey("devices")) {
             JsonArray devices = doc["devices"];
+            
+            // Reset all devices to disabled first
+            for (int i = 0; i < 8; i++) {
+                mcp3424Config.devices[i].enabled = false;
+                mcp3424Config.devices[i].autoDetected = false;
+                strcpy(mcp3424Config.devices[i].gasType, "");
+                strcpy(mcp3424Config.devices[i].description, "");
+            }
+            
             mcp3424Config.deviceCount = 0;
             
+            // Only process enabled devices from frontend
             for (JsonObject device : devices) {
                 if (mcp3424Config.deviceCount < 8) {
-                    MCP3424DeviceAssignment& newDevice = mcp3424Config.devices[mcp3424Config.deviceCount];
-                    newDevice.deviceIndex = device["deviceIndex"] | 0;
-                    newDevice.i2cAddress = device["i2cAddress"] | (0x68 + mcp3424Config.deviceCount);
-                    strlcpy(newDevice.gasType, device["gasType"] | "", sizeof(newDevice.gasType));
-                    strlcpy(newDevice.description, device["description"] | "", sizeof(newDevice.description));
-                    newDevice.enabled = device["enabled"] | true;
-                    newDevice.autoDetected = device["autoDetected"] | false;
-                    mcp3424Config.deviceCount++;
+                    int deviceIndex = device["deviceIndex"] | 0;
+                    if (deviceIndex >= 0 && deviceIndex < 8) {
+                        MCP3424DeviceAssignment& newDevice = mcp3424Config.devices[deviceIndex];
+                        newDevice.deviceIndex = deviceIndex;
+                        newDevice.i2cAddress = device["i2cAddress"] | (0x68 + deviceIndex);
+                        strlcpy(newDevice.gasType, device["gasType"] | "", sizeof(newDevice.gasType));
+                        strlcpy(newDevice.description, device["description"] | "", sizeof(newDevice.description));
+                        newDevice.enabled = device["enabled"] | true;
+                        newDevice.autoDetected = device["autoDetected"] | false;
+                        mcp3424Config.deviceCount++;
+                    }
                 }
             }
             
@@ -1876,9 +2519,20 @@ void handleWebSocketMessageInTask(AsyncWebSocketClient* client, DynamicJsonDocum
         response["timestamp"] = time(nullptr); // Epoch timestamp
         
         initializeDefaultMCP3424Mapping();
+        
+        // Update deviceCount to reflect enabled devices (should be 0 for new defaults)
+        int enabledCount = 0;
+        for (int i = 0; i < 8; i++) {
+            if (mcp3424Config.devices[i].enabled) {
+                enabledCount++;
+            }
+        }
+        mcp3424Config.deviceCount = enabledCount;
+        
         if (saveMCP3424Config(mcp3424Config)) {
             response["success"] = true;
-            response["message"] = "MCP3424 configuration reset to defaults";
+            response["message"] = "MCP3424 configuration reset to defaults (all devices disabled)";
+            safePrintln("MCP3424 config reset: " + String(enabledCount) + " devices enabled");
         } else {
             response["success"] = false;
             response["error"] = "Failed to save default MCP3424 configuration";

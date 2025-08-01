@@ -221,6 +221,10 @@ let autoUpdate = false;
 let autoUpdateInterval;
 let ws;
 
+// Pakietowanie danych
+let currentPackets = {};
+let allData = {};
+
 function connectWebSocket() {
   ws = new WebSocket(`ws://${window.location.host}/ws`);
   ws.onopen = function() {
@@ -249,10 +253,18 @@ function connectWebSocket() {
 function updateStatusBar(data) {
   document.getElementById('update-status').textContent = `Ostatnia aktualizacja: ${new Date().toLocaleTimeString('pl-PL')}`;
   
+  // Debug info
+  console.log('Status bar update:', data.cmd, data);
+  
   if (data.history) {
     const memoryPercent = data.history.memoryUsed > 0 ? Math.round((data.history.memoryUsed / data.history.memoryBudget) * 100) : 0;
     document.getElementById('history-status').textContent = 
       `Historia: ${data.history.enabled ? '✅' : '❌'} (${memoryPercent}% pamięci)`;
+  }
+  
+  // Show connection quality
+  if (data.success === false) {
+    document.getElementById('connection-status').textContent = 'Błąd odpowiedzi ⚠️';
   }
 }
 
@@ -265,124 +277,223 @@ function handleHistoryResponse(data) {
     return;
   }
   
+  // Sprawdź czy to automatyczny tryb
+  const autoMode = data.autoMode || false;
+  
+  // Informacje o pakietach
+  const packetIndex = data.packetIndex || 0;
+  const totalPackets = data.totalPackets || 1;
+  const hasMorePackets = data.hasMorePackets || false;
+  const totalAvailableSamples = data.totalAvailableSamples || 0;
+  
+  console.log(`Pakiet ${packetIndex + 1}/${totalPackets}, dostępne próbki: ${totalAvailableSamples}, więcej pakietów: ${hasMorePackets}, autoMode: ${autoMode}`);
+  
   if (!data.data || data.data.length === 0) {
-    console.log('No data array or empty data');
-    const errorMsg = !data.data ? 'Brak pola data w odpowiedzi' : 'Pusta tablica danych';
-    document.getElementById('charts-container').innerHTML = `<div class="no-data">📭 ${errorMsg}<br><small>Sensor: ${data.sensor}, zakres: ${data.timeRange}, typ: ${data.sampleType}</small></div>`;
-    return;
+    if (packetIndex === 0) {
+      console.log('No data array or empty data');
+      const errorMsg = !data.data ? 'Brak pola data w odpowiedzi' : 'Pusta tablica danych';
+      document.getElementById('charts-container').innerHTML = `<div class="no-data">📭 ${errorMsg}<br><small>Sensor: ${data.sensor}, zakres: ${data.timeRange}, typ: ${data.sampleType}</small></div>`;
+      return;
+    }
   }
   
-  console.log('Data received:', data.data.length, 'samples');
-  console.log('Response info: sensor=' + data.sensor + ', timeRange=' + data.timeRange + ', sampleType=' + data.sampleType);
+  const sensorKey = `${data.sensor}_${data.timeRange}_${data.sampleType}`;
   
-  // Log first sample structure for debugging
-  if (data.data.length > 0) {
-    console.log('First sample structure:', data.data[0]);
+  // Inicjalizuj storage dla tego sensora jeśli nie istnieje
+  if (!allData[sensorKey]) {
+    allData[sensorKey] = [];
+    currentPackets[sensorKey] = {
+      received: new Set(),
+      totalPackets: totalPackets,
+      sensor: data.sensor,
+      timeRange: data.timeRange,
+      sampleType: data.sampleType
+    };
   }
   
-  const sensorType = document.getElementById('sensorType').value;
-  
-  // Create charts based on sensor type
-  if (sensorType === 'sps30') {
-    createSPS30Charts(data.data);
-  } else if (sensorType === 'ips') {
-    createIPSCharts(data.data);
-  } else if (sensorType === 'ina219') {
-    createINA219Charts(data.data);
-  } else if (sensorType === 'sht40') {
-    createSHT40Charts(data.data);
-  } else if (sensorType === 'scd41') {
-    createSCD41Charts(data.data);
-  } else if (sensorType === 'hcho') {
-    createHCHOCharts(data.data);
-  } else if (sensorType === 'i2c') {
-    createI2CCharts(data.data);
-  } else if (sensorType === 'mcp3424') {
-    createMCP3424Charts(data.data);
-  } else if (sensorType === 'ads1110') {
-    createADS1110Charts(data.data);
-  } else if (sensorType === 'solar') {
-    createSolarCharts(data.data);
-  } else if (sensorType === 'opcn3') {
-    createOPCN3Charts(data.data);
-  } else if (sensorType === 'calibrated') {
-    createCalibratedCharts(data.data);
+  // Dodaj dane z tego pakietu
+  if (data.data && data.data.length > 0) {
+    allData[sensorKey] = allData[sensorKey].concat(data.data);
+    currentPackets[sensorKey].received.add(packetIndex);
+    console.log(`Pakiet ${packetIndex} dodany. Łącznie próbek: ${allData[sensorKey].length}`);
   }
   
-  // Show stats
-  const statsDiv = document.createElement('div');
-  statsDiv.className = 'chart-info';
-  statsDiv.style.textAlign = 'center';
-  statsDiv.style.color = 'white';
-  statsDiv.style.marginTop = '20px';
-  const sampleTypeText = document.getElementById('sampleType').value === 'fast' ? 'szybkich (10s)' : 'wolnych (5min)';
-  statsDiv.innerHTML = `📊 Załadowano ${data.samples} próbek ${sampleTypeText} z ${sensorType}`;
-  document.getElementById('charts-container').appendChild(statsDiv);
+  // Sprawdź czy mamy wszystkie pakiety lub to pierwszy pakiet
+  const receivedPackets = currentPackets[sensorKey].received.size;
+  const shouldCreateCharts = (receivedPackets >= totalPackets) || (packetIndex === 0 && !hasMorePackets);
   
-  console.log('Charts created successfully');
+  if (shouldCreateCharts) {
+    console.log(`Tworzenie wykresów z ${allData[sensorKey].length} próbek`);
+    
+    // Log first sample structure for debugging
+    if (allData[sensorKey].length > 0) {
+      console.log('First sample structure:', allData[sensorKey][0]);
+    }
+    
+    const sensorType = document.getElementById('sensorType').value;
+  
+    // Create charts based on sensor type
+    if (sensorType === 'sps30') {
+      createSPS30Charts(allData[sensorKey]);
+    } else if (sensorType === 'ips') {
+      createIPSCharts(allData[sensorKey]);
+    } else if (sensorType === 'ina219') {
+      createINA219Charts(allData[sensorKey]);
+    } else if (sensorType === 'sht40') {
+      createSHT40Charts(allData[sensorKey]);
+    } else if (sensorType === 'scd41') {
+      createSCD41Charts(allData[sensorKey]);
+    } else if (sensorType === 'hcho') {
+      createHCHOCharts(allData[sensorKey]);
+    } else if (sensorType === 'i2c') {
+      createI2CCharts(allData[sensorKey]);
+    } else if (sensorType === 'mcp3424') {
+      createMCP3424Charts(allData[sensorKey]);
+    } else if (sensorType === 'ads1110') {
+      createADS1110Charts(allData[sensorKey]);
+    } else if (sensorType === 'solar') {
+      createSolarCharts(allData[sensorKey]);
+    } else if (sensorType === 'opcn3') {
+      createOPCN3Charts(allData[sensorKey]);
+    } else if (sensorType === 'calibrated') {
+      createCalibratedCharts(allData[sensorKey]);
+    } else {
+      console.error('Unknown sensor type:', sensorType);
+      const container = document.getElementById('charts-container');
+      container.innerHTML = '<div class="no-data">❌ Nieznany typ czujnika: ' + sensorType + '</div>';
+      return;
+    }
+    
+    // Show stats
+    const statsDiv = document.createElement('div');
+    statsDiv.className = 'chart-info';
+    statsDiv.style.textAlign = 'center';
+    statsDiv.style.color = 'white';
+    statsDiv.style.marginTop = '20px';
+    const sampleTypeText = document.getElementById('sampleType').value === 'fast' ? 'szybkich (10s)' : 'wolnych (5min)';
+    const modeText = autoMode ? 'automatycznie' : 'manualnie';
+    statsDiv.innerHTML = `📊 Załadowano ${allData[sensorKey].length} próbek ${sampleTypeText} z ${sensorType} (${modeText}, pakiety: ${receivedPackets}/${totalPackets})`;
+    document.getElementById('charts-container').appendChild(statsDiv);
+    
+    console.log('Charts created successfully');
+    
+    // Wyczyść dane po utworzeniu wykresów
+    delete allData[sensorKey];
+    delete currentPackets[sensorKey];
+    
+  } else if (hasMorePackets && !autoMode) {
+    // Żądaj kolejnego pakietu TYLKO jeśli nie ma autoMode (stary sposób)
+    console.log(`Żądam pakietu ${packetIndex + 1}/${totalPackets} (manual mode)`);
+    requestNextPacket(data.sensor, data.timeRange, data.sampleType, packetIndex + 1, data.fromTime, data.toTime);
+    
+    // Pokaż postęp
+    const container = document.getElementById('charts-container');
+    const progress = Math.round((receivedPackets / totalPackets) * 100);
+    container.innerHTML = `<div class="loading">📊 Ładowanie danych... ${progress}% (pakiet ${receivedPackets}/${totalPackets})</div>`;
+  } else if (hasMorePackets && autoMode) {
+    // W autoMode tylko pokaż postęp - serwer sam wyśle kolejne pakiety
+    const container = document.getElementById('charts-container');
+    const progress = Math.round((receivedPackets / totalPackets) * 100);
+    container.innerHTML = `<div class="loading">📊 Automatyczne ładowanie... ${progress}% (pakiet ${receivedPackets}/${totalPackets})</div>`;
+    console.log(`Waiting for auto packet ${packetIndex + 1}/${totalPackets}`);
+  }
 }
 
 function createChart(containerId, title, datasets) {
+  // Check if Chart.js is loaded
+  if (typeof Chart === 'undefined') {
+    console.error('Chart.js library not loaded!');
+    document.getElementById(containerId).innerHTML = '<div class="no-data">❌ Błąd: Chart.js nie załadowany</div>';
+    return null;
+  }
+  
   const canvas = document.createElement('canvas');
-  document.getElementById(containerId).appendChild(canvas);
+  const container = document.getElementById(containerId);
+  
+  if (!container) {
+    console.error('Chart container not found:', containerId);
+    return null;
+  }
+  
+  container.appendChild(canvas);
   
   const ctx = canvas.getContext('2d');
-  return new Chart(ctx, {
-    type: 'line',
-    data: {
-      datasets: datasets
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: {
-        x: {
-          type: 'time',
-          time: {
-            unit: 'minute',
-            displayFormats: {
-              minute: 'HH:mm'
+  
+  // Count datasets with data
+  const datasetsWithData = datasets.filter(dataset => dataset.data && dataset.data.length > 0);
+  console.log(`Creating chart "${title}" with ${datasetsWithData.length}/${datasets.length} datasets having data`);
+  
+  if (datasetsWithData.length === 0) {
+    container.innerHTML = '<div class="no-data">📭 Brak danych do wyświetlenia</div>';
+    return null;
+  }
+  
+  try {
+    return new Chart(ctx, {
+      type: 'line',
+      data: {
+        datasets: datasets
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: {
+            type: 'time',
+            time: {
+              unit: 'minute',
+              displayFormats: {
+                minute: 'HH:mm'
+              }
+            },
+            title: {
+              display: true,
+              text: 'Czas'
             }
           },
-          title: {
-            display: true,
-            text: 'Czas'
+          y: {
+            beginAtZero: false,
+            title: {
+              display: true,
+              text: 'Wartość'
+            }
           }
         },
-        y: {
-          beginAtZero: false,
+        plugins: {
           title: {
             display: true,
-            text: 'Wartość'
-          }
-        }
-      },
-      plugins: {
-        title: {
-          display: true,
-          text: title,
-          font: {
-            size: 16
+            text: title,
+            font: {
+              size: 16
+            }
+          },
+          legend: {
+            display: true,
+            position: 'top'
           }
         },
-        legend: {
-          display: true,
-          position: 'top'
+        interaction: {
+          intersect: false,
+          mode: 'index'
         }
-      },
-      interaction: {
-        intersect: false,
-        mode: 'index'
       }
-    }
-  });
+    });
+  } catch (error) {
+    console.error('Error creating chart:', error);
+    container.innerHTML = '<div class="no-data">❌ Błąd tworzenia wykresu: ' + error.message + '</div>';
+    return null;
+  }
 }
 
 function formatChartData(historyData, valueKey, label, color) {
-  if (!historyData || !historyData.length) return [];
+  if (!historyData || !historyData.length) {
+    console.warn(`No history data for key: ${valueKey}`);
+    return [];
+  }
   
   console.log(`Formatting chart data for key: ${valueKey}, entries: ${historyData.length}`);
   
+  let validEntries = 0;
   const formattedData = historyData.map((entry, index) => {
     let timestamp = entry.timestamp;
     
@@ -401,6 +512,10 @@ function formatChartData(historyData, valueKey, label, color) {
       console.log(`Entry ${index}: timestamp=${entry.timestamp}, converted=${timestamp}, value=${value}, parsedValue=${parsedValue}`);
     }
     
+    if (!isNaN(parsedValue)) {
+      validEntries++;
+    }
+    
     return {
       x: new Date(timestamp),
       y: isNaN(parsedValue) ? null : parsedValue
@@ -410,12 +525,38 @@ function formatChartData(historyData, valueKey, label, color) {
   // Sort by timestamp to ensure proper order
   formattedData.sort((a, b) => a.x.getTime() - b.x.getTime());
   
-  console.log(`Formatted ${formattedData.length} valid points for ${valueKey}`);
-  if (formattedData.length > 0) {
+  console.log(`Formatted ${formattedData.length}/${validEntries} valid points for ${valueKey}`);
+  if (formattedData.length === 0) {
+    console.warn(`No valid data points found for key: ${valueKey}`);
+  } else if (formattedData.length > 0) {
     console.log(`Time range: ${formattedData[0].x.toISOString()} to ${formattedData[formattedData.length-1].x.toISOString()}`);
   }
   
   return formattedData;
+}
+
+function requestNextPacket(sensor, timeRange, sampleType, packetIndex, fromTime, toTime) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const command = {
+      cmd: 'getHistory',
+      sensor: sensor,
+      timeRange: timeRange,
+      sampleType: sampleType,
+      packetIndex: packetIndex,
+      packetSize: 20 // Domyślny rozmiar pakietu
+    };
+    
+    // Dodaj fromTime/toTime jeśli są dostępne
+    if (fromTime && toTime) {
+      command.fromTime = fromTime;
+      command.toTime = toTime;
+    }
+    
+    console.log('Requesting next packet:', command);
+    ws.send(JSON.stringify(command));
+  } else {
+    console.error('WebSocket not available for next packet request');
+  }
 }
 
 async function updateCharts() {
@@ -424,27 +565,47 @@ async function updateCharts() {
   const sensorType = document.getElementById('sensorType').value;
   const container = document.getElementById('charts-container');
   
+  if (!container) {
+    console.error('Charts container not found!');
+    return;
+  }
+  
   console.log('=== updateCharts called ===');
   console.log('Updating charts:', { timeRange, sampleType, sensorType });
+  console.log('WebSocket state:', ws ? ws.readyState : 'no ws');
   
-  // Clear existing charts
-  Object.values(charts).forEach(chart => chart.destroy());
+  // Clear existing charts and data
+  Object.values(charts).forEach(chart => {
+    if (chart && chart.destroy) {
+      console.log('Destroying chart:', chart.config?.options?.plugins?.title?.text || 'unknown');
+      chart.destroy();
+    }
+  });
   charts = {};
-  container.innerHTML = '<div class="loading">📊 Ładowanie danych z ' + sensorType + '...</div>';
   
-  // Send WebSocket command
+  // Wyczyść poprzednie dane
+  const sensorKey = `${sensorType}_${timeRange}_${sampleType}`;
+  console.log('Clearing data for key:', sensorKey);
+  delete allData[sensorKey];
+  delete currentPackets[sensorKey];
+  
+  container.innerHTML = '<div class="loading">📊 Ładowanie danych z ' + sensorType + '... (pakiet 1)</div>';
+  
+  // Send WebSocket command (automatyczny tryb - bez parametrów pakietowania)
   if (ws && ws.readyState === WebSocket.OPEN) {
     const command = {
       cmd: 'getHistory',
       sensor: sensorType,
       timeRange: timeRange,
       sampleType: sampleType
+      // Brak packetIndex/packetSize = automatyczny tryb
     };
-    console.log('Sending WebSocket command:', command);
+    console.log('Sending WebSocket command (auto mode):', command);
     ws.send(JSON.stringify(command));
   } else {
-    console.log('WebSocket not connected, state:', ws ? ws.readyState : 'no ws');
-    container.innerHTML = '<div class="no-data">❌ Brak połączenia WebSocket</div>';
+    const wsState = ws ? ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][ws.readyState] : 'NO_WS';
+    console.log('WebSocket not connected, state:', wsState);
+    container.innerHTML = '<div class="no-data">❌ Brak połączenia WebSocket<br><small>Stan: ' + wsState + '</small></div>';
   }
 }
 
@@ -1002,6 +1163,19 @@ function createCalibratedCharts(data) {
   ]);
 }
 
+function clearAllData() {
+  console.log('Clearing all chart data and packets');
+  allData = {};
+  currentPackets = {};
+  
+  Object.values(charts).forEach(chart => {
+    if (chart && chart.destroy) {
+      chart.destroy();
+    }
+  });
+  charts = {};
+}
+
 function toggleAutoUpdate() {
   autoUpdate = !autoUpdate;
   const button = document.getElementById('auto-status');
@@ -1009,26 +1183,48 @@ function toggleAutoUpdate() {
   if (autoUpdate) {
     button.textContent = 'ON';
     button.style.color = '#27ae60';
-    autoUpdateInterval = setInterval(updateCharts, 30000);
+    console.log('Auto-update enabled: refreshing every 30 seconds');
+    autoUpdateInterval = setInterval(() => {
+      console.log('Auto-update triggered');
+      updateCharts();
+    }, 30000);
+    // Update charts immediately when auto-update is enabled
+    updateCharts();
   } else {
     button.textContent = 'OFF';
     button.style.color = '#e74c3c';
+    console.log('Auto-update disabled');
     if (autoUpdateInterval) {
       clearInterval(autoUpdateInterval);
+      autoUpdateInterval = null;
     }
   }
 }
 
 // Initialize
 window.addEventListener('load', function() {
+  console.log('Charts page loaded, connecting WebSocket...');
   connectWebSocket();
   // Don't auto-load charts, wait for user selection
 });
 
 window.addEventListener('beforeunload', function() {
-  if (ws) ws.close();
-  if (autoUpdateInterval) clearInterval(autoUpdateInterval);
-  Object.values(charts).forEach(chart => chart.destroy());
+  console.log('Charts page unloading, cleaning up...');
+  if (ws) {
+    console.log('Closing WebSocket connection');
+    ws.close();
+  }
+  if (autoUpdateInterval) {
+    console.log('Clearing auto-update interval');
+    clearInterval(autoUpdateInterval);
+  }
+  console.log('Destroying', Object.keys(charts).length, 'charts');
+  Object.values(charts).forEach(chart => {
+    if (chart && chart.destroy) {
+      chart.destroy();
+    }
+  });
+  clearAllData();
 });
 </script>
 </body>

@@ -115,11 +115,11 @@ String getAllSensorJson() {
     doc["uptime"] = millis() / 1000;
     doc["freeHeap"] = ESP.getFreeHeap();
     doc["wifiSignal"] = WiFi.RSSI();
+    doc["DeviceID"] = config.DeviceID;
     doc["ntpTime"] = getFormattedTime();
     doc["ntpEpoch"] = getEpochTime();
     doc["ntpDate"] = getFormattedDate();
-    doc["ntpValid"] = isTimeSet();
-    
+    doc["ntpValid"] = isTimeSet();    
     // History status
     extern HistoryManager historyManager;
     JsonObject history = doc.createNestedObject("history");

@@ -634,10 +634,39 @@ const char *update_html = R"rawliteral(
       </div>
       
       <div class="status-text" id="systemInfo">
+        <strong>Device ID:</strong> <span id="deviceID">--</span><br>
         <strong>Uptime:</strong> <span id="uptime">--</span><br>
         <strong>Free Heap:</strong> <span id="freeHeap">--</span> KB<br>
         <strong>WiFi Signal:</strong> <span id="wifiSignal">--</span> dBm<br>
         <strong>Last Update:</strong> <span id="lastUpdate">--</span>
+      </div>
+      
+      <!-- Device ID Configuration -->
+      <div class="control-section">
+        <h4>🆔 Konfiguracja Device ID</h4>
+        <div class="input-group">
+          <input type="text" id="deviceIDInput" placeholder="Wprowadź Device ID" 
+                 class="form-control" style="margin-bottom: 10px;">
+          <button class="btn btn-primary" onclick="updateDeviceID()">
+            💾 Zapisz Device ID
+          </button>
+        </div>
+      </div>
+      
+      <!-- Network Flag Control -->
+      <div class="control-section">
+        <h4>🌐 Flaga Sieci</h4>
+        <div class="control-buttons">
+          <button class="btn btn-success" onclick="setNetworkFlag(true)">
+            ✅ Włącz Flagę Sieci
+          </button>
+          <button class="btn btn-danger" onclick="setNetworkFlag(false)">
+            ❌ Wyłącz Flagę Sieci
+          </button>
+        </div>
+        <div class="status-text" style="margin-top: 10px;">
+          <strong>Status flagi:</strong> <span id="networkFlagStatus">--</span>
+        </div>
       </div>
       
       <button class="btn btn-warning" id="refreshInfo">
@@ -652,7 +681,8 @@ const char *update_html = R"rawliteral(
         <div class="card-title">Sterowanie Wentylatorem i GLine</div>
       </div>
       <div class="card-description">
-        Kontrola wentylatora, GLine (router) i tryb sleep
+        Kontrola wentylatora, GLine (router) i tryb sleep<br>
+        <small style="color: #ff9800;"><strong>⚠️ Uwaga:</strong> Sterowanie wentylatorem musi być włączone w konfiguracji systemu poniżej</small>
       </div>
       
       <!-- Fan Control -->
@@ -671,8 +701,8 @@ const char *update_html = R"rawliteral(
           <label>Prędkość: <span id="fanSpeedValue">50</span>% <small style="color: #666;">(0% = wyłączony)</small></label>
           <input type="range" id="fanSpeedSlider" min="0" max="100" value="50" 
                  oninput="updateFanSpeed(this.value)" 
-                 onmouseup="sendFanCommand('fan_speed', this.value)"
-                 ontouchend="sendFanCommand('fan_speed', this.value)">
+                 onmouseup="sendFanCommand('fan_speed', parseInt(this.value))"
+                 ontouchend="sendFanCommand('fan_speed', parseInt(this.value))">
           <button class="btn btn-primary" onclick="setFanSpeed()" style="margin-top: 10px; min-width: 150px;">
             ⚡ Ustaw Prędkość
           </button>
@@ -771,6 +801,21 @@ const char *update_html = R"rawliteral(
             SHT40 (Temperatura/Wilgotność)
           </label>
           <label class="config-checkbox">
+            <input type="checkbox" id="enableSHT30" onchange="updateSystemConfig('enableSHT30', this.checked)">
+            <span class="checkmark"></span>
+            SHT30 (Temperatura/Wilgotność)
+          </label>
+          <label class="config-checkbox">
+            <input type="checkbox" id="enableBME280" onchange="updateSystemConfig('enableBME280', this.checked)">
+            <span class="checkmark"></span>
+            BME280 (Temperatura/Wilgotność/Ciśnienie)
+          </label>
+          <label class="config-checkbox">
+            <input type="checkbox" id="enableSCD41" onchange="updateSystemConfig('enableSCD41', this.checked)">
+            <span class="checkmark"></span>
+            SCD41 (CO2/Temperatura/Wilgotność)
+          </label>
+          <label class="config-checkbox">
             <input type="checkbox" id="enableHCHO" onchange="updateSystemConfig('enableHCHO', this.checked)">
             <span class="checkmark"></span>
             HCHO (Formaldehyd)
@@ -783,7 +828,12 @@ const char *update_html = R"rawliteral(
           <label class="config-checkbox">
             <input type="checkbox" id="enableMCP3424" onchange="updateSystemConfig('enableMCP3424', this.checked)">
             <span class="checkmark"></span>
-            MCP3424 (ADC)
+            MCP3424 (ADC 18-bit)
+          </label>
+          <label class="config-checkbox">
+            <input type="checkbox" id="enableADS1110" onchange="updateSystemConfig('enableADS1110', this.checked)">
+            <span class="checkmark"></span>
+            ADS1110 (ADC 16-bit)
           </label>
           <label class="config-checkbox">
             <input type="checkbox" id="enableSolarSensor" onchange="updateSystemConfig('enableSolarSensor', this.checked)">
@@ -791,14 +841,29 @@ const char *update_html = R"rawliteral(
             Solar (Panel słoneczny)
           </label>
           <label class="config-checkbox">
+            <input type="checkbox" id="enableOPCN3Sensor" onchange="updateSystemConfig('enableOPCN3Sensor', this.checked)">
+            <span class="checkmark"></span>
+            OPCN3 (Czujnik pyłu optyczny)
+          </label>
+          <label class="config-checkbox">
             <input type="checkbox" id="enableIPS" onchange="updateSystemConfig('enableIPS', this.checked)">
             <span class="checkmark"></span>
-            IPS (Czujnik pyłu)
+            IPS (Czujnik pyłu UART)
+          </label>
+          <label class="config-checkbox">
+            <input type="checkbox" id="enableIPSDebug" onchange="updateSystemConfig('enableIPSDebug', this.checked)">
+            <span class="checkmark"></span>
+            IPS Debug Mode
           </label>
           <label class="config-checkbox">
             <input type="checkbox" id="enableI2CSensors" onchange="updateSystemConfig('enableI2CSensors', this.checked)">
             <span class="checkmark"></span>
-            I2C Sensors (SCD41 CO2)
+            I2C Sensors (Ogólne I2C)
+          </label>
+          <label class="config-checkbox">
+            <input type="checkbox" id="enableFan" onchange="updateSystemConfig('enableFan', this.checked)">
+            <span class="checkmark"></span>
+            Wentylator i GLine (Kontrola PWM)
           </label>
         </div>
         
@@ -831,6 +896,16 @@ const char *update_html = R"rawliteral(
             <input type="checkbox" id="lowPowerModeMain" onchange="updateSystemConfig('lowPowerMode', this.checked)">
             <span class="checkmark"></span>
             Tryb niskiego poboru energii
+          </label>
+        </div>
+        
+        <!-- Zaawansowane -->
+        <div class="config-section">
+          <h4>🔧 Zaawansowane</h4>
+          <label class="config-checkbox">
+            <input type="checkbox" id="autoReset" onchange="updateSystemConfig('autoReset', this.checked)">
+            <span class="checkmark"></span>
+            Auto Reset (Automatyczny restart systemu)
           </label>
         </div>
         
@@ -887,8 +962,30 @@ function connectWebSocket() {
         } else {
           showAlert('Błąd aktualizacji konfiguracji: ' + (data.error || 'Nieznany błąd'), 'error');
         }
+      } else if (data.cmd === 'setNetworkFlag') {
+        // Handle network flag response
+        if (data.success) {
+          showAlert(data.message || 'Flaga sieci zaktualizowana', 'success');
+          // Update status display
+          document.getElementById('networkFlagStatus').textContent = data.enabled ? 'WŁĄCZONA' : 'WYŁĄCZONA';
+        } else {
+          showAlert('Błąd aktualizacji flagi sieci: ' + (data.error || 'Nieznany błąd'), 'error');
+        }
+      } else if (data.cmd === 'fan_status' || data.cmd === 'fan_on' || data.cmd === 'fan_off' || 
+                 data.cmd === 'fan_speed' || data.cmd === 'gline_on' || data.cmd === 'gline_off' ||
+                 data.cmd === 'sleep' || data.cmd === 'sleep_stop') {
+        // Handle fan control commands
+        updateFanStatusDisplay(data);
+      } else if (data.cmd === 'restart' || data.cmd === 'lowPowerOn' || data.cmd === 'lowPowerOff' ||
+                 data.cmd === 'pushbulletTest' || data.cmd === 'pushbulletBatteryTest') {
+        // Handle other system commands
+        if (data.success) {
+          showAlert(data.message || `Komenda ${data.cmd} wykonana pomyślnie`, 'success');
+        } else {
+          showAlert(data.error || `Błąd wykonania komendy ${data.cmd}`, 'error');
+        }
       } else if (data.cmd === 'system') {
-        // Handle system commands (including fan control)
+        // Handle legacy system commands (backward compatibility)
         updateFanStatusDisplay(data);
         
         // Also handle other system messages
@@ -896,7 +993,7 @@ function connectWebSocket() {
           updateSystemInfo(data);
         }
       } else {
-        // Handle other messages
+        // Handle other messages (status, sensor data, etc.)
         updateSystemInfo(data);
       }
     } catch (error) {
@@ -911,7 +1008,10 @@ function updateSystemInfo(data = null) {
     const uptime = data.uptime || (data.data && data.data.uptime) || 0;
     const freeHeap = data.freeHeap || (data.data && data.data.freeHeap) || 0;
     const wifiSignal = data.wifiSignal || (data.data && data.data.wifiSignal) || 0;
+    const deviceID = data.DeviceID || (data.data && data.data.DeviceID) || '--';
     
+    document.getElementById('deviceID').textContent = deviceID;
+    document.getElementById('deviceIDInput').value = deviceID; // Fill the input field
     document.getElementById('uptime').textContent = formatUptime(uptime);
     document.getElementById('freeHeap').textContent = Math.round(freeHeap / 1024);
     document.getElementById('wifiSignal').textContent = wifiSignal;
@@ -976,8 +1076,7 @@ function toggleLowPowerMode() {
         "lowPowerOff" : "lowPowerOn";
       
       ws.send(JSON.stringify({
-        cmd: "system",
-        command: command
+        cmd: command  // Bezpośrednie użycie komendy
       }));
     }, 100);
   }
@@ -1050,8 +1149,7 @@ function updatePushbulletConfig(data) {
 function testPushbullet() {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({
-      cmd: "system",
-      command: "pushbulletTest"
+      cmd: "pushbulletTest"  // Bezpośrednie użycie komendy
     }));
   }
 }
@@ -1059,8 +1157,7 @@ function testPushbullet() {
 function testBatteryNotification() {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({
-      cmd: "system",
-      command: "pushbulletBatteryTest"
+      cmd: "pushbulletBatteryTest"  // Bezpośrednie użycie komendy
     }));
   }
 }
@@ -1129,6 +1226,15 @@ function updateSystemConfigDisplay(config) {
   if (config.enableSHT40 !== undefined) {
     document.getElementById('enableSHT40').checked = config.enableSHT40;
   }
+  if (config.enableSHT30 !== undefined) {
+    document.getElementById('enableSHT30').checked = config.enableSHT30;
+  }
+  if (config.enableBME280 !== undefined) {
+    document.getElementById('enableBME280').checked = config.enableBME280;
+  }
+  if (config.enableSCD41 !== undefined) {
+    document.getElementById('enableSCD41').checked = config.enableSCD41;
+  }
   if (config.enableHCHO !== undefined) {
     document.getElementById('enableHCHO').checked = config.enableHCHO;
   }
@@ -1138,14 +1244,26 @@ function updateSystemConfigDisplay(config) {
   if (config.enableMCP3424 !== undefined) {
     document.getElementById('enableMCP3424').checked = config.enableMCP3424;
   }
+  if (config.enableADS1110 !== undefined) {
+    document.getElementById('enableADS1110').checked = config.enableADS1110;
+  }
   if (config.enableSolarSensor !== undefined) {
     document.getElementById('enableSolarSensor').checked = config.enableSolarSensor;
+  }
+  if (config.enableOPCN3Sensor !== undefined) {
+    document.getElementById('enableOPCN3Sensor').checked = config.enableOPCN3Sensor;
   }
   if (config.enableIPS !== undefined) {
     document.getElementById('enableIPS').checked = config.enableIPS;
   }
+  if (config.enableIPSDebug !== undefined) {
+    document.getElementById('enableIPSDebug').checked = config.enableIPSDebug;
+  }
   if (config.enableI2CSensors !== undefined) {
     document.getElementById('enableI2CSensors').checked = config.enableI2CSensors;
+  }
+  if (config.enableFan !== undefined) {
+    document.getElementById('enableFan').checked = config.enableFan;
   }
   
   // Komunikacja
@@ -1163,6 +1281,10 @@ function updateSystemConfigDisplay(config) {
   if (config.lowPowerMode !== undefined) {
     document.getElementById('lowPowerModeMain').checked = config.lowPowerMode;
   }
+  // Zaawansowane
+  if (config.autoReset !== undefined) {
+    document.getElementById('autoReset').checked = config.autoReset;
+  }
 }
 
 function saveAllConfigMain() {
@@ -1178,12 +1300,19 @@ function saveAllConfigMain() {
       // Czujniki
       enableSPS30: document.getElementById('enableSPS30').checked,
       enableSHT40: document.getElementById('enableSHT40').checked,
+      enableSHT30: document.getElementById('enableSHT30').checked,
+      enableBME280: document.getElementById('enableBME280').checked,
+      enableSCD41: document.getElementById('enableSCD41').checked,
       enableHCHO: document.getElementById('enableHCHO').checked,
       enableINA219: document.getElementById('enableINA219').checked,
       enableMCP3424: document.getElementById('enableMCP3424').checked,
+      enableADS1110: document.getElementById('enableADS1110').checked,
       enableSolarSensor: document.getElementById('enableSolarSensor').checked,
+      enableOPCN3Sensor: document.getElementById('enableOPCN3Sensor').checked,
       enableIPS: document.getElementById('enableIPS').checked,
+      enableIPSDebug: document.getElementById('enableIPSDebug').checked,
       enableI2CSensors: document.getElementById('enableI2CSensors').checked,
+      enableFan: document.getElementById('enableFan').checked,
       
       // Komunikacja
       enableWiFi: document.getElementById('enableWiFi').checked,
@@ -1191,7 +1320,9 @@ function saveAllConfigMain() {
       enableModbus: document.getElementById('enableModbus').checked,
       
       // Tryb Pracy
-      lowPowerMode: document.getElementById('lowPowerModeMain').checked
+      lowPowerMode: document.getElementById('lowPowerModeMain').checked,
+      // Zaawansowane
+      autoReset: document.getElementById('autoReset').checked
     };
     
     ws.send(JSON.stringify({
@@ -1213,8 +1344,7 @@ function restartSystemMain() {
     
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
-        cmd: 'system',
-        command: 'restart'
+        cmd: 'restart'  // Bezpośrednie użycie komendy restart
       }));
       showAlert('System zostanie zrestartowany...', 'warning');
     } else {
@@ -1260,16 +1390,19 @@ document.getElementById('updateForm').addEventListener('submit', function(e) {
 
 // Fan Control Functions
 function sendFanCommand(command, value = null) {
-  console.log('Sending fan command:', command, value);
+  console.log('=== sendFanCommand() called ===');
+  console.log('command:', command);
+  console.log('value:', value);
+  console.log('value type:', typeof value);
   
   if (ws && ws.readyState === WebSocket.OPEN) {
     const message = {
-      cmd: 'system',
-      command: command
+      cmd: command  // Bezpośrednie użycie komendy jako cmd
     };
     
     if (value !== null) {
       message.value = value;
+      console.log('Added value to message:', message.value);
     }
     
     // For sleep command, add delay and duration
@@ -1277,6 +1410,9 @@ function sendFanCommand(command, value = null) {
       message.delay = parseInt(document.getElementById('sleepDelay').value) || 60;
       message.duration = parseInt(document.getElementById('sleepDuration').value) || 300;
     }
+    
+    console.log('Final message object:', message);
+    console.log('JSON string:', JSON.stringify(message));
     
     ws.send(JSON.stringify(message));
     
@@ -1297,8 +1433,19 @@ function updateFanSpeed(value) {
 }
 
 function setFanSpeed() {
-  const speed = document.getElementById('fanSpeedSlider').value;
-  sendFanCommand('fan_speed', speed);
+  console.log('=== setFanSpeed() called ===');
+  
+  const slider = document.getElementById('fanSpeedSlider');
+  console.log('Slider element:', slider);
+  
+  const speed = slider.value;
+  console.log('Slider raw value:', speed);
+  console.log('Slider value type:', typeof speed);
+  
+  const speedInt = parseInt(speed);
+  console.log('Parsed to int:', speedInt);
+  
+  sendFanCommand('fan_speed', speedInt);
 }
 
 function startSleepMode() {
@@ -1315,8 +1462,7 @@ function getFanStatus() {
   
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({
-      cmd: 'system',
-      command: 'fan_status'
+      cmd: 'fan_status'  // Bezpośrednie użycie komendy
     }));
   } else {
     showAlert('Brak połączenia WebSocket', 'error');
@@ -1326,7 +1472,8 @@ function getFanStatus() {
 function updateFanStatusDisplay(data) {
   console.log('Updating fan status display:', data);
   
-  if (data.cmd === 'system' && data.command === 'fan_status') {
+  if (data.cmd === 'fan_status') {
+    // Obsługa odpowiedzi fan_status
     document.getElementById('fanState').textContent = data.enabled ? 'Włączony' : 'Wyłączony';
     document.getElementById('fanDutyCycle').textContent = data.dutyCycle || '--';
     document.getElementById('fanRPM').textContent = data.rpm || '--';
@@ -1334,7 +1481,7 @@ function updateFanStatusDisplay(data) {
     
     // Update sleep mode status
     if (data.sleepMode) {
-      const sleepEnd = new Date(data.sleepEndTime);
+      const sleepEnd = new Date(data.sleepEndTime * 1000); // Convert from epoch
       document.getElementById('sleepState').textContent = `Aktywny do ${sleepEnd.toLocaleTimeString()}`;
     } else {
       document.getElementById('sleepState').textContent = 'Nieaktywny';
@@ -1345,26 +1492,45 @@ function updateFanStatusDisplay(data) {
       document.getElementById('fanSpeedSlider').value = data.dutyCycle;
       document.getElementById('fanSpeedValue').textContent = data.dutyCycle;
     }
-  } else if (data.cmd === 'system' && (
-    data.command === 'fan_on' || 
-    data.command === 'fan_off' || 
-    data.command === 'fan_speed' ||
-    data.command === 'gline_on' ||
-    data.command === 'gline_off' ||
-    data.command === 'sleep' ||
-    data.command === 'sleep_stop'
-  )) {
-    // Handle command responses
+  } else if (data.cmd === 'fan_speed' || data.cmd === 'fan_on' || data.cmd === 'fan_off' ||
+             data.cmd === 'gline_on' || data.cmd === 'gline_off' || 
+             data.cmd === 'sleep' || data.cmd === 'sleep_stop') {
+    // Obsługa odpowiedzi komend fan
     if (data.success) {
-      showAlert(data.message || `Komenda ${data.command} wykonana pomyślnie`, 'success');
+      showAlert(data.message || `Komenda ${data.cmd} wykonana pomyślnie`, 'success');
       
       // Update specific UI elements based on command
-      if (data.command === 'fan_speed' && data.speed !== undefined) {
+      if (data.cmd === 'fan_speed' && data.speed !== undefined) {
         document.getElementById('fanSpeedSlider').value = data.speed;
         document.getElementById('fanSpeedValue').textContent = data.speed;
       }
     } else {
-      showAlert(data.error || `Błąd wykonania komendy ${data.command}`, 'error');
+      showAlert(data.error || `Błąd wykonania komendy ${data.cmd}`, 'error');
+    }
+  } else if (data.cmd === 'system') {
+    // Fallback dla starych komend system (jeśli są jeszcze używane)
+    updateFanStatusDisplay_Legacy(data);
+  }
+}
+
+// Legacy function for backward compatibility
+function updateFanStatusDisplay_Legacy(data) {
+  if (data.command === 'fan_status') {
+    document.getElementById('fanState').textContent = data.enabled ? 'Włączony' : 'Wyłączony';
+    document.getElementById('fanDutyCycle').textContent = data.dutyCycle || '--';
+    document.getElementById('fanRPM').textContent = data.rpm || '--';
+    document.getElementById('glineState').textContent = data.glineEnabled ? 'Włączony' : 'Wyłączony';
+    
+    if (data.sleepMode) {
+      const sleepEnd = new Date(data.sleepEndTime);
+      document.getElementById('sleepState').textContent = `Aktywny do ${sleepEnd.toLocaleTimeString()}`;
+    } else {
+      document.getElementById('sleepState').textContent = 'Nieaktywny';
+    }
+    
+    if (data.dutyCycle !== undefined) {
+      document.getElementById('fanSpeedSlider').value = data.dutyCycle;
+      document.getElementById('fanSpeedValue').textContent = data.dutyCycle;
     }
   }
 }
@@ -1434,6 +1600,42 @@ function showAlert(message, type = 'info') {
       }
     }, 300);
   }, 3000);
+}
+
+// Device ID and Network Flag Functions
+function updateDeviceID() {
+  const deviceID = document.getElementById('deviceIDInput').value.trim();
+  if (!deviceID) {
+    showAlert('Wprowadź Device ID', 'error');
+    return;
+  }
+  
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const message = {
+      cmd: 'setConfig',
+      DeviceID: deviceID
+    };
+    ws.send(JSON.stringify(message));
+    showAlert('Wysyłanie Device ID...', 'info');
+  } else {
+    showAlert('WebSocket nie jest połączony', 'error');
+  }
+}
+
+function setNetworkFlag(enabled) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const message = {
+      cmd: 'setNetworkFlag',
+      enabled: enabled
+    };
+    ws.send(JSON.stringify(message));
+    showAlert(`Flaga sieci ${enabled ? 'włączona' : 'wyłączona'}`, 'info');
+    
+    // Update status display
+    document.getElementById('networkFlagStatus').textContent = enabled ? 'WŁĄCZONA' : 'WYŁĄCZONA';
+  } else {
+    showAlert('WebSocket nie jest połączony', 'error');
+  }
 }
 
 // Event listeners

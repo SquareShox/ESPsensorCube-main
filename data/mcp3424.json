@@ -1,0 +1,69 @@
+{
+  "deviceCount": 8,
+  "devices": [
+    {
+      "deviceIndex": 0,
+      "i2cAddress": 104,
+      "gasType": "NO",
+      "description": "NO Sensor (K1)",
+      "enabled": false,
+      "autoDetected": false
+    },
+    {
+      "deviceIndex": 1,
+      "i2cAddress": 106,
+      "gasType": "O3",
+      "description": "O3 Sensor (K2)",
+      "enabled": false,
+      "autoDetected": false
+    },
+    {
+      "deviceIndex": 2,
+      "i2cAddress": 107,
+      "gasType": "NO2",
+      "description": "NO2 Sensor (K3)",
+      "enabled": false,
+      "autoDetected": false
+    },
+    {
+      "deviceIndex": 3,
+      "i2cAddress": 108,
+      "gasType": "CO",
+      "description": "CO Sensor (K4)",
+      "enabled": false,
+      "autoDetected": false
+    },
+    {
+      "deviceIndex": 4,
+      "i2cAddress": 110,
+      "gasType": "SO2",
+      "description": "SO2 Sensor (K5)",
+      "enabled": false,
+      "autoDetected": false
+    },
+    {
+      "deviceIndex": 5,
+      "i2cAddress": 109,
+      "gasType": "TGS1",
+      "description": "TGS Sensor 1",
+      "enabled": false,
+      "autoDetected": false
+    },
+    {
+      "deviceIndex": 6,
+      "i2cAddress": 112,
+      "gasType": "TGS2",
+      "description": "TGS Sensor 2",
+      "enabled": true,
+      "autoDetected": false
+    },
+    {
+      "deviceIndex": 7,
+      "i2cAddress": 111,
+      "gasType": "TGS3",
+      "description": "TGS Sensor 3",
+      "enabled": false,
+      "autoDetected": false
+    }
+  ]
+}

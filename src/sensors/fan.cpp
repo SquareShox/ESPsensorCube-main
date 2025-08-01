@@ -7,6 +7,9 @@ static bool fanEnabled = false;
 static uint8_t fanDutyCycle = 0;  // 0-255
 static uint16_t fanRPM = 0;
 static bool glineEnabled = false;
+
+// Global FanData for moving averages
+FanData fanData;
 static unsigned long lastTachoPulse = 0;
 static unsigned long tachoPulseCount = 0;
 static unsigned long lastRPMCalculation = 0;
@@ -35,7 +38,7 @@ void initializeFan() {
     // Configure PWM for fan control
     ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RESOLUTION);
     ledcAttachPin(PWM_PIN, PWM_CHANNEL);
-    ledcWrite(PWM_CHANNEL, 128); // Start with fan off
+    ledcWrite(PWM_CHANNEL, 0); // Start with fan off
     
     // Configure tacho pin as input with pullup
     pinMode(TACHO_PIN, INPUT_PULLUP);
@@ -44,6 +47,15 @@ void initializeFan() {
     pinMode(GLine_PIN, OUTPUT);
     digitalWrite(GLine_PIN, HIGH); // Start with router ON
     
+    // Initialize global fanData
+    fanData.dutyCycle = 0;
+    fanData.rpm = 0;
+    fanData.enabled = false;
+    fanData.glineEnabled = true; // Start with GLine enabled
+    fanData.valid = true;
+    fanData.lastUpdate = millis();
+    setFanSpeed(50);
+    
     safePrintln("Fan system initialized");
     safePrintln("PWM Pin: " + String(PWM_PIN) + " (Channel " + String(PWM_CHANNEL) + ")");
     safePrintln("Tacho Pin: " + String(TACHO_PIN));
@@ -51,10 +63,16 @@ void initializeFan() {
 }
 
 void setFanSpeed(uint8_t dutyCycle) {
+    safePrintln("=== setFanSpeed() called with dutyCycle=" + String(dutyCycle) + " ===");
+    
     if (dutyCycle > 100) dutyCycle = 100; // Clamp to 0-100%
+    
+    safePrintln("After clamp: dutyCycle=" + String(dutyCycle));
     
     fanDutyCycle = dutyCycle;
     uint8_t pwmValue = map(dutyCycle, 0, 100, 0, 255);
+    
+    safePrintln("PWM value calculated: " + String(pwmValue) + " (from " + String(dutyCycle) + "%)");
     
     if (dutyCycle == 0) {
         fanEnabled = false;
@@ -65,11 +83,25 @@ void setFanSpeed(uint8_t dutyCycle) {
         ledcWrite(PWM_CHANNEL, pwmValue);
         safePrintln("Fan speed set to " + String(dutyCycle) + "% (PWM: " + String(pwmValue) + ")");
     }
+    
+    // Update global fanData
+    fanData.dutyCycle = dutyCycle;
+    fanData.enabled = fanEnabled;
+    fanData.valid = true;
+    fanData.lastUpdate = millis();
+    
+    safePrintln("Final fanDutyCycle=" + String(fanDutyCycle) + ", fanEnabled=" + String(fanEnabled));
 }
 
 void setGLine(bool enabled) {
     glineEnabled = enabled;
     digitalWrite(GLine_PIN, enabled ? HIGH : LOW);
+    
+    // Update global fanData
+    fanData.glineEnabled = enabled;
+    fanData.valid = true;
+    fanData.lastUpdate = millis();
+    
     safePrintln("GLine router " + String(enabled ? "ENABLED" : "DISABLED"));
 }
 
@@ -158,6 +190,11 @@ void updateFanRPM() {
                 fanRPM = 0;
             }
         }
+        
+        // Update global fanData
+        fanData.rpm = fanRPM;
+        fanData.valid = true;
+        fanData.lastUpdate = currentTime;
         
         lastRPMCalculation = currentTime;
     }

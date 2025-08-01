@@ -4,6 +4,38 @@
 #include <config.h>
 #include <calib.h>
 #include <new> // For std::nothrow
+#include <esp_heap_caps.h> // For PSRAM allocation
+
+// Forward declarations
+void safePrint(const String& message);
+void safePrintln(const String& message);
+
+// PSRAM allocation helper for moving averages
+template<typename T>
+T* allocateCircularBufferPSRAM() {
+    if (ESP.getPsramSize() == 0) {
+        Serial.println("PSRAM not available for CircularBuffer, using heap");
+        return new(std::nothrow) T();
+    }
+    
+    size_t size = sizeof(T);
+    void* ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM);
+    if (ptr) {
+        Serial.println("✓ CircularBuffer allocated in PSRAM (" + String(size) + " bytes)");
+        return new(ptr) T(); // Placement new
+    } else {
+        Serial.println("PSRAM allocation failed for CircularBuffer, falling back to heap");
+        return new(std::nothrow) T();
+    }
+}
+
+template<typename T>
+void freeCircularBufferPSRAM(T* ptr) {
+    if (ptr) {
+        ptr->~T(); // Call destructor
+        heap_caps_free(ptr);
+    }
+}
 
 // Temporal moving average periods
 #define FAST_PERIOD_MS (10 * 1000)   // 10 seconds
@@ -623,6 +655,13 @@ MCP3424Data CircularBuffer<MCP3424Data, FAST_BUFFER_SIZE>::addWeighted(const MCP
         result.deviceCount = b.deviceCount;
         result.resolution = b.resolution;
         result.gain = b.gain;
+        result.lastUpdate = b.lastUpdate;  // Dodane kopiowanie lastUpdate
+        
+        // Zresetuj valid array dla bezpieczeństwa
+        for (uint8_t i = 0; i < MAX_MCP3424_DEVICES; i++) {
+            result.valid[i] = false;
+        }
+        
         for (uint8_t dev = 0; dev < b.deviceCount && dev < MAX_MCP3424_DEVICES; dev++) {
             result.addresses[dev] = b.addresses[dev];
             if (b.valid[dev]) {
@@ -640,7 +679,19 @@ template<>
 MCP3424Data CircularBuffer<MCP3424Data, FAST_BUFFER_SIZE>::addSimple(const MCP3424Data& a, const MCP3424Data& b) {
     MCP3424Data result = a;
     if (b.deviceCount > 0) {
+        // Kopiuj metadane
+        result.deviceCount = b.deviceCount;
+        result.resolution = b.resolution;
+        result.gain = b.gain;
+        result.lastUpdate = b.lastUpdate;
+        
+        // Zresetuj valid array dla bezpieczeństwa
+        for (uint8_t i = 0; i < MAX_MCP3424_DEVICES; i++) {
+            result.valid[i] = false;
+        }
+        
         for (uint8_t dev = 0; dev < b.deviceCount && dev < MAX_MCP3424_DEVICES; dev++) {
+            result.addresses[dev] = b.addresses[dev];
             if (b.valid[dev]) {
                 result.valid[dev] = true;
                 for (int ch = 0; ch < 4; ch++) {
@@ -690,6 +741,13 @@ MCP3424Data CircularBuffer<MCP3424Data, SLOW_BUFFER_SIZE>::addWeighted(const MCP
         result.deviceCount = b.deviceCount;
         result.resolution = b.resolution;
         result.gain = b.gain;
+        result.lastUpdate = b.lastUpdate;  // Dodane kopiowanie lastUpdate
+        
+        // Zresetuj valid array dla bezpieczeństwa
+        for (uint8_t i = 0; i < MAX_MCP3424_DEVICES; i++) {
+            result.valid[i] = false;
+        }
+        
         for (uint8_t dev = 0; dev < b.deviceCount && dev < MAX_MCP3424_DEVICES; dev++) {
             result.addresses[dev] = b.addresses[dev];
             if (b.valid[dev]) {
@@ -707,7 +765,19 @@ template<>
 MCP3424Data CircularBuffer<MCP3424Data, SLOW_BUFFER_SIZE>::addSimple(const MCP3424Data& a, const MCP3424Data& b) {
     MCP3424Data result = a;
     if (b.deviceCount > 0) {
+        // Kopiuj metadane
+        result.deviceCount = b.deviceCount;
+        result.resolution = b.resolution;
+        result.gain = b.gain;
+        result.lastUpdate = b.lastUpdate;
+        
+        // Zresetuj valid array dla bezpieczeństwa
+        for (uint8_t i = 0; i < MAX_MCP3424_DEVICES; i++) {
+            result.valid[i] = false;
+        }
+        
         for (uint8_t dev = 0; dev < b.deviceCount && dev < MAX_MCP3424_DEVICES; dev++) {
+            result.addresses[dev] = b.addresses[dev];
             if (b.valid[dev]) {
                 result.valid[dev] = true;
                 for (int ch = 0; ch < 4; ch++) {
@@ -1619,6 +1689,111 @@ HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::divideByCount(const HCHODat
     return result;
 }
 
+// FanData template specializations
+template<>
+FanData CircularBuffer<FanData, FAST_BUFFER_SIZE>::addWeighted(const FanData& a, const FanData& b, float weight) {
+    FanData result;
+    result.dutyCycle = (uint8_t)(a.dutyCycle * weight + b.dutyCycle * (1.0f - weight));
+    result.rpm = (uint16_t)(a.rpm * weight + b.rpm * (1.0f - weight));
+    result.enabled = a.enabled || b.enabled;
+    result.glineEnabled = a.glineEnabled || b.glineEnabled;
+    result.valid = a.valid || b.valid;
+    result.lastUpdate = millis();
+    return result;
+}
+
+template<>
+FanData CircularBuffer<FanData, FAST_BUFFER_SIZE>::addSimple(const FanData& a, const FanData& b) {
+    FanData result;
+    result.dutyCycle = a.dutyCycle + b.dutyCycle;
+    result.rpm = a.rpm + b.rpm;
+    result.enabled = a.enabled || b.enabled;
+    result.glineEnabled = a.glineEnabled || b.glineEnabled;
+    result.valid = a.valid || b.valid;
+    result.lastUpdate = millis();
+    return result;
+}
+
+template<>
+FanData CircularBuffer<FanData, FAST_BUFFER_SIZE>::divideByWeight(const FanData& sum, float weight) {
+    FanData result;
+    if (weight > 0) {
+        result.dutyCycle = (uint8_t)(sum.dutyCycle / weight);
+        result.rpm = (uint16_t)(sum.rpm / weight);
+        result.enabled = sum.enabled;
+        result.glineEnabled = sum.glineEnabled;
+        result.valid = true;
+        result.lastUpdate = millis();
+    }
+    return result;
+}
+
+template<>
+FanData CircularBuffer<FanData, FAST_BUFFER_SIZE>::divideByCount(const FanData& sum, size_t count) {
+    FanData result;
+    if (count > 0) {
+        result.dutyCycle = (uint8_t)(sum.dutyCycle / count);
+        result.rpm = (uint16_t)(sum.rpm / count);
+        result.enabled = sum.enabled;
+        result.glineEnabled = sum.glineEnabled;
+        result.valid = true;
+        result.lastUpdate = millis();
+    }
+    return result;
+}
+
+template<>
+FanData CircularBuffer<FanData, SLOW_BUFFER_SIZE>::addWeighted(const FanData& a, const FanData& b, float weight) {
+    FanData result;
+    result.dutyCycle = (uint8_t)(a.dutyCycle * weight + b.dutyCycle * (1.0f - weight));
+    result.rpm = (uint16_t)(a.rpm * weight + b.rpm * (1.0f - weight));
+    result.enabled = a.enabled || b.enabled;
+    result.glineEnabled = a.glineEnabled || b.glineEnabled;
+    result.valid = a.valid || b.valid;
+    result.lastUpdate = millis();
+    return result;
+}
+
+template<>
+FanData CircularBuffer<FanData, SLOW_BUFFER_SIZE>::addSimple(const FanData& a, const FanData& b) {
+    FanData result;
+    result.dutyCycle = a.dutyCycle + b.dutyCycle;
+    result.rpm = a.rpm + b.rpm;
+    result.enabled = a.enabled || b.enabled;
+    result.glineEnabled = a.glineEnabled || b.glineEnabled;
+    result.valid = a.valid || b.valid;
+    result.lastUpdate = millis();
+    return result;
+}
+
+template<>
+FanData CircularBuffer<FanData, SLOW_BUFFER_SIZE>::divideByWeight(const FanData& sum, float weight) {
+    FanData result;
+    if (weight > 0) {
+        result.dutyCycle = (uint8_t)(sum.dutyCycle / weight);
+        result.rpm = (uint16_t)(sum.rpm / weight);
+        result.enabled = sum.enabled;
+        result.glineEnabled = sum.glineEnabled;
+        result.valid = true;
+        result.lastUpdate = millis();
+    }
+    return result;
+}
+
+template<>
+FanData CircularBuffer<FanData, SLOW_BUFFER_SIZE>::divideByCount(const FanData& sum, size_t count) {
+    FanData result;
+    if (count > 0) {
+        result.dutyCycle = (uint8_t)(sum.dutyCycle / count);
+        result.rpm = (uint16_t)(sum.rpm / count);
+        result.enabled = sum.enabled;
+        result.glineEnabled = sum.glineEnabled;
+        result.valid = true;
+        result.lastUpdate = millis();
+    }
+    return result;
+}
+
 // Moving average manager class
 class MovingAverageManager {
 private:
@@ -1633,6 +1808,7 @@ private:
     CircularBuffer<SHT40Data, FAST_BUFFER_SIZE>* sht40FastBuffer;
     CircularBuffer<CalibratedSensorData, FAST_BUFFER_SIZE>* calibFastBuffer;
     CircularBuffer<HCHOData, FAST_BUFFER_SIZE>* hchoFastBuffer;
+    CircularBuffer<FanData, FAST_BUFFER_SIZE>* fanFastBuffer;
     
     // Slow buffers (5 minute averages) - conditionally allocated
     CircularBuffer<SolarData, SLOW_BUFFER_SIZE>* solarSlowBuffer;
@@ -1645,6 +1821,7 @@ private:
     CircularBuffer<SHT40Data, SLOW_BUFFER_SIZE>* sht40SlowBuffer;
     CircularBuffer<CalibratedSensorData, SLOW_BUFFER_SIZE>* calibSlowBuffer;
     CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>* hchoSlowBuffer;
+    CircularBuffer<FanData, SLOW_BUFFER_SIZE>* fanSlowBuffer;
     
     // Sensor enabled flags (cached from config)
     bool solarEnabled;
@@ -1657,6 +1834,7 @@ private:
     bool sht40Enabled;
     bool calibEnabled;
     bool hchoEnabled;
+    bool fanEnabled;
     
     // Averaged data storage
     SolarData solarFastAvg, solarSlowAvg;
@@ -1669,6 +1847,7 @@ private:
     SHT40Data sht40FastAvg, sht40SlowAvg;
     CalibratedSensorData calibFastAvg, calibSlowAvg;
     HCHOData hchoFastAvg, hchoSlowAvg;
+    FanData fanFastAvg, fanSlowAvg;
     
     unsigned long lastFastUpdate = 0;
     unsigned long lastSlowUpdate = 0;
@@ -1686,6 +1865,7 @@ public:
         sht40FastBuffer = nullptr;
         calibFastBuffer = nullptr;
         hchoFastBuffer = nullptr;
+        fanFastBuffer = nullptr;
         
         solarSlowBuffer = nullptr;
         i2cSlowBuffer = nullptr;
@@ -1697,6 +1877,7 @@ public:
         sht40SlowBuffer = nullptr;
         calibSlowBuffer = nullptr;
         hchoSlowBuffer = nullptr;
+        fanSlowBuffer = nullptr;
         
         // Initialize all flags to false
         solarEnabled = false;
@@ -1709,31 +1890,34 @@ public:
         sht40Enabled = false;
         calibEnabled = false;
         hchoEnabled = false;
+        fanEnabled = false;
     }
     
     ~MovingAverageManager() {
-        // Clean up dynamically allocated buffers
-        delete solarFastBuffer;
-        delete i2cFastBuffer;
-        delete sps30FastBuffer;
-        delete ipsFastBuffer;
-        delete mcp3424FastBuffer;
-        delete ads1110FastBuffer;
-        delete ina219FastBuffer;
-        delete sht40FastBuffer;
-        delete calibFastBuffer;
-        delete hchoFastBuffer;
+        // Clean up dynamically allocated buffers (PSRAM/heap safe)
+        freeCircularBufferPSRAM(solarFastBuffer);
+        freeCircularBufferPSRAM(i2cFastBuffer);
+        freeCircularBufferPSRAM(sps30FastBuffer);
+        freeCircularBufferPSRAM(ipsFastBuffer);
+        freeCircularBufferPSRAM(mcp3424FastBuffer);
+        freeCircularBufferPSRAM(ads1110FastBuffer);
+        freeCircularBufferPSRAM(ina219FastBuffer);
+        freeCircularBufferPSRAM(sht40FastBuffer);
+        freeCircularBufferPSRAM(calibFastBuffer);
+        freeCircularBufferPSRAM(hchoFastBuffer);
+        freeCircularBufferPSRAM(fanFastBuffer);
         
-        delete solarSlowBuffer;
-        delete i2cSlowBuffer;
-        delete sps30SlowBuffer;
-        delete ipsSlowBuffer;
-        delete mcp3424SlowBuffer;
-        delete ads1110SlowBuffer;
-        delete ina219SlowBuffer;
-        delete sht40SlowBuffer;
-        delete calibSlowBuffer;
-        delete hchoSlowBuffer;
+        freeCircularBufferPSRAM(solarSlowBuffer);
+        freeCircularBufferPSRAM(i2cSlowBuffer);
+        freeCircularBufferPSRAM(sps30SlowBuffer);
+        freeCircularBufferPSRAM(ipsSlowBuffer);
+        freeCircularBufferPSRAM(mcp3424SlowBuffer);
+        freeCircularBufferPSRAM(ads1110SlowBuffer);
+        freeCircularBufferPSRAM(ina219SlowBuffer);
+        freeCircularBufferPSRAM(sht40SlowBuffer);
+        freeCircularBufferPSRAM(calibSlowBuffer);
+        freeCircularBufferPSRAM(hchoSlowBuffer);
+        freeCircularBufferPSRAM(fanSlowBuffer);
     }
     
     void initializeBuffers() {
@@ -1750,135 +1934,151 @@ public:
         sht40Enabled = config.enableSHT40;
         calibEnabled = calibConfig.enableMovingAverages;
         hchoEnabled = config.enableHCHO;
+        fanEnabled = config.enableFan;
         
         Serial.println("Initializing moving average buffers for enabled sensors:");
         
         // Allocate buffers only for enabled sensors
         if (solarEnabled) {
-            solarFastBuffer = new(std::nothrow) CircularBuffer<SolarData, FAST_BUFFER_SIZE>();
-            solarSlowBuffer = new(std::nothrow) CircularBuffer<SolarData, SLOW_BUFFER_SIZE>();
+            solarFastBuffer = allocateCircularBufferPSRAM<CircularBuffer<SolarData, FAST_BUFFER_SIZE>>();
+            solarSlowBuffer = allocateCircularBufferPSRAM<CircularBuffer<SolarData, SLOW_BUFFER_SIZE>>();
             if (solarFastBuffer && solarSlowBuffer) {
                 Serial.println("  - Solar buffers allocated");
             } else {
                 Serial.println("  - ERROR: Failed to allocate Solar buffers");
-                delete solarFastBuffer; delete solarSlowBuffer;
+                freeCircularBufferPSRAM(solarFastBuffer); freeCircularBufferPSRAM(solarSlowBuffer);
                 solarFastBuffer = nullptr; solarSlowBuffer = nullptr;
                 solarEnabled = false;
             }
         }
         
         if (i2cEnabled) {
-            i2cFastBuffer = new(std::nothrow) CircularBuffer<I2CSensorData, FAST_BUFFER_SIZE>();
-            i2cSlowBuffer = new(std::nothrow) CircularBuffer<I2CSensorData, SLOW_BUFFER_SIZE>();
+            i2cFastBuffer = allocateCircularBufferPSRAM<CircularBuffer<I2CSensorData, FAST_BUFFER_SIZE>>();
+            i2cSlowBuffer = allocateCircularBufferPSRAM<CircularBuffer<I2CSensorData, SLOW_BUFFER_SIZE>>();
             if (i2cFastBuffer && i2cSlowBuffer) {
                 Serial.println("  - I2C buffers allocated");
             } else {
                 Serial.println("  - ERROR: Failed to allocate I2C buffers");
-                delete i2cFastBuffer; delete i2cSlowBuffer;
+                freeCircularBufferPSRAM(i2cFastBuffer); freeCircularBufferPSRAM(i2cSlowBuffer);
                 i2cFastBuffer = nullptr; i2cSlowBuffer = nullptr;
                 i2cEnabled = false;
             }
         }
         
         if (sps30Enabled) {
-            sps30FastBuffer = new(std::nothrow) CircularBuffer<SPS30Data, FAST_BUFFER_SIZE>();
-            sps30SlowBuffer = new(std::nothrow) CircularBuffer<SPS30Data, SLOW_BUFFER_SIZE>();
+            sps30FastBuffer = allocateCircularBufferPSRAM<CircularBuffer<SPS30Data, FAST_BUFFER_SIZE>>();
+            sps30SlowBuffer = allocateCircularBufferPSRAM<CircularBuffer<SPS30Data, SLOW_BUFFER_SIZE>>();
             if (sps30FastBuffer && sps30SlowBuffer) {
                 Serial.println("  - SPS30 buffers allocated");
             } else {
                 Serial.println("  - ERROR: Failed to allocate SPS30 buffers");
-                delete sps30FastBuffer; delete sps30SlowBuffer;
+                freeCircularBufferPSRAM(sps30FastBuffer); freeCircularBufferPSRAM(sps30SlowBuffer);
                 sps30FastBuffer = nullptr; sps30SlowBuffer = nullptr;
                 sps30Enabled = false;
             }
         }
         
         if (ipsEnabled) {
-            ipsFastBuffer = new(std::nothrow) CircularBuffer<IPSSensorData, FAST_BUFFER_SIZE>();
-            ipsSlowBuffer = new(std::nothrow) CircularBuffer<IPSSensorData, SLOW_BUFFER_SIZE>();
+            ipsFastBuffer = allocateCircularBufferPSRAM<CircularBuffer<IPSSensorData, FAST_BUFFER_SIZE>>();
+            ipsSlowBuffer = allocateCircularBufferPSRAM<CircularBuffer<IPSSensorData, SLOW_BUFFER_SIZE>>();
             if (ipsFastBuffer && ipsSlowBuffer) {
                 Serial.println("  - IPS buffers allocated");
             } else {
                 Serial.println("  - ERROR: Failed to allocate IPS buffers");
-                delete ipsFastBuffer; delete ipsSlowBuffer;
+                freeCircularBufferPSRAM(ipsFastBuffer); freeCircularBufferPSRAM(ipsSlowBuffer);
                 ipsFastBuffer = nullptr; ipsSlowBuffer = nullptr;
                 ipsEnabled = false;
             }
         }
         
         if (mcp3424Enabled) {
-            mcp3424FastBuffer = new(std::nothrow) CircularBuffer<MCP3424Data, FAST_BUFFER_SIZE>();
-            mcp3424SlowBuffer = new(std::nothrow) CircularBuffer<MCP3424Data, SLOW_BUFFER_SIZE>();
+            mcp3424FastBuffer = allocateCircularBufferPSRAM<CircularBuffer<MCP3424Data, FAST_BUFFER_SIZE>>();
+            mcp3424SlowBuffer = allocateCircularBufferPSRAM<CircularBuffer<MCP3424Data, SLOW_BUFFER_SIZE>>();
             if (mcp3424FastBuffer && mcp3424SlowBuffer) {
                 Serial.println("  - MCP3424 buffers allocated");
             } else {
                 Serial.println("  - ERROR: Failed to allocate MCP3424 buffers");
-                delete mcp3424FastBuffer; delete mcp3424SlowBuffer;
+                freeCircularBufferPSRAM(mcp3424FastBuffer); freeCircularBufferPSRAM(mcp3424SlowBuffer);
                 mcp3424FastBuffer = nullptr; mcp3424SlowBuffer = nullptr;
                 mcp3424Enabled = false;
             }
+        } else {
+            Serial.println("  - MCP3424 buffers NOT allocated (disabled)");
         }
         
         if (ads1110Enabled) {
-            ads1110FastBuffer = new(std::nothrow) CircularBuffer<ADS1110Data, FAST_BUFFER_SIZE>();
-            ads1110SlowBuffer = new(std::nothrow) CircularBuffer<ADS1110Data, SLOW_BUFFER_SIZE>();
+            ads1110FastBuffer = allocateCircularBufferPSRAM<CircularBuffer<ADS1110Data, FAST_BUFFER_SIZE>>();
+            ads1110SlowBuffer = allocateCircularBufferPSRAM<CircularBuffer<ADS1110Data, SLOW_BUFFER_SIZE>>();
             if (ads1110FastBuffer && ads1110SlowBuffer) {
                 Serial.println("  - ADS1110 buffers allocated");
             } else {
                 Serial.println("  - ERROR: Failed to allocate ADS1110 buffers");
-                delete ads1110FastBuffer; delete ads1110SlowBuffer;
+                freeCircularBufferPSRAM(ads1110FastBuffer); freeCircularBufferPSRAM(ads1110SlowBuffer);
                 ads1110FastBuffer = nullptr; ads1110SlowBuffer = nullptr;
                 ads1110Enabled = false;
             }
         }
         
         if (ina219Enabled) {
-            ina219FastBuffer = new(std::nothrow) CircularBuffer<INA219Data, FAST_BUFFER_SIZE>();
-            ina219SlowBuffer = new(std::nothrow) CircularBuffer<INA219Data, SLOW_BUFFER_SIZE>();
+            ina219FastBuffer = allocateCircularBufferPSRAM<CircularBuffer<INA219Data, FAST_BUFFER_SIZE>>();
+            ina219SlowBuffer = allocateCircularBufferPSRAM<CircularBuffer<INA219Data, SLOW_BUFFER_SIZE>>();
             if (ina219FastBuffer && ina219SlowBuffer) {
                 Serial.println("  - INA219 buffers allocated");
             } else {
                 Serial.println("  - ERROR: Failed to allocate INA219 buffers");
-                delete ina219FastBuffer; delete ina219SlowBuffer;
+                freeCircularBufferPSRAM(ina219FastBuffer); freeCircularBufferPSRAM(ina219SlowBuffer);
                 ina219FastBuffer = nullptr; ina219SlowBuffer = nullptr;
                 ina219Enabled = false;
             }
         }
         
         if (sht40Enabled) {
-            sht40FastBuffer = new(std::nothrow) CircularBuffer<SHT40Data, FAST_BUFFER_SIZE>();
-            sht40SlowBuffer = new(std::nothrow) CircularBuffer<SHT40Data, SLOW_BUFFER_SIZE>();
+            sht40FastBuffer = allocateCircularBufferPSRAM<CircularBuffer<SHT40Data, FAST_BUFFER_SIZE>>();
+            sht40SlowBuffer = allocateCircularBufferPSRAM<CircularBuffer<SHT40Data, SLOW_BUFFER_SIZE>>();
             if (sht40FastBuffer && sht40SlowBuffer) {
                 Serial.println("  - SHT40 buffers allocated");
             } else {
                 Serial.println("  - ERROR: Failed to allocate SHT40 buffers");
-                delete sht40FastBuffer; delete sht40SlowBuffer;
+                freeCircularBufferPSRAM(sht40FastBuffer); freeCircularBufferPSRAM(sht40SlowBuffer);
                 sht40FastBuffer = nullptr; sht40SlowBuffer = nullptr;
                 sht40Enabled = false;
             }
         }
 
         if (calibEnabled) {
-            calibFastBuffer = new(std::nothrow) CircularBuffer<CalibratedSensorData, FAST_BUFFER_SIZE>();
-            calibSlowBuffer = new(std::nothrow) CircularBuffer<CalibratedSensorData, SLOW_BUFFER_SIZE>();
+            calibFastBuffer = allocateCircularBufferPSRAM<CircularBuffer<CalibratedSensorData, FAST_BUFFER_SIZE>>();
+            calibSlowBuffer = allocateCircularBufferPSRAM<CircularBuffer<CalibratedSensorData, SLOW_BUFFER_SIZE>>();
             if (calibFastBuffer && calibSlowBuffer) {
                 Serial.println("  - Calibration buffers allocated");
             } else {
                 Serial.println("  - ERROR: Failed to allocate Calibration buffers");
-                delete calibFastBuffer; delete calibSlowBuffer;
+                freeCircularBufferPSRAM(calibFastBuffer); freeCircularBufferPSRAM(calibSlowBuffer);
                 calibFastBuffer = nullptr; calibSlowBuffer = nullptr;
                 calibEnabled = false;
             }
         }
         
+        if (fanEnabled) {
+            fanFastBuffer = allocateCircularBufferPSRAM<CircularBuffer<FanData, FAST_BUFFER_SIZE>>();
+            fanSlowBuffer = allocateCircularBufferPSRAM<CircularBuffer<FanData, SLOW_BUFFER_SIZE>>();
+            if (fanFastBuffer && fanSlowBuffer) {
+                Serial.println("  - Fan buffers allocated");
+            } else {
+                Serial.println("  - ERROR: Failed to allocate Fan buffers");
+                freeCircularBufferPSRAM(fanFastBuffer); freeCircularBufferPSRAM(fanSlowBuffer);
+                fanFastBuffer = nullptr; fanSlowBuffer = nullptr;
+                fanEnabled = false;
+            }
+        }
+        
         if (hchoEnabled) {
-            hchoFastBuffer = new(std::nothrow) CircularBuffer<HCHOData, FAST_BUFFER_SIZE>();
-            hchoSlowBuffer = new(std::nothrow) CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>();
+            hchoFastBuffer = allocateCircularBufferPSRAM<CircularBuffer<HCHOData, FAST_BUFFER_SIZE>>();
+            hchoSlowBuffer = allocateCircularBufferPSRAM<CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>>();
             if (hchoFastBuffer && hchoSlowBuffer) {
                 Serial.println("  - HCHO buffers allocated");
             } else {
                 Serial.println("  - ERROR: Failed to allocate HCHO buffers");
-                delete hchoFastBuffer; delete hchoSlowBuffer;
+                freeCircularBufferPSRAM(hchoFastBuffer); freeCircularBufferPSRAM(hchoSlowBuffer);
                 hchoFastBuffer = nullptr; hchoSlowBuffer = nullptr;
                 hchoEnabled = false;
             }
@@ -1972,6 +2172,14 @@ public:
             hchoSlowBuffer->push(hchoData, currentTime);
         }
         
+        if (fanEnabled && fanFastBuffer && fanSlowBuffer) {
+            extern FanData fanData;
+            if (fanData.valid) {
+                fanFastBuffer->push(fanData, currentTime);
+                fanSlowBuffer->push(fanData, currentTime);
+            }
+        }
+        
         // Update fast averages (every 5 seconds)
         if (currentTime - lastFastUpdate >= 5000) {
             lastFastUpdate = currentTime;
@@ -2008,6 +2216,9 @@ public:
             }
             if (hchoEnabled && hchoFastBuffer) {
                 hchoFastAvg = hchoFastBuffer->getWeightedAverage(currentTime, FAST_PERIOD_MS);
+            }
+            if (fanEnabled && fanFastBuffer) {
+                fanFastAvg = fanFastBuffer->getWeightedAverage(currentTime, FAST_PERIOD_MS);
             }
         }
         
@@ -2047,6 +2258,9 @@ public:
             }
             if (hchoEnabled && hchoSlowBuffer) {
                 hchoSlowAvg = hchoSlowBuffer->getWeightedAverage(currentTime, SLOW_PERIOD_MS);
+            }
+            if (fanEnabled && fanSlowBuffer) {
+                fanSlowAvg = fanSlowBuffer->getWeightedAverage(currentTime, SLOW_PERIOD_MS);
             }
         }
     }
@@ -2089,12 +2303,18 @@ public:
     }
     
     MCP3424Data getMCP3424FastAverage() const { 
-        if (mcp3424Enabled && mcp3424FastBuffer) return mcp3424FastAvg; 
-        return MCP3424Data{}; 
+        if (mcp3424Enabled && mcp3424FastBuffer) {
+            return mcp3424FastAvg; 
+        } else {
+            return MCP3424Data{}; 
+        }
     }
     MCP3424Data getMCP3424SlowAverage() const { 
-        if (mcp3424Enabled && mcp3424SlowBuffer) return mcp3424SlowAvg; 
-        return MCP3424Data{}; 
+        if (mcp3424Enabled && mcp3424SlowBuffer) {
+            return mcp3424SlowAvg; 
+        } else {
+            return MCP3424Data{}; 
+        }
     }
     
     ADS1110Data getADS1110FastAverage() const { 
@@ -2133,13 +2353,22 @@ public:
         return CalibratedSensorData{};
     }
     
-    HCHOData getHCHOFastAverage() const {
-        if (hchoEnabled && hchoFastBuffer) return hchoFastAvg;
-        return HCHOData{};
+        HCHOData getHCHOFastAverage() const {
+        if (hchoEnabled && hchoFastBuffer) return hchoFastAvg; 
+        return HCHOData{}; 
     }
     HCHOData getHCHOSlowAverage() const {
-        if (hchoEnabled && hchoSlowBuffer) return hchoSlowAvg;
-        return HCHOData{};
+        if (hchoEnabled && hchoSlowBuffer) return hchoSlowAvg; 
+        return HCHOData{}; 
+    }
+    
+    FanData getFANFastAverage() const {
+        if (fanEnabled && fanFastBuffer) return fanFastAvg; 
+        return FanData{}; 
+    }
+    FanData getFANSlowAverage() const {
+        if (fanEnabled && fanSlowBuffer) return fanSlowAvg; 
+        return FanData{}; 
     }
     
     void printAverageStatus() {
@@ -2283,4 +2512,11 @@ HCHOData getHCHOFastAverage() {
 
 HCHOData getHCHOSlowAverage() {
     return movingAverageManager.getHCHOSlowAverage();
+}
+
+FanData getFANFastAverage() {
+    return movingAverageManager.getFANFastAverage();
+}
+FanData getFANSlowAverage() {
+    return movingAverageManager.getFANSlowAverage();
 }

@@ -491,11 +491,17 @@ function connectWebSocket() {
   ws = new WebSocket(`ws://${window.location.host}/ws`);
   ws.onopen = function() {
     console.log('WebSocket connected');
+    showAlert('Połączono z systemem', 'success');
     loadCurrentConfig();
   };
   ws.onclose = function() {
     console.log('WebSocket disconnected, reconnecting...');
+    showAlert('Rozłączono z systemem, ponowne łączenie...', 'warning');
     setTimeout(connectWebSocket, 5000);
+  };
+  ws.onerror = function(error) {
+    console.error('WebSocket error:', error);
+    showAlert('Błąd połączenia WebSocket', 'error');
   };
   ws.onmessage = function(event) {
     try {
@@ -507,24 +513,30 @@ function connectWebSocket() {
       } else if (data.cmd === "setWiFiConfig") {
         if (data.success) {
           showAlert(data.message || 'Konfiguracja WiFi zapisana pomyślnie', 'success');
+          // Refresh config to show updated data
+          setTimeout(() => loadCurrentConfig(), 1000);
         } else {
           showAlert(data.error || 'Błąd zapisu konfiguracji WiFi', 'error');
         }
       } else if (data.cmd === "setNetworkConfig") {
         if (data.success) {
           showAlert(data.message || 'Konfiguracja sieci zapisana pomyślnie', 'success');
+          // Refresh config to show updated data
+          setTimeout(() => loadCurrentConfig(), 1000);
         } else {
           showAlert(data.error || 'Błąd zapisu konfiguracji sieci', 'error');
         }
       } else if (data.cmd === "testWiFi") {
         if (data.wifiConnected) {
-          showAlert(`WiFi połączony: ${data.ssid} (${data.localIP})`, 'success');
+          showAlert(`WiFi połączony: ${data.ssid} (${data.localIP}) Sygnał: ${data.rssi}dBm`, 'success');
         } else {
           showAlert('WiFi nie połączony', 'error');
         }
       } else if (data.cmd === "applyNetworkConfig") {
         if (data.success) {
           showAlert(data.message || 'Konfiguracja sieci zastosowana', 'success');
+          // Refresh config after apply
+          setTimeout(() => loadCurrentConfig(), 2000);
         } else {
           showAlert(data.error || 'Błąd zastosowania konfiguracji', 'error');
         }
@@ -539,6 +551,7 @@ function connectWebSocket() {
       }
     } catch (error) {
       console.error('Error parsing WebSocket data:', error);
+      showAlert('Błąd parsowania odpowiedzi z systemu', 'error');
     }
   };
 }
@@ -561,7 +574,14 @@ function updateNetworkConfigDisplay(data) {
   
   // Update WiFi fields
   document.getElementById('wifi-ssid').value = data.wifiSSID || '';
-  document.getElementById('wifi-password').value = data.wifiPassword || '';
+  // Nie wyświetlamy hasła ze względów bezpieczeństwa, tylko pokazujemy czy jest ustawione
+  if (data.wifiPasswordSet) {
+    document.getElementById('wifi-password').placeholder = 'Hasło ustawione - wprowadź nowe aby zmienić';
+    document.getElementById('wifi-password').value = '';
+  } else {
+    document.getElementById('wifi-password').placeholder = 'Wprowadź hasło WiFi';
+    document.getElementById('wifi-password').value = '';
+  }
   
   // Update network fields
   document.getElementById('static-ip').value = data.staticIP || '192.168.1.100';
@@ -592,7 +612,7 @@ function saveWiFiConfig() {
   const ssid = document.getElementById('wifi-ssid').value.trim();
   const password = document.getElementById('wifi-password').value;
   
-  console.log('Saving WiFi config:', { ssid, password: password ? '***' : 'empty' });
+  console.log('Saving WiFi config:', { ssid, password: password ? '***' : 'empty (keeping existing)' });
   
   if (!ssid) {
     showAlert('Wprowadź nazwę sieci WiFi!', 'error');
@@ -607,7 +627,12 @@ function saveWiFiConfig() {
     };
     console.log('Sending WiFi config command:', command);
     ws.send(JSON.stringify(command));
-    showAlert('Konfiguracja WiFi wysłana...', 'info');
+    
+    if (password === '') {
+      showAlert('Zapisywanie WiFi (hasło pozostanie bez zmian)...', 'info');
+    } else {
+      showAlert('Zapisywanie nowej konfiguracji WiFi...', 'info');
+    }
   } else {
     console.log('WebSocket not connected, state:', ws ? ws.readyState : 'no ws');
     showAlert('Brak połączenia WebSocket!', 'error');
@@ -704,6 +729,27 @@ window.addEventListener('load', function() {
 window.addEventListener('beforeunload', function() {
   if (ws) ws.close();
 });
+
+// Alert/notification function  
+function showAlert(message, type = 'info') {
+  const alertContainer = document.getElementById('alert-container');
+  
+  // Create alert element
+  const alert = document.createElement('div');
+  alert.className = `alert alert-${type}`;
+  alert.textContent = message;
+  
+  // Clear previous alerts and add new one
+  alertContainer.innerHTML = '';
+  alertContainer.appendChild(alert);
+  
+  // Auto-remove after 5 seconds
+  setTimeout(() => {
+    if (alert.parentNode) {
+      alert.parentNode.removeChild(alert);
+    }
+  }, 5000);
+}
 </script>
 </body>
 </html>

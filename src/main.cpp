@@ -44,6 +44,9 @@ bool sendDataFlag = false;
 unsigned long lastSensorCheck = 0;
 unsigned long lastMovingAverageUpdate = 0;
 
+// Network flag for display
+bool turnOnNetwork = false;
+
 // Heap debugging function declarations (Arduino compatible)
 void initializeHeapDebugging();
 void printHeapInfo();
@@ -290,9 +293,13 @@ void loop()
     readBatteryVoltage();
     readSerialSensors();
 
-    // Update battery status and check for shutdown
-    updateBatteryStatus();
-    checkBatteryShutdown();
+    // Update battery status every second (not every loop iteration)
+    static unsigned long lastBatteryUpdate = 0;
+    if (currentTime - lastBatteryUpdate >= 1000) {
+        lastBatteryUpdate = currentTime;
+        updateBatteryStatus();
+        checkBatteryShutdown();
+    }
 
     // Update fan RPM measurement if enabled
     if (config.enableFan)
@@ -1594,8 +1601,8 @@ void setOffPin(bool state)
 float calculateBatteryPercentage(float voltage)
 {
     // Li-ion 2S battery: 7.25V = 0%, 8.35V = 100%
-    const float MIN_VOLTAGE = 7.25;
-    const float MAX_VOLTAGE = 8.35;
+    const float MIN_VOLTAGE = 7.15;
+    const float MAX_VOLTAGE = 8.25;
 
     if (voltage <= MIN_VOLTAGE)
         return 0.0;
@@ -1609,7 +1616,7 @@ bool isBatteryPowered(float current)
 {
     // If current > -20mA, we're powered by external source (charging or external power)
     // If current < -20mA, we're running on battery (discharging)
-    return current > -20.0;
+    return current < -20.0;
 }
 
 void updateBatteryStatus()
@@ -1649,19 +1656,20 @@ void updateBatteryStatus()
     batteryData.valid = true;
     batteryData.lastUpdate = millis();
 
-    // Debug output every 30 seconds
-    // static unsigned long lastBatteryDebug = 0;
-    // if (millis() - lastBatteryDebug > 30000) {
-    //     lastBatteryDebug = millis();
-    //     safePrintln("=== Battery Status ===");
-    //     safePrint("Voltage: "); safePrint(String(avgVoltage, 3)); safePrintln("V");
-    //     safePrint("Current: "); safePrint(String(ina219Data.current, 2)); safePrintln("mA");
-    //     safePrint("Power: "); safePrint(String(ina219Data.power, 1)); safePrintln("mW");
-    //     safePrint("Charge: "); safePrint(String(batteryData.chargePercent)); safePrintln("%");
-    //     safePrint("Source: "); safePrintln(batteryData.isBatteryPowered ? "External" : "Battery");
-    //     safePrint("Low Battery: "); safePrintln(batteryData.lowBattery ? "YES" : "NO");
-    //     safePrint("Critical: "); safePrintln(batteryData.criticalBattery ? "YES" : "NO");
-    // }
+    // Debug output every 30 seconds for monitoring 10-second average
+    static unsigned long lastBatteryDebug = 0;
+    if (millis() - lastBatteryDebug > 30000) {
+        lastBatteryDebug = millis();
+        safePrintln("=== Battery Status (10s average) ===");
+        safePrint("Voltage: "); safePrint(String(avgVoltage, 3)); safePrintln("V");
+        safePrint("Samples: "); safePrint(String(count)); safePrint("/"); safePrintln(String(BatteryData::VOLTAGE_AVERAGE_SIZE));
+        safePrint("Current: "); safePrint(String(ina219Data.current, 2)); safePrintln("mA");
+        safePrint("Power: "); safePrint(String(ina219Data.power, 1)); safePrintln("mW");
+        safePrint("Charge: "); safePrint(String(batteryData.chargePercent)); safePrintln("%");
+        safePrint("Source: "); safePrintln(batteryData.isBatteryPowered ? "Battery" : "External");
+        safePrint("Low Battery (7.2V): "); safePrintln(batteryData.lowBattery ? "YES" : "NO");
+        safePrint("Critical (7.09V): "); safePrintln(batteryData.criticalBattery ? "YES" : "NO");
+    }
 }
 
 void checkBatteryShutdown()
@@ -1669,10 +1677,10 @@ void checkBatteryShutdown()
     if (!batteryData.valid)
         return;
 
-    // If battery voltage drops below 7.2V, activate OFF pin
-    if (batteryData.lowBattery && batteryData.isBatteryPowered)
+    // If 10-second average battery voltage drops below 7.09V (critical), activate OFF pin
+    if (batteryData.criticalBattery && batteryData.isBatteryPowered)
     {
-        safePrintln("WARNING: Low battery detected! Activating OFF pin...");
+        safePrintln("CRITICAL: 10-second average battery voltage below 7.09V! Activating OFF pin...");
 
         // Send critical battery notification
         sendBatteryCriticalNotification();
@@ -1694,7 +1702,7 @@ void checkBatteryShutdown()
 
         // Reset OFF pin to LOW and restart system
         setOffPin(LOW);
-        safePrintln("System restarting after battery shutdown...");
+        safePrintln("System restarting after critical battery shutdown...");
         delay(1000);
         ESP.restart();
     }
@@ -1773,7 +1781,10 @@ void sendBatteryCriticalNotification()
     message += "Current: " + String(batteryData.current, 2) + "mA\n";
     message += "Uptime: " + getUptimeString() + "\n";
     message += "Time: " + getFormattedTime() + " " + getFormattedDate() + "\n";
-    message += "IP: " + WiFi.localIP().toString();
+    message += "IP: " + WiFi.localIP().toString()+"\n";
+    //add vrsion and device id
+    message += "Version: " + String(FIRMWARE_VERSION) + "\n";
+    message += "Device ID: " + String(config.DeviceID) + "\n";
 
     sendPushbulletNotification(title, message);
     digitalWrite(OFF_PIN, HIGH);
@@ -1787,7 +1798,9 @@ void sendSystemStartupNotification()
     message += "IP: " + WiFi.localIP().toString() + "\n";
     message += "WiFi Signal: " + String(WiFi.RSSI()) + " dBm\n";
     message += "Free Heap: " + String(ESP.getFreeHeap() / 1024) + " KB\n";
-    message += "Time: " + getFormattedTime() + " " + getFormattedDate();
+    message += "Time: " + getFormattedTime() + " " + getFormattedDate()+"\n";
+   
+    message += "Device ID: " + String(config.DeviceID) + "\n";
 
     sendPushbulletNotification(title, message);
 }

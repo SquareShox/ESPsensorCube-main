@@ -23,6 +23,10 @@ Sensor_PADS sensor;
 // CRC-8 polynomial for data validation
 #define SHT40_CRC8_POLYNOMIAL 0x31
 
+// Auto-retry timer for SHT40 (2 minutes = 120000ms)
+#define SHT40_RETRY_INTERVAL_MS 120000
+static unsigned long lastSHT40RetryTime = 0;
+
 // Forward declarations
 static void safePrint(const String& message);
 static void safePrintln(const String& message);
@@ -146,12 +150,45 @@ bool initializeSHT40() {
     return true;
 }
 
+// Function to retry SHT40 initialization if failed
+void retrySHT40IfFailed() {
+    extern FeatureConfig config;
+    extern bool sht40SensorStatus;
+    
+    if (!config.enableSHT40 || sht40SensorStatus) {
+        return; // SHT40 disabled or already working
+    }
+    
+    unsigned long currentTime = millis();
+    if (currentTime - lastSHT40RetryTime >= SHT40_RETRY_INTERVAL_MS) {
+        safePrintln("Retrying SHT40 initialization...");
+        if (initializeSHT40()) {
+            safePrintln("SHT40 retry successful!");
+        } else {
+            safePrintln("SHT40 retry failed");
+        }
+        lastSHT40RetryTime = currentTime;
+    }
+}
+
 // Read sensor data from SHT40
 bool readSHT40() {
     extern FeatureConfig config;
+    extern bool sht40SensorStatus;
     
     if (!config.enableSHT40) {
         return false;
+    }
+    
+    // Try to retry initialization if sensor failed
+    static unsigned long lastRetryCheck = 0;
+    if (millis() - lastRetryCheck >= 10000) { // Check every 10 seconds
+        retrySHT40IfFailed();
+        lastRetryCheck = millis();
+    }
+    
+    if (!sht40SensorStatus) {
+        return false; // Sensor not working, don't try to read
     }
 
     // Take I2C semaphore
