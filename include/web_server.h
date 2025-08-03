@@ -12,6 +12,7 @@ void initializeWiFi();
 void initializeWebServer();
 void WiFiReconnectTask(void *parameter);
 
+
 // Global objects
 extern AsyncWebServer server;
 extern AsyncEventSource events;

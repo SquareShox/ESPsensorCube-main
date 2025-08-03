@@ -7,6 +7,7 @@
 #include <config.h>
 #include <time.h>
 #include <cstring>
+#include <esp_heap_caps.h> // For PSRAM allocation
 
 // Forward declaration
 void getFormattedDateTime(char* buffer, size_t bufferSize);
@@ -30,6 +31,12 @@ void getFormattedDateTime(char* buffer, size_t bufferSize);
 #define CALIB_DATA_SIZE 300       // wiele floatów kalibracji
 #define HCHO_DATA_SIZE 32         // 5 floats + flags
 #define FAN_DATA_SIZE 16          // dutyCycle, rpm, flags
+#define BATTERY_DATA_SIZE 32      // voltage, current, power, chargePercent, flags
+#define BATTERY_ENTRY_SIZE 36     // BATTERY_DATA_SIZE + timestamp (4B)
+
+// Rozmiary historii dla baterii
+#define BATTERY_FAST_HISTORY 360  // 1 godzina (co 10s)
+#define BATTERY_SLOW_HISTORY 288  // 24 godziny (co 5min)
 
 // Struktura wpisu historii
 template<typename T>
@@ -164,25 +171,44 @@ public:
     
     ~SensorHistory() {
         if (fastHistory) {
-            free(fastHistory);
+            // heap_caps_free działa zarówno dla PSRAM jak i heap
+            heap_caps_free(fastHistory);
+            fastHistory = nullptr;
         }
         if (slowHistory) {
-            free(slowHistory);
+            heap_caps_free(slowHistory);
+            slowHistory = nullptr;
         }
     }
     
     bool initialize() {
-        // Alokuj w PSRAM jeśli dostępny
-        fastHistory = (HistoryEntry<T>*)ps_malloc(FAST_SIZE * sizeof(HistoryEntry<T>));
-        slowHistory = (HistoryEntry<T>*)ps_malloc(SLOW_SIZE * sizeof(HistoryEntry<T>));
+        // Alokuj w PSRAM jeśli dostępny, inaczej fallback do heap
+        size_t fastSize = FAST_SIZE * sizeof(HistoryEntry<T>);
+        size_t slowSize = SLOW_SIZE * sizeof(HistoryEntry<T>);
         
-        if (!fastHistory || !slowHistory) {
-            // Fallback do zwykłej pamięci
-            if (fastHistory) free(fastHistory);
-            if (slowHistory) free(slowHistory);
+        if (ESP.getPsramSize() > 0) {
+            // Próbuj PSRAM
+            fastHistory = (HistoryEntry<T>*)heap_caps_malloc(fastSize, MALLOC_CAP_SPIRAM);
+            slowHistory = (HistoryEntry<T>*)heap_caps_malloc(slowSize, MALLOC_CAP_SPIRAM);
             
-            fastHistory = (HistoryEntry<T>*)malloc(FAST_SIZE * sizeof(HistoryEntry<T>));
-            slowHistory = (HistoryEntry<T>*)malloc(SLOW_SIZE * sizeof(HistoryEntry<T>));
+            if (fastHistory && slowHistory) {
+                Serial.println("✓ SensorHistory allocated in PSRAM (" + String(fastSize + slowSize) + " bytes)");
+            } else {
+                // Cleanup partial allocation
+                if (fastHistory) heap_caps_free(fastHistory);
+                if (slowHistory) heap_caps_free(slowHistory);
+                fastHistory = nullptr;
+                slowHistory = nullptr;
+            }
+        }
+        
+        // Fallback to heap if PSRAM failed or unavailable
+        if (!fastHistory || !slowHistory) {
+            fastHistory = (HistoryEntry<T>*)malloc(fastSize);
+            slowHistory = (HistoryEntry<T>*)malloc(slowSize);
+            if (fastHistory && slowHistory) {
+                Serial.println("⚠ SensorHistory allocated in heap (" + String(fastSize + slowSize) + " bytes)");
+            }
         }
         
         initialized = (fastHistory != nullptr && slowHistory != nullptr);
@@ -274,6 +300,7 @@ private:
     SensorHistory<CalibratedSensorData, CALIB_FAST_HISTORY, CALIB_SLOW_HISTORY>* calibHistory;
     SensorHistory<HCHOData, HCHO_FAST_HISTORY, HCHO_SLOW_HISTORY>* hchoHistory;
     SensorHistory<FanData, FAN_FAST_HISTORY, FAN_SLOW_HISTORY>* fanHistory;
+    SensorHistory<BatteryData, BATTERY_FAST_HISTORY, BATTERY_SLOW_HISTORY>* batteryHistory;
     
     bool initialized = false;
     size_t totalMemoryUsed = 0;
@@ -299,6 +326,7 @@ public:
     SensorHistory<CalibratedSensorData, CALIB_FAST_HISTORY, CALIB_SLOW_HISTORY>* getCalibHistory() { return calibHistory; }
     SensorHistory<HCHOData, HCHO_FAST_HISTORY, HCHO_SLOW_HISTORY>* getHCHOHistory() { return hchoHistory; }
     SensorHistory<FanData, FAN_FAST_HISTORY, FAN_SLOW_HISTORY>* getFanHistory() { return fanHistory; }
+    SensorHistory<BatteryData, BATTERY_FAST_HISTORY, BATTERY_SLOW_HISTORY>* getBatteryHistory() { return batteryHistory; }
     
     bool isInitialized() const { return initialized; }
     size_t getTotalMemoryUsed() const { return totalMemoryUsed; }
@@ -311,10 +339,11 @@ void initializeHistory();
 void updateSensorHistory();
 void printHistoryMemoryUsage();
 void printHistoryStatus();
+void checkHistoryMemoryType();
 
-// Funkcje API do pobierania danych historycznych
+// Funkcje API do pobierania danych historycznych z pakietowaniem
 size_t getHistoricalData(const String& sensor, const String& timeRange, 
                         String& jsonResponse, unsigned long fromTime = 0, unsigned long toTime = 0,
-                        const String& sampleType = "fast");
+                        const String& sampleType = "fast", int packetIndex = 0, int packetSize = 20);
 
 #endif // HISTORY_H 

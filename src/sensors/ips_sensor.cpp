@@ -29,8 +29,8 @@ void initializeIPS() {
     safePrintln("");
     
     // Wait for sensor boot
-    safePrintln("Waiting 5 seconds for IPS sensor boot...");
-    delay(5000);
+    // safePrintln("Waiting 5 seconds for IPS sensor boot...");
+    // delay(5000);
     
     // Send configuration commands  
     safePrintln("Requesting IPS status...");
@@ -59,7 +59,7 @@ void initializeIPS() {
     // Clear any startup data
     while (Serial1.available()) {
         String c = Serial1.readStringUntil('\n');
-        safePrint(c);
+       // safePrint(c);
     }
     safePrintln("");
     
@@ -220,8 +220,8 @@ bool parseIPSDebugData(String data) {
     // Parse IPS debug data format zgodnie z dokumentacją
     data.trim();
     
-    safePrint("Parsing IPS DEBUG data: ");
-    safePrintln(data);
+    // safePrint("Parsing IPS DEBUG data: ");
+    // safePrintln(data);
     
     if (data.length() < 10) return false;
     

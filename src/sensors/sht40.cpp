@@ -23,6 +23,10 @@ Sensor_PADS sensor;
 // CRC-8 polynomial for data validation
 #define SHT40_CRC8_POLYNOMIAL 0x31
 
+// Auto-retry timer for SHT40 (2 minutes = 120000ms)
+#define SHT40_RETRY_INTERVAL_MS 120000
+static unsigned long lastSHT40RetryTime = 0;
+
 // Forward declarations
 static void safePrint(const String& message);
 static void safePrintln(const String& message);
@@ -81,14 +85,26 @@ bool initializeSHT40() {
     // Check if SHT40 is present
     Wire.beginTransmission(SHT40_DEFAULT_ADDR);
     uint8_t error = Wire.endTransmission();
-    
-    if (error != 0) {
-        safePrint("SHT40 not found at address 0x");
+    int retry = 0;
+    bool found = false;
+    for (retry = 0; retry < 5; retry++) {
+        if (error == 0) {
+            found = true;
+            break;
+        }
+        safePrint("SHT40 nie znaleziony, proba ");
+        safePrintln(String(retry + 1));
+        delay(50);
+        // Ponowne sprawdzenie obecnosci
+        Wire.beginTransmission(SHT40_DEFAULT_ADDR);
+        error = Wire.endTransmission();
+    }
+    if (!found) {
+        safePrint("SHT40 nie znaleziony pod adresem 0x");
         safePrintln(String(SHT40_DEFAULT_ADDR, HEX));
         if (i2c_semaphore) xSemaphoreGive(i2c_semaphore);
         return false;
     }
-    
     // Perform soft reset
     Wire.beginTransmission(SHT40_DEFAULT_ADDR);
     Wire.write(SHT40_SOFT_RESET);
@@ -134,12 +150,45 @@ bool initializeSHT40() {
     return true;
 }
 
+// Function to retry SHT40 initialization if failed
+void retrySHT40IfFailed() {
+    extern FeatureConfig config;
+    extern bool sht40SensorStatus;
+    
+    if (!config.enableSHT40 || sht40SensorStatus) {
+        return; // SHT40 disabled or already working
+    }
+    
+    unsigned long currentTime = millis();
+    if (currentTime - lastSHT40RetryTime >= SHT40_RETRY_INTERVAL_MS) {
+        safePrintln("Retrying SHT40 initialization...");
+        if (initializeSHT40()) {
+            safePrintln("SHT40 retry successful!");
+        } else {
+            safePrintln("SHT40 retry failed");
+        }
+        lastSHT40RetryTime = currentTime;
+    }
+}
+
 // Read sensor data from SHT40
 bool readSHT40() {
     extern FeatureConfig config;
+    extern bool sht40SensorStatus;
     
     if (!config.enableSHT40) {
         return false;
+    }
+    
+    // Try to retry initialization if sensor failed
+    static unsigned long lastRetryCheck = 0;
+    if (millis() - lastRetryCheck >= 10000) { // Check every 10 seconds
+        retrySHT40IfFailed();
+        lastRetryCheck = millis();
+    }
+    
+    if (!sht40SensorStatus) {
+        return false; // Sensor not working, don't try to read
     }
 
     // Take I2C semaphore

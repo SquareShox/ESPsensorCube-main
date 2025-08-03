@@ -1,6 +1,11 @@
 #include <web_server.h>
-#include <html.h>
-#include <chart.h>
+#include <web_socket.h>
+#include <update_html.h>
+#include <dashboard_html.h>
+#include <network_config_html.h>
+#include <mcp3424_config_html.h>
+#include <charts_html.h>
+#include <common_js.h>
 #include <sensors.h>
 #include <calib.h>
 #include <network_config.h>
@@ -9,7 +14,6 @@
 #include <ESPAsyncWebServer.h>
 #include <time.h>
 #include <history.h>
-#include <web_socket.h>
 #include <ArduinoJson.h>
 #include <fan.h>
 #include <mean.h>
@@ -93,8 +97,6 @@ bool isTimeSet() {
     return timeInitialized && (time(nullptr) > 8 * 3600 * 2); // > year 1970
 }
 
-// WebSocket event handler zostanie zastąpiony przez initializeWebSocket
-
 String getAllSensorJson() {
     // Check memory before building JSON
     if (ESP.getFreeHeap() < 15000) {
@@ -109,15 +111,15 @@ String getAllSensorJson() {
     // Create JSON document with appropriate size for all sensor data
     DynamicJsonDocument doc(8192); // 8KB - zmniejszone dla stabilności
     
-    doc["t"] = millis() / 1000;
+    doc["t"] = millis();
     doc["uptime"] = millis() / 1000;
     doc["freeHeap"] = ESP.getFreeHeap();
     doc["wifiSignal"] = WiFi.RSSI();
+    doc["DeviceID"] = config.DeviceID;
     doc["ntpTime"] = getFormattedTime();
     doc["ntpEpoch"] = getEpochTime();
     doc["ntpDate"] = getFormattedDate();
-    doc["ntpValid"] = isTimeSet();
-    
+    doc["ntpValid"] = isTimeSet();    
     // History status
     extern HistoryManager historyManager;
     JsonObject history = doc.createNestedObject("history");
@@ -128,6 +130,8 @@ String getAllSensorJson() {
     
     doc["psramSize"] = ESP.getPsramSize();
     doc["freePsram"] = ESP.getFreePsram();
+    doc["lowPowerMode"] = config.lowPowerMode;
+    doc["enablePushbullet"] = config.enablePushbullet;
     
     JsonObject sensorsEnabled = doc.createNestedObject("sensorsEnabled");
     sensorsEnabled["solar"] = solarSensorStatus;
@@ -227,10 +231,10 @@ String getAllSensorJson() {
     }
     
     // CO2 (SCD41)
-    JsonObject co2 = doc.createNestedObject("co2");
-    co2["valid"] = scd41SensorStatus;
+    JsonObject scd41 = doc.createNestedObject("scd41");
+    scd41["valid"] = scd41SensorStatus;
     if (scd41SensorStatus) {
-        co2["co2"] = i2cSensorData.co2;
+        scd41["co2"] = i2cSensorData.co2;
     }
     
     // MCP3424 (all devices)
@@ -245,10 +249,10 @@ String getAllSensorJson() {
         deviceObj["resolution"] = mcp3424Data.resolution;
         deviceObj["gain"] = mcp3424Data.gain;
         JsonObject channels = deviceObj.createNestedObject("channels");
-        channels["ch1"] = round(mcp3424Data.channels[device][0] * 1000000) / 1000000.0;
-        channels["ch2"] = round(mcp3424Data.channels[device][1] * 1000000) / 1000000.0;
-        channels["ch3"] = round(mcp3424Data.channels[device][2] * 1000000) / 1000000.0;
-        channels["ch4"] = round(mcp3424Data.channels[device][3] * 1000000) / 1000000.0;
+        channels["ch1"] = mcp3424Data.channels[device][0];
+        channels["ch2"] = mcp3424Data.channels[device][1];
+        channels["ch3"] = mcp3424Data.channels[device][2];
+        channels["ch4"] = mcp3424Data.channels[device][3];
     }
     
     // ADS1110
@@ -330,6 +334,22 @@ String getAllSensorJson() {
     fan["pwmValue"] = config.enableFan ? map(getFanDutyCycle(), 0, 100, 0, 255) : 0;
     fan["pwmFreq"] = 25000; // 25kHz
     fan["valid"] = config.enableFan;
+    
+    // Battery monitoring
+    extern BatteryData batteryData;
+    JsonObject battery = doc.createNestedObject("battery");
+    battery["valid"] = batteryData.valid;
+    if (batteryData.valid) {
+        battery["voltage"] = round(batteryData.voltage * 1000) / 1000.0;
+        battery["current"] = round(batteryData.current * 100) / 100.0;
+        battery["power"] = round(batteryData.power * 100) / 100.0;
+        battery["chargePercent"] = batteryData.chargePercent;
+        battery["isBatteryPowered"] = batteryData.isBatteryPowered;
+        battery["lowBattery"] = batteryData.lowBattery;
+        battery["criticalBattery"] = batteryData.criticalBattery;
+        battery["offPinState"] = digitalRead(OFF_PIN);
+        battery["age"] = (millis() - batteryData.lastUpdate) / 1000;
+    }
     
     // Calibration data (all sensors if enabled)
     JsonObject calibration = doc.createNestedObject("calibration");
@@ -421,27 +441,49 @@ String getAllSensorJson() {
         }
     }
     
+    doc["success"] = true;
+    
     String json;
     serializeJson(doc, json);
     return json;
 }
 
 void wsBroadcastTask(void *parameter) {
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xFrequency = pdMS_TO_TICKS(10000); // 10 sekund
+    
     for (;;) {
-        // Skip broadcast if memory is low
-        if (ESP.getFreeHeap() > 20000) {
-            // Użyj getAllSensorJson zamiast broadcastSensorData
-            String jsonData = getAllSensorJson();
-            if (jsonData.length() > 0) {
-                ws.textAll(jsonData);
-                safePrintln("WebSocket broadcast: " + String(jsonData.length()) + " bytes");
-            } else {
-                safePrintln("WebSocket broadcast: empty JSON");
-            }
-        } else {
-            safePrintln("Skipping WebSocket broadcast - low memory: " + String(ESP.getFreeHeap()));
+        // Sprawdź czy są klienci WebSocket
+        if (ws.count() == 0) {
+            vTaskDelayUntil(&xLastWakeTime, xFrequency);
+            continue;
         }
-        vTaskDelay(10000 / portTICK_PERIOD_MS); // 10s
+        
+        // Sprawdź pamięć - użyj tych samych progów co WebSocket task
+        uint32_t freeHeap = ESP.getFreeHeap();
+        if (freeHeap < 20480) { // 20KB minimum heap
+            // Jeśli pamięć krytycznie niska, zasugeruj reset WebSocket
+            if (freeHeap < 10240) { // 10KB critical heap
+                forceWebSocketReset("Critical memory during broadcast");
+            }
+            vTaskDelayUntil(&xLastWakeTime, xFrequency * 2); // Dłuższe opóźnienie
+            continue;
+        }
+        
+        // Sprawdź czy WebSocket nie ma problemów (alternatywnie sprawdź status)
+        if (freeHeap < 30720) { // 30KB - dodatkowy buffer dla broadcast task
+            vTaskDelayUntil(&xLastWakeTime, xFrequency * 2);
+            continue;
+        }
+        
+        // Wyślij dane do wszystkich klientów
+        String jsonData = getAllSensorJson();
+        if (jsonData.length() > 0 && jsonData.length() < 8192) { // Limit rozmiaru
+            ws.textAll(jsonData);
+        }
+        
+        // Regularne opóźnienie
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
 }
 
@@ -452,7 +494,6 @@ void timeCheckTask(void *parameter) {
             time_t now = time(nullptr);
             if (now > 8 * 3600 * 2) { // > year 1970
                 timeInitialized = true;
-                safePrintln("Time synchronized: " + getFormattedTime() + " " + getFormattedDate());
             }
         }
         vTaskDelay(10000 / portTICK_PERIOD_MS); // Check every 10 seconds
@@ -488,7 +529,7 @@ void WiFiReconnectTask(void *parameter) {
                 safePrintln("WiFi reconnection failed");
             }
         }
-        vTaskDelay(30000 / portTICK_PERIOD_MS); // Check every 30 seconds
+        vTaskDelay(20000 / portTICK_PERIOD_MS); // Check every 20 seconds
     }
 }
 
@@ -546,25 +587,31 @@ void initializeWiFi() {
 void initializeWebServer() {
     if (!config.enableWebServer || !config.enableWiFi) return;
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send(200, "text/html", update_html);
+        request->send(200, "text/html", String(update_html) + common_js);
     });
     server.on("/dashboard", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send(200, "text/html", dashboard_html);
+        request->send(200, "text/html", String(dashboard_html) + common_js);
     });
     server.on("/charts", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send(200, "text/html", charts_html);
+        request->send(200, "text/html", String(charts_html) + common_js);
     });
     server.on("/network", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send(200, "text/html", network_config_html);
+        request->send(200, "text/html", String(network_config_html) + common_js);
     });
     server.on("/mcp3424", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send(200, "text/html", mcp3424_config_html);
+        request->send(200, "text/html", String(mcp3424_config_html) + common_js);
+    });
+    server.on("/common.js", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/javascript", common_js);
+    });
+    server.on("/common.js", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/javascript", common_js);
     });
     server.on("/test", HTTP_GET, [](AsyncWebServerRequest *request) {
         request->send(200, "text/plain", "WebSocket test: " + String(ws.count()) + " clients connected");
     });
     server.on("/api/history", HTTP_GET, [](AsyncWebServerRequest *request) {
-        String sensor = "i2c";  // Default to i2c instead of "all"
+        String sensor = "scd41";  // Default to scd41 (CO2 sensor)
         String timeRange = "1h";
         String sampleType = "fast";  // Default to fast samples
         
@@ -640,10 +687,16 @@ void initializeWebServer() {
     });
     // Inicjalizacja WebSocket z nowym systemem komend
     initializeWebSocket(ws);
+    
+    // Inicjalizacja WebSocket Task System
+    if (initializeWebSocketTask()) {
+        safePrintln("WebSocket Task system initialized successfully");
+    } else {
+        safePrintln("WARNING: WebSocket Task system failed to initialize, using fallback mode");
+    }
+    
     server.addHandler(&ws);
     server.begin();
-    safePrintln("Web server started");
-    safePrintln("WebSocket initialized and ready");
     xTaskCreatePinnedToCore(wsBroadcastTask, "wsBroadcastTask", 4096, NULL, 1, NULL, 1);
     xTaskCreatePinnedToCore(WiFiReconnectTask, "wifiReconnectTask", 4096, NULL, 1, NULL, 0);
     xTaskCreatePinnedToCore(timeCheckTask, "timeCheckTask", 2048, NULL, 1, NULL, 0);

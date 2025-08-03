@@ -14,7 +14,9 @@ CalibrationConfig calibConfig;
 
 // External global MCP3424 data
 extern MCP3424Data mcp3424Data;
-
+//#define DEBUG
+const char* gasTypes[] = {"NO", "O3", "NO2", "CO", "SO2", "TGS1", "TGS2", "TGS3"};
+const char* gasNames[] = {"K1", "K2", "K3", "K4", "K5", "K6", "K7", "K8"};
 // Implementacja wzorów z calib_functions.tcl
 
 // Procedury kompensacji temperaturowej dla czujnikow elektrochemicznych
@@ -98,68 +100,143 @@ float Linear_advanced(float mul, float RAW, float add) {
 // Kalibracja temperatury dla czujników K1-K5 (B4)
 void calibrateB4Temperature() {
     // K1 temperatura (NO) - channel 2,3
-    int8_t deviceNO = getMCP3424DeviceByGasType("NO");
+    int8_t deviceNO = getMCP3424DeviceByGasType(gasTypes[0]);
     if (deviceNO >= 0) {
         float K1_3 = getMCP3424Value(deviceNO, 2); // RAW_T
         float K1_4 = getMCP3424Value(deviceNO, 3); // RAW_V
         calibratedData.K1_temp = B4_T(K1_3, K1_4);
+        
+        #ifdef DEBUG
+        Serial.print("[DEBUG] K1 (NO) - device=");
+        Serial.print(deviceNO);
+        Serial.print(", K1_3=");
+        Serial.print(K1_3, 6);
+        Serial.print(", K1_4=");
+        Serial.print(K1_4, 6);
+        Serial.print(", temp=");
+        Serial.println(calibratedData.K1_temp, 6);
+        #endif
+    } else {
+        #ifdef DEBUG
+        Serial.println("[DEBUG] K1 (NO) - device not found");
+        #endif
     }
     
     // K2 temperatura (O3) - channel 2,3
-    int8_t deviceO3 = getMCP3424DeviceByGasType("O3");
+    int8_t deviceO3 = getMCP3424DeviceByGasType(gasTypes[1]);
     if (deviceO3 >= 0) {
         float K2_3 = getMCP3424Value(deviceO3, 2);
         float K2_4 = getMCP3424Value(deviceO3, 3);
         calibratedData.K2_temp = B4_T(K2_3, K2_4);
+        
+        #ifdef DEBUG
+        Serial.print("[DEBUG] K2 (O3) - device=");
+        Serial.print(deviceO3);
+        Serial.print(", K2_3=");
+        Serial.print(K2_3, 6);
+        Serial.print(", K2_4=");
+        Serial.print(K2_4, 6);
+        Serial.print(", temp=");
+        Serial.println(calibratedData.K2_temp, 6);
+        #endif
+    } else {
+        #ifdef DEBUG
+        Serial.println("[DEBUG] K2 (O3) - device not found");
+        #endif
     }
     
-    // K3 temperatura (NO2) - channel 2,3
-    int8_t deviceNO2 = getMCP3424DeviceByGasType("NO2");
+        // K3 temperatura (NO2) - channel 2,3
+    int8_t deviceNO2 = getMCP3424DeviceByGasType(gasTypes[2]);
     if (deviceNO2 >= 0) {
         float K3_3 = getMCP3424Value(deviceNO2, 2);
         float K3_4 = getMCP3424Value(deviceNO2, 3);
         calibratedData.K3_temp = B4_T(K3_3, K3_4);
+        
+        #ifdef DEBUG
+        Serial.print("[DEBUG] K3 (NO2) - device=");
+        Serial.print(deviceNO2);
+        Serial.print(", K3_3=");
+        Serial.print(K3_3, 6);
+        Serial.print(", K3_4=");
+        Serial.print(K3_4, 6);
+        Serial.print(", temp=");
+        Serial.println(calibratedData.K3_temp, 6);
+        #endif
+    } else {
+        #ifdef DEBUG
+        Serial.println("[DEBUG] K3 (NO2) - device not found");
+        #endif
     }
     
     // K4 temperatura (CO) - channel 2,3
-    int8_t deviceCO = getMCP3424DeviceByGasType("CO");
+    int8_t deviceCO = getMCP3424DeviceByGasType(gasTypes[3]);
     if (deviceCO >= 0) {
         float K4_3 = getMCP3424Value(deviceCO, 2);
         float K4_4 = getMCP3424Value(deviceCO, 3);
         calibratedData.K4_temp = B4_T(K4_3, K4_4);
+        
+        #ifdef DEBUG
+        Serial.print("[DEBUG] K4 (CO) - device=");
+        Serial.print(deviceCO);
+        Serial.print(", K4_3=");
+        Serial.print(K4_3, 6);
+        Serial.print(", K4_4=");
+        Serial.print(K4_4, 6);
+        Serial.print(", temp=");
+        Serial.println(calibratedData.K4_temp, 6);
+        #endif
+    } else {
+        #ifdef DEBUG
+        Serial.println("[DEBUG] K4 (CO) - device not found");
+        #endif
     }
     
     // K5 temperatura (SO2) - channel 2,3
-    int8_t deviceSO2 = getMCP3424DeviceByGasType("SO2");
+    int8_t deviceSO2 = getMCP3424DeviceByGasType(gasTypes[4]);
     if (deviceSO2 >= 0) {
         float K5_3 = getMCP3424Value(deviceSO2, 2);
         float K5_4 = getMCP3424Value(deviceSO2, 3);
         calibratedData.K5_temp = B4_T(K5_3, K5_4);
+        
+        #ifdef DEBUG
+        Serial.print("[DEBUG] K5 (SO2) - device=");
+        Serial.print(deviceSO2);
+        Serial.print(", K5_3=");
+        Serial.print(K5_3, 6);
+        Serial.print(", K5_4=");
+        Serial.print(K5_4, 6);
+        Serial.print(", temp=");
+        Serial.println(calibratedData.K5_temp, 6);
+        #endif
+    } else {
+        #ifdef DEBUG
+        Serial.println("[DEBUG] K5 (SO2) - device not found");
+        #endif
     }
 }
 
 // Kalibracja napiec dla czujników B4
 void calibrateB4Voltage() {
-    int8_t deviceNO = getMCP3424DeviceByGasType("NO");
+    int8_t deviceNO = getMCP3424DeviceByGasType(gasTypes[0]);
     if (deviceNO >= 0) calibratedData.K1_voltage = B4_mV(getMCP3424Value(deviceNO, 3));
     
-    int8_t deviceO3 = getMCP3424DeviceByGasType("O3");
+    int8_t deviceO3 = getMCP3424DeviceByGasType(gasTypes[1]);
     if (deviceO3 >= 0) calibratedData.K2_voltage = B4_mV(getMCP3424Value(deviceO3, 3));
     
-    int8_t deviceNO2 = getMCP3424DeviceByGasType("NO2");
+    int8_t deviceNO2 = getMCP3424DeviceByGasType(gasTypes[2]);
     if (deviceNO2 >= 0) calibratedData.K3_voltage = B4_mV(getMCP3424Value(deviceNO2, 3));
     
-    int8_t deviceCO = getMCP3424DeviceByGasType("CO");
+    int8_t deviceCO = getMCP3424DeviceByGasType(gasTypes[3]);
     if (deviceCO >= 0) calibratedData.K4_voltage = B4_mV(getMCP3424Value(deviceCO, 3));
     
-    int8_t deviceSO2 = getMCP3424DeviceByGasType("SO2");
+    int8_t deviceSO2 = getMCP3424DeviceByGasType(gasTypes[4]);
     if (deviceSO2 >= 0) calibratedData.K5_voltage = B4_mV(getMCP3424Value(deviceSO2, 3));
 }
 
 // Kalibracja temperatur czujnikow TGS (K6-K12)
 void calibrateTGSTemperature() {
     // K6 temperatura - TGS1 (channel 0,1)
-    int8_t deviceTGS1 = getMCP3424DeviceByGasType("TGS1");
+    int8_t deviceTGS1 = getMCP3424DeviceByGasType(gasTypes[5]);
     if (deviceTGS1 >= 0) {
         float K6_1 = getMCP3424Value(deviceTGS1, 0); // C1
         float K6_2 = getMCP3424Value(deviceTGS1, 1); // C2
@@ -167,7 +244,7 @@ void calibrateTGSTemperature() {
     }
     
     // K7 temperatura - TGS2 (channel 0,1)
-    int8_t deviceTGS2 = getMCP3424DeviceByGasType("TGS2");
+    int8_t deviceTGS2 = getMCP3424DeviceByGasType(gasTypes[6]);
     if (deviceTGS2 >= 0) {
         float K7_1 = getMCP3424Value(deviceTGS2, 0);
         float K7_2 = getMCP3424Value(deviceTGS2, 1);
@@ -175,7 +252,7 @@ void calibrateTGSTemperature() {
     }
     
     // K8 temperatura - TGS3 (channel 0,1)
-    int8_t deviceTGS3 = getMCP3424DeviceByGasType("TGS3");
+    int8_t deviceTGS3 = getMCP3424DeviceByGasType(gasTypes[7]);
     if (deviceTGS3 >= 0) {
         float K8_1 = getMCP3424Value(deviceTGS3, 0);
         float K8_2 = getMCP3424Value(deviceTGS3, 1);
@@ -193,27 +270,27 @@ void calibrateTGSTemperature() {
 
 // Kalibracja napiec czujnikow TGS
 void calibrateTGSVoltage() {
-    int8_t deviceTGS1 = getMCP3424DeviceByGasType("TGS1");
+    int8_t deviceTGS1 = getMCP3424DeviceByGasType(gasTypes[5]);
     if (deviceTGS1 >= 0) calibratedData.K6_voltage = TGSv4_mV(getMCP3424Value(deviceTGS1, 3));
     
-    int8_t deviceTGS2 = getMCP3424DeviceByGasType("TGS2");
+    int8_t deviceTGS2 = getMCP3424DeviceByGasType(gasTypes[6]);
     if (deviceTGS2 >= 0) calibratedData.K7_voltage = TGSv4_mV(getMCP3424Value(deviceTGS2, 3));
     
-    int8_t deviceTGS3 = getMCP3424DeviceByGasType("TGS3");
+    int8_t deviceTGS3 = getMCP3424DeviceByGasType(gasTypes[7]);
     if (deviceTGS3 >= 0) calibratedData.K8_voltage = TGSv4_mV(getMCP3424Value(deviceTGS3, 3));
     
     // K9 i K12 - używamy CO i O3
-    int8_t deviceCO = getMCP3424DeviceByGasType("CO");
+    int8_t deviceCO = getMCP3424DeviceByGasType(gasTypes[3]);
     if (deviceCO >= 0) calibratedData.K9_voltage = TGSv4_mV(getMCP3424Value(deviceCO, 3));
     
-    int8_t deviceO3 = getMCP3424DeviceByGasType("O3");
+    int8_t deviceO3 = getMCP3424DeviceByGasType(gasTypes[1]);
     if (deviceO3 >= 0) calibratedData.K12_voltage = TGSv4_mV(getMCP3424Value(deviceO3, 3));
 }
 
 // Kalibracja czujnikow TGS
 void calibrateTGSSensors() {
     // TGS03 (K6) - TGS1 (channel 2,3)
-    int8_t deviceTGS1 = getMCP3424DeviceByGasType("TGS1");
+    int8_t deviceTGS1 = getMCP3424DeviceByGasType(gasTypes[5]);
     if (deviceTGS1 >= 0) {
         float K6_3 = getMCP3424Value(deviceTGS1, 2);
         float K6_4 = getMCP3424Value(deviceTGS1, 3);
@@ -222,7 +299,7 @@ void calibrateTGSSensors() {
     }
     
     // TGS02 (K7) - TGS2 (channel 2,3)
-    int8_t deviceTGS2 = getMCP3424DeviceByGasType("TGS2");
+    int8_t deviceTGS2 = getMCP3424DeviceByGasType(gasTypes[6]);
     if (deviceTGS2 >= 0) {
         float K7_3 = getMCP3424Value(deviceTGS2, 2);
         float K7_4 = getMCP3424Value(deviceTGS2, 3);
@@ -234,7 +311,7 @@ void calibrateTGSSensors() {
     }
     
     // TGS12 - TGS3 (channel 2,3)
-    int8_t deviceTGS3 = getMCP3424DeviceByGasType("TGS3");
+    int8_t deviceTGS3 = getMCP3424DeviceByGasType(gasTypes[7]);
     if (deviceTGS3 >= 0) {
         float Kx_3 = getMCP3424Value(deviceTGS3, 2);
         float Kx_4 = getMCP3424Value(deviceTGS3, 3);
@@ -246,7 +323,7 @@ void calibrateTGSSensors() {
 // Kalibracja gazow elektrochemicznych w ug/m3
 void calibrateGases() {
     // CO (K4) - channel 0,1,2,3
-    int8_t deviceCO = getMCP3424DeviceByGasType("CO");
+    int8_t deviceCO = getMCP3424DeviceByGasType(gasTypes[3]);
     if (deviceCO >= 0) {
         float K4_1 = getMCP3424Value(deviceCO, 0); // WRK
         float K4_2 = getMCP3424Value(deviceCO, 1); // AUX  
@@ -255,10 +332,31 @@ void calibrateGases() {
         float T_CO = B4_T(K4_3, K4_4);
         calibratedData.CO = CO_B0 + CO_B1 * K4_1 + CO_B2 * K4_2 + CO_B3 * T_CO;
         calibratedData.CO = fmax(GAS_MIN, fmin(calibratedData.CO, GAS_MAX));
+        
+        #ifdef DEBUG
+        Serial.print("[DEBUG] CO calculation - device=");
+        Serial.print(deviceCO);
+        Serial.print(", K4_1=");
+        Serial.print(K4_1, 6);
+        Serial.print(", K4_2=");
+        Serial.print(K4_2, 6);
+        Serial.print(", K4_3=");
+        Serial.print(K4_3, 6);
+        Serial.print(", K4_4=");
+        Serial.print(K4_4, 6);
+        Serial.print(", T_CO=");
+        Serial.print(T_CO, 6);
+        Serial.print(", CO=");
+        Serial.println(calibratedData.CO, 6);
+        #endif
+    } else {
+        #ifdef DEBUG
+        Serial.println("[DEBUG] CO - device not found");
+        #endif
     }
     
     // NO (K1) - channel 0,1
-    int8_t deviceNO = getMCP3424DeviceByGasType("NO");
+    int8_t deviceNO = getMCP3424DeviceByGasType(gasTypes[0]);
     if (deviceNO >= 0) {
         float K1_1 = getMCP3424Value(deviceNO, 0); // WRK
         float K1_2 = getMCP3424Value(deviceNO, 1); // AUX
@@ -268,7 +366,7 @@ void calibrateGases() {
     }
     
     // NO2 (K3) - channel 0,1
-    int8_t deviceNO2 = getMCP3424DeviceByGasType("NO2");
+    int8_t deviceNO2 = getMCP3424DeviceByGasType(gasTypes[2]);
     if (deviceNO2 >= 0) {
         float K3_1 = getMCP3424Value(deviceNO2, 0); // WRK
         float K3_2 = getMCP3424Value(deviceNO2, 1); // AUX
@@ -278,7 +376,7 @@ void calibrateGases() {
     }
     
     // O3 (K2) z kompensacja NO2 - channel 0,1
-    int8_t deviceO3 = getMCP3424DeviceByGasType("O3");
+    int8_t deviceO3 = getMCP3424DeviceByGasType(gasTypes[1]);
     if (deviceO3 >= 0) {
         float K2_1 = getMCP3424Value(deviceO3, 0); // WRK
         float K2_2 = getMCP3424Value(deviceO3, 1); // AUX
@@ -288,7 +386,7 @@ void calibrateGases() {
     }
     
     // SO2 (K5) - channel 0,1,2,3
-    int8_t deviceSO2 = getMCP3424DeviceByGasType("SO2");
+    int8_t deviceSO2 = getMCP3424DeviceByGasType(gasTypes[4]);
     if (deviceSO2 >= 0) {
         float K5_1 = getMCP3424Value(deviceSO2, 0); // WRK
         float K5_2 = getMCP3424Value(deviceSO2, 1); // AUX
@@ -347,7 +445,7 @@ void calibrateSpecialSensors() {
     }
     
     // PID-AH v8 - wykorzystujemy TGS1
-    int8_t deviceTGS1 = getMCP3424DeviceByGasType("TGS1");
+    int8_t deviceTGS1 = getMCP3424DeviceByGasType(gasTypes[5]);
     if (deviceTGS1 >= 0) {
         float WRK = getMCP3424Value(deviceTGS1, 2); // WRK
         float OFS = getMCP3424Value(deviceTGS1, 3); // OFS
@@ -403,19 +501,27 @@ float clamp(float value, float min_val, float max_val) {
 
 // Glowna funkcja kalibracji
 void performCalibration() {
+    // DEBUG: start kalibracji
+    #define DEBUG
+
+ 
+
     // Sprawdz czy kalibracja jest wlaczona
     if (!calibConfig.enableCalibration) {
+      
         calibratedData.valid = false;
         return;
     }
     
     if (!mcp3424Data.deviceCount || (millis() - mcp3424Data.lastUpdate) > 5000) {
         // Brak danych lub dane nieaktualne
+  
         calibratedData.valid = false;
         return;
     }
     
     // Kalibracja podstawowych pomiarow (zawsze wlaczone gdy kalibracja aktywna)
+
     calibrateB4Temperature();
     calibrateB4Voltage();
     calibrateTGSTemperature();
@@ -423,26 +529,31 @@ void performCalibration() {
     
     // Kalibracja czujnikow TGS (kontrolowane przez config)
     if (calibConfig.enableTGSSensors) {
+   
         calibrateTGSSensors();
     }
     
     // Kalibracja gazow elektrochemicznych (kontrolowane przez config)
     if (calibConfig.enableGasSensors) {
+     
         calibrateGases();
         
         // Konwersja na ppb (tylko jesli gazy wlaczone)
         if (calibConfig.enablePPBConversion) {
+         
             calibrateGasesPPB();
         }
     }
     
     // Kalibracja HCHO i PID (kontrolowane przez config)
     if (calibConfig.enableSpecialSensors) {
+
         calibrateSpecialSensors();
     }
     
     calibratedData.valid = true;
     calibratedData.lastUpdate = millis();
+
 }
 
 // Funkcje dostepowe

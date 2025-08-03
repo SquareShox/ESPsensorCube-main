@@ -21,6 +21,10 @@ static unsigned long lastReadTime = 0;
 static bool measurementStarted = false;
 static unsigned long measurementStartTime = 0;
 
+// Auto-retry timer for SPS30 (2 minutes = 120000ms)
+#define SPS30_RETRY_INTERVAL_MS 120000
+static unsigned long lastSPS30RetryTime = 0;
+
 bool initializeSPS30() {
     safePrintln("=== Inicjalizacja SPS30 ===");
 //    WebSerial.println("=== Inicjalizacja SPS30 ===");
@@ -110,13 +114,44 @@ bool initializeSPS30() {
     return true;
 }
 
+// Function to retry SPS30 initialization if failed
+void retrySPS30IfFailed() {
+    extern FeatureConfig config;
+    
+    if (!config.enableSPS30 || sps30SensorStatus) {
+        return; // SPS30 disabled or already working
+    }
+    
+    unsigned long currentTime = millis();
+    if (currentTime - lastSPS30RetryTime >= SPS30_RETRY_INTERVAL_MS) {
+        safePrintln("Retrying SPS30 initialization...");
+        if (initializeSPS30()) {
+            safePrintln("SPS30 retry successful!");
+        } else {
+            safePrintln("SPS30 retry failed");
+        }
+        lastSPS30RetryTime = currentTime;
+    }
+}
+
 bool readSPS30(SPS30Data& data) {
     static unsigned long lastReadTime = 0;
+    static unsigned long lastRetryCheck = 0;
     unsigned long currentTime = millis();
+    
+    // Try to retry initialization if sensor failed (check every 10 seconds)
+    if (currentTime - lastRetryCheck >= 10000) {
+        retrySPS30IfFailed();
+        lastRetryCheck = currentTime;
+    }
     
     // Read once per second as requested
     if (currentTime - lastReadTime < 1000) {
         return false; // Too soon for next reading
+    }
+    
+    if (!sps30SensorStatus) {
+        return false; // Sensor not working, don't try to read
     }
     
     // Check if measurement was started and enough time passed (1 second)
