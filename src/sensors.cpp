@@ -15,6 +15,7 @@ ADS1110Data ads1110Data;
 INA219Data ina219Data;
 SPS30Data sps30Data;
 SHT40Data sht40Data;
+SCD41Data scd41Data;
 HCHOData hchoData;  // Global HCHO sensor data
 
 // Global sensor status flags  

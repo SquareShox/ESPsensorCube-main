@@ -202,13 +202,9 @@ public:
             }
         }
         
-        // Fallback to heap if PSRAM failed or unavailable
+        // Nie alokuj w heap jeśli PSRAM się nie udało
         if (!fastHistory || !slowHistory) {
-            fastHistory = (HistoryEntry<T>*)malloc(fastSize);
-            slowHistory = (HistoryEntry<T>*)malloc(slowSize);
-            if (fastHistory && slowHistory) {
-                Serial.println("⚠ SensorHistory allocated in heap (" + String(fastSize + slowSize) + " bytes)");
-            }
+            Serial.println("✗ SensorHistory allocation failed - PSRAM unavailable or insufficient");
         }
         
         initialized = (fastHistory != nullptr && slowHistory != nullptr);

@@ -9,7 +9,7 @@
 #define WIFI_TIMEOUT 20000
 #define CONNECTION_TIMEOUT (20 * 60 * 1000) // 20 minutes
 
-#define FIRMWARE_VERSION "1.0.2"
+#define FIRMWARE_VERSION "1.1.0"
 #define DEVICE_ID "SCUBE-001"
 
 // Pin Definitions
@@ -207,6 +207,15 @@ struct SHT40Data {
     unsigned long lastUpdate = 0;
 };
 
+// SCD41 dedicated data bucket (CO2 + its own T/RH)
+struct SCD41Data {
+    float co2 = 0.0;                // CO2 in ppm
+    float temperature = 0.0;        // Temperature in Celsius (from SCD41)
+    float humidity = 0.0;           // Relative humidity in % (from SCD41)
+    bool valid = false;
+    unsigned long lastUpdate = 0;
+};
+
 // IPS Sensor Data Structure (moved from sensors.h to avoid circular dependency)
 struct IPSSensorData {
     unsigned long pc_values[7];  // Particle count values  
@@ -246,6 +255,7 @@ struct SPS30Data {
 struct HCHOData {
     float hcho = 0.0;              // Formaldehyde concentration [mg/m³]
     float hcho_ppb = 0.0;          // Formaldehyde concentration [ppb]
+    float tvoc = 0.0;              // TVOC concentration [mg/m³]
     bool valid = false;
     unsigned long lastUpdate = 0;
 };
@@ -291,6 +301,7 @@ void setOffPin(bool state);
 void sendPushbulletNotification(const String& title, const String& message);
 void sendBatteryCriticalNotification();
 void sendSystemStartupNotification();
+void sendSystemStartupNotificationWithTimeout(); // Bezpieczniejsza wersja z timeoutem
 String getUptimeString();
 
 // Time helper function declarations

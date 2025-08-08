@@ -34,10 +34,14 @@ String getMCP3424GasTypeByI2CAddress(uint8_t i2cAddress);
 bool updateMCP3424DeviceDetection(uint8_t i2cAddress, bool detected);
 void scanAndMapMCP3424Devices();
 void displayMCP3424MappingInfo();
+bool isMCP3424DeviceValid(uint8_t deviceIndex);
 float getMCP3424Value(uint8_t deviceIndex, uint8_t channel);
 
 // External configurations
 extern NetworkConfig networkConfig;
 extern MCP3424Config mcp3424Config;
+
+// Flag: set to true when WiFi config has changed (for conditional Modbus export)
+extern volatile bool wifiConfigChanged;
 
 #endif // NETWORK_CONFIG_H 

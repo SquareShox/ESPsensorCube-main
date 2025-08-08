@@ -130,6 +130,10 @@ bool HistoryManager::initialize() {
     size_t psramSize = ESP.getPsramSize();
     size_t freePsram = ESP.getFreePsram();
     size_t freeHeap = ESP.getFreeHeap();
+    if (psramSize == 0) {
+        safePrintln("ERROR: PSRAM not detected, history initialization aborted");
+        return false;
+    }
     
     safePrint("PSRAM size: ");
     safePrint(String(psramSize));
@@ -848,7 +852,9 @@ void initializeHistory() {
         // Sprawdź gdzie pamięć została alokowana
         checkHistoryMemoryType();
     } else {
-        safePrintln("Historia initialization FAILED");
+        safePrintln("Historia initialization FAILED - disabling history feature");
+        config.enableHistory = false;
+        //safePrintln("Historia initialization FAILED");
     }
 }
 
@@ -1278,6 +1284,7 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
                 JsonObject data = sample.createNestedObject("data");
                 data["hcho_mg"] = buffer[idx].data.hcho;
                 data["hcho_ppb"] = buffer[idx].data.hcho_ppb;
+                data["tvoc_mg"] = buffer[idx].data.tvoc;
                 totalSamples++;
             }
             
@@ -1436,7 +1443,8 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
             freePSRAM(buffer);
         }
     } else if (sensor == "calibration" || sensor == "voc" || sensor == "co" || sensor == "no" || 
-               sensor == "no2" || sensor == "o3" || sensor == "so2" || sensor == "h2s" || sensor == "nh3") {
+               sensor == "no2" || sensor == "o3" || sensor == "so2" || sensor == "h2s" || sensor == "nh3" ||
+               sensor == "pm1" || sensor == "pm25" || sensor == "pm10") {
         auto* calibHist = historyManager.getCalibHistory();
         if (calibHist && calibHist->isInitialized()) {
             // Użyj heap zamiast stosu dla dużego bufora
@@ -1498,6 +1506,15 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
                     // Tylko NH3
                     data["nh3_ugm3"] = round(buffer[i].data.NH3 * 10) / 10.0;
                     data["nh3_ppb"] = round(buffer[i].data.NH3_ppb * 10) / 10.0;
+                } else if (sensor == "pm1") {
+                    // Tylko PM1
+                    data["pm1_ugm3"] = round(buffer[i].data.PM1 * 10) / 10.0;
+                } else if (sensor == "pm25") {
+                    // Tylko PM2.5
+                    data["pm25_ugm3"] = round(buffer[i].data.PM25 * 10) / 10.0;
+                } else if (sensor == "pm10") {
+                    // Tylko PM10
+                    data["pm10_ugm3"] = round(buffer[i].data.PM10 * 10) / 10.0;
                 } else {
                     // Wszystkie gazy (calibration)
                     data["CO"] = round(buffer[i].data.CO * 10) / 10.0;
@@ -1511,6 +1528,28 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
                     data["VOC_ppb"] = round(buffer[i].data.VOC_ppb * 10) / 10.0;
                     data["HCHO"] = round(buffer[i].data.HCHO * 10) / 10.0;
                     data["PID"] = round(buffer[i].data.PID * 1000) / 1000.0;
+                    
+                    // ODO
+                    data["ODO"] = round(buffer[i].data.ODO * 10) / 10.0;
+                    
+                    // PM sensors (SPS30)
+                    data["PM1"] = round(buffer[i].data.PM1 * 10) / 10.0;
+                    data["PM25"] = round(buffer[i].data.PM25 * 10) / 10.0;
+                    data["PM10"] = round(buffer[i].data.PM10 * 10) / 10.0;
+                    
+                    // Environmental sensors
+                    
+                    
+                    data["DUST_TEMP"] = round(buffer[i].data.DUST_TEMP * 10) / 10.0;
+                    data["DUST_HUMID"] = round(buffer[i].data.DUST_HUMID * 10) / 10.0;
+                    data["DUST_PRESS"] = round(buffer[i].data.DUST_PRESS * 10) / 10.0;
+                    
+                    
+                    
+                    // CO2 sensor
+                    data["SCD_CO2"] = round(buffer[i].data.SCD_CO2 * 10) / 10.0;
+                    data["SCD_T"] = round(buffer[i].data.SCD_T * 10) / 10.0;
+                    data["SCD_RH"] = round(buffer[i].data.SCD_RH * 10) / 10.0;
                 }
                 totalSamples++;
             }

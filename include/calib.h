@@ -76,7 +76,33 @@ struct CalibratedSensorData {
     
     // VOC (Volatile Organic Compounds) - suma NH3, H2S, SO2
     float VOC = 0.0f;        // VOC [ug/m3] - suma NH3 + H2S + SO2
-    float VOC_ppb = 0.0f;    // VOC [ppb] - suma NH3 + H2S + SO2
+    float VOC_ppb = 0.0f;    // TVOC [ppb] - TGS02 value
+    
+    // ODO (Odor Detection Unit) - według wzoru z calib.tcl
+    float ODO = 0.0f;        // ODO value based on TGS sensors
+    
+    // PM sensors (SPS30) - zgodnie z calib.tcl linie 1017-1048
+    float PM1 = 0.0f;        // PM1.0 skalibrowane [ug/m3]
+    float PM25 = 0.0f;       // PM2.5 skalibrowane [ug/m3]
+    float PM10 = 0.0f;       // PM10 skalibrowane [ug/m3]
+    
+    // Environmental sensors (I2C sensors) - zgodnie z calib.tcl
+    float AMBIENT_TEMP = 0.0f;     // Temperatura zewnętrzna [°C]
+    float AMBIENT_HUMID = 0.0f;    // Wilgotność zewnętrzna [%]
+    float AMBIENT_PRESS = 0.0f;    // Ciśnienie zewnętrzne [hPa]
+    
+    float DUST_TEMP = 0.0f;        // Temperatura toru pylowego [°C]
+    float DUST_HUMID = 0.0f;       // Wilgotność toru pylowego [%]
+    float DUST_PRESS = 0.0f;       // Ciśnienie toru pylowego [hPa]
+    
+    float GAS_TEMP = 0.0f;         // Temperatura toru gazowego [°C]
+    float GAS_HUMID = 0.0f;        // Wilgotność toru gazowego [%]
+    float GAS_PRESS = 0.0f;        // Ciśnienie toru gazowego [hPa]
+    
+    // CO2 sensor
+    float SCD_CO2 = 0.0f;          // CO2 [ppm]
+    float SCD_T = 0.0f;            // SCD temperatura [°C]
+    float SCD_RH = 0.0f;           // SCD wilgotność [%]
     
     // Metadata
     bool valid = false;
@@ -92,6 +118,8 @@ float A4_SO2(float T);
 float B4_SO2(float T);
 float A4_NO2(float T);
 float B4_NO2(float T);
+float A4_H2S(float T);
+float B4_H2S(float T);
 
 // Funkcje obliczania temperatury i napiecia
 float B4_T(float T, float V);
@@ -122,6 +150,9 @@ void calibrateTGSSensors();
 void calibrateGases();
 void calibrateGasesPPB();
 void calibrateSpecialSensors();
+void calibratePMSensors();
+void calibrateEnvironmentalSensors();
+void calibrateCO2Sensor();
 
 // Global data
 extern CalibratedSensorData calibratedData;

@@ -319,7 +319,7 @@ const char *mcp3424_config_html = R"rawliteral(
     <div class="info-box">
       <h3>📋 Informacje o konfiguracji MCP3424</h3>
       <ul>
-        <li><strong>Device 0-4:</strong> Czujniki elektrochemiczne (NO, O3, NO2, CO, SO2)</li>
+        <li><strong>Device 0-4:</strong> Czujniki elektrochemiczne (NO, O3, NO2, CO, SO2, H2S, NH3)</li>
         <li><strong>Device 5-7:</strong> Czujniki TGS (TGS1, TGS2, TGS3)</li>
         <li><strong>Channel 0:</strong> Working Electrode (WRK)</li>
         <li><strong>Channel 1:</strong> Auxiliary Electrode (AUX)</li>
@@ -535,10 +535,10 @@ function createDeviceCard(deviceIndex, deviceData) {
     card.classList.add('active');
   }
   
-  const gasTypes = ['NO', 'O3', 'NO2', 'CO', 'SO2', 'TGS1', 'TGS2', 'TGS3'];
+  const gasTypes = ['NO', 'O3', 'NO2', 'CO', 'SO2', 'H2S', 'NH3', 'TGS1', 'TGS2', 'TGS3'];
   const descriptions = [
     'NO Sensor (K1)', 'O3 Sensor (K2)', 'NO2 Sensor (K3)', 
-    'CO Sensor (K4)', 'SO2 Sensor (K5)', 'TGS Sensor 1', 
+    'CO Sensor (K4)', 'SO2 Sensor (K5)', 'H2S Sensor (K6)', 'NH3 Sensor (K7)', 'TGS Sensor 1', 
     'TGS Sensor 2', 'TGS Sensor 3'
   ];
   

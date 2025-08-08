@@ -90,6 +90,7 @@ bool readHCHO() {
     if (success) {
         // Only collect HCHO data as requested
         hchoData.hcho = hchoSensor.getHcho();
+        hchoData.tvoc = hchoSensor.getTvoc();
         //calculate mg/m3 to ppb for HCHO (molar mass: 30.03 g/mol)
         hchoData.hcho_ppb = hchoData.hcho * 814.2; // ppb = mg/m³ × (24.45/30.03) × 1000
         hchoData.valid = true;
@@ -105,6 +106,10 @@ bool readHCHO() {
             safePrint("HCHO reading - HCHO: ");
             safePrint(String(hchoData.hcho, 3));
             safePrintln(" mg/m³");
+            //voc
+            safePrint("HCHO reading - TVOC: ");
+            safePrint(String(hchoData.tvoc, 3));
+            safePrintln(" ppb");
         }
         
         return true;

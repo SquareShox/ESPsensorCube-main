@@ -19,6 +19,7 @@
 #include <web_socket.h>
 #include <mean.h>
 #include <calib.h>
+#include <calib_constants.h>
 #include <network_config.h>
 #include <history.h>
 #include <fan.h>
@@ -65,6 +66,7 @@ void printSingleTaskMemoryStats(const char *taskName);
 void setup();
 void loop();
 void watchDogTask(void *parameter);
+void timeSyncTask(void *parameter);
 void initializeHardware();
 void processSerialCommands();
 void updateSystemStatus();
@@ -203,6 +205,17 @@ void setup()
     else
     {
         safePrintln("MCP3424 config loaded: " + String(mcp3424Config.deviceCount) + " devices");
+    }
+
+    // Initialize calibration constants
+    safePrintln("Loading calibration constants...");
+    if (loadCalibrationConstants(calibConstants))
+    {
+        safePrintln("Calibration constants loaded from file");
+    }
+    else
+    {
+        safePrintln("Using default calibration constants");
     }
 
     // Initialize moving averages system
@@ -544,25 +557,15 @@ void initializeHardware()
 
     safePrintln("Hardware initialization complete");
 
-    // wait to time to be set
-    int proby = 0;
-    while (!isTimeSet() && proby < 5)
-    {
-        delay(1000);
-        proby++;
-    }
-    if (isTimeSet())
-    {
-        safePrintln("Czas zsynchronizowany: " + getFormattedTime() + " " + getFormattedDate());
-        if (config.enablePushbullet && strlen(config.pushbulletToken) > 0)
-        {
-            sendSystemStartupNotification();
-        }
-    }
-    else
-    {
-        safePrintln("Blad: nie udalo sie zsynchronizowac czasu po 5 probach");
-    }
+    // Start time sync task
+    xTaskCreate(
+        timeSyncTask,        // Task function
+        "TimeSync",          // Task name
+        8096,                // Stack size
+        NULL,                // Task parameters
+        3,                   // Priority
+        NULL                 // Task handle
+    );
 }
 
 void processSerialCommands()
@@ -1771,8 +1774,8 @@ void sendPushbulletNotification(const String &title, const String &message)
 
 void sendBatteryCriticalNotification()
 {
-    if (!batteryData.valid)
-        return;
+    // if (!batteryData.valid)
+    //     return;
 
     String title = "🔋 CRITICAL BATTERY - Device Shutting Down";
     String message = "Device: ESP32 Sensor Cube\n";
@@ -1787,6 +1790,7 @@ void sendBatteryCriticalNotification()
     message += "Device ID: " + String(config.DeviceID) + "\n";
 
     sendPushbulletNotification(title, message);
+    delay(1000);
     digitalWrite(OFF_PIN, HIGH);
 }
 
@@ -1803,6 +1807,54 @@ void sendSystemStartupNotification()
     message += "Device ID: " + String(config.DeviceID) + "\n";
 
     sendPushbulletNotification(title, message);
+}
+
+// Nowa funkcja z timeoutem dla powiadomien - bezpieczniejsza wersja
+void sendSystemStartupNotificationWithTimeout() {
+    if (!config.enablePushbullet || strlen(config.pushbulletToken) == 0) {
+        return;
+    }
+
+    if (WiFi.status() != WL_CONNECTED) {
+        safePrintln("Pushbullet: No WiFi connection");
+        return;
+    }
+
+    HTTPClient http;
+    http.setTimeout(10000); // 10 sekund timeout
+    
+    http.begin("https://api.pushbullet.com/v2/pushes");
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("Access-Token", config.pushbulletToken);
+
+    // Uzyj mniejszego bufora JSON dla bezpieczenstwa
+    DynamicJsonDocument doc(512); // Zmniejszone z 1024
+    doc["type"] = "note";
+    doc["title"] = "🚀 ESP32 Sensor Cube Started";
+    
+    String message = "Device: ESP32 Sensor Cube\n";
+    message += "Version: " + String(FIRMWARE_VERSION) + "\n";
+    message += "IP: " + WiFi.localIP().toString() + "\n";
+    message += "WiFi Signal: " + String(WiFi.RSSI()) + " dBm\n";
+    message += "Free Heap: " + String(ESP.getFreeHeap() / 1024) + " KB\n";
+    message += "Time: " + getFormattedTime() + " " + getFormattedDate() + "\n";
+    message += "Device ID: " + String(config.DeviceID) + "\n";
+    
+    doc["body"] = message;
+
+    String jsonPayload;
+    serializeJson(doc, jsonPayload);
+
+    int httpResponseCode = http.POST(jsonPayload);
+
+    if (httpResponseCode == 200) {
+        safePrintln("Pushbullet notification sent successfully");
+    } else {
+        safePrintln("Pushbullet notification failed: " + String(httpResponseCode));
+        // Nie loguj pelnej odpowiedzi dla bezpieczenstwa
+    }
+
+    http.end();
 }
 
 // ===========================================
@@ -2124,6 +2176,57 @@ void sendSystemStartupNotification()
 //     }
 // }
 
+void timeSyncTask(void *parameter) {
+    safePrintln("TimeSync task started - waiting for time synchronization...");
+    
+    int proby = 0;
+    const int max_proby = 30; // Zwiekszam do 30 prob (30 sekund)
+    const int check_interval = 500; // Sprawdzaj co 500ms zamiast 1000ms dla lepszej responsywnosci
+    
+    while (!isTimeSet() && proby < max_proby) {
+        vTaskDelay(pdMS_TO_TICKS(check_interval)); // Krotsze opoznienie
+        proby++;
+        
+        // Reset watchdog co 10 prob (co 5 sekund)
+        if (proby % 10 == 0) { // Co 10 prob pokazuj status
+            safePrintln("TimeSync: proba " + String(proby) + "/" + String(max_proby));
+            esp_task_wdt_reset();
+        }
+        
+        // Sprawdz czy WiFi jest nadal polaczony
+        if (WiFi.status() != WL_CONNECTED) {
+            safePrintln("TimeSync: WiFi disconnected, waiting for reconnection...");
+            // Czekaj na ponowne polaczenie WiFi z timeoutem
+            int wifi_retry = 0;
+            while (WiFi.status() != WL_CONNECTED && wifi_retry < 20) {
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                wifi_retry++;
+                esp_task_wdt_reset();
+            }
+            if (WiFi.status() != WL_CONNECTED) {
+                safePrintln("TimeSync: WiFi reconnection failed, exiting task");
+                vTaskDelete(NULL);
+                return;
+            }
+        }
+    }
+    
+    if (isTimeSet()) {
+        safePrintln("✓ Czas zsynchronizowany: " + getFormattedTime() + " " + getFormattedDate());
+        if (config.enablePushbullet && strlen(config.pushbulletToken) > 0 && WiFi.status() == WL_CONNECTED) {
+            // Ustaw timeout dla operacji HTTP
+            esp_task_wdt_reset();
+            
+            // Wyslij powiadomienie z timeoutem
+            sendSystemStartupNotificationWithTimeout();
+        }
+    } else {
+        safePrintln("✗ Blad: nie udalo sie zsynchronizowac czasu po " + String(max_proby) + " probach");
+    }
+    
+    safePrintln("TimeSync task completed and will be deleted");
+    vTaskDelete(NULL); // Usun task po zakonczeniu
+}
 // void printSingleTaskMemoryStats(const char* taskName) {
 //     safePrintln("=== SINGLE TASK ANALYSIS ===");
 //     safePrintln("Searching for task: " + String(taskName));
@@ -2179,3 +2282,4 @@ void sendSystemStartupNotification()
 //         printTaskMemoryStats();
 //     }
 // }
+

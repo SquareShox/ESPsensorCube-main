@@ -18,6 +18,7 @@ void printMovingAverageStatus();
 // Getter functions for fast averages (10 second period)
 SolarData getSolarFastAverage();
 I2CSensorData getI2CFastAverage();
+SCD41Data getSCD41FastAverage();
 SPS30Data getSPS30FastAverage();
 IPSSensorData getIPSFastAverage();
 MCP3424Data getMCP3424FastAverage();
@@ -29,6 +30,7 @@ HCHOData getHCHOFastAverage();
 // Getter functions for slow averages (5 minute period)
 SolarData getSolarSlowAverage();
 I2CSensorData getI2CSlowAverage();
+SCD41Data getSCD41SlowAverage();
 SPS30Data getSPS30SlowAverage();
 IPSSensorData getIPSSlowAverage();
 MCP3424Data getMCP3424SlowAverage();

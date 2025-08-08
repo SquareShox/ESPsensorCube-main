@@ -3,7 +3,7 @@
   "enableWebServer": true,
   "enableHistory": true,
   "useAveragedData": true,
-  "enableModbus": false,
+  "enableModbus": true,
   "enableSolarSensor": false,
   "enableOPCN3Sensor": false,
   "enableI2CSensors": true,
@@ -23,5 +23,5 @@
   "lowPowerMode": false,
   "enablePushbullet": true,
   "pushbulletToken": "o.vLzQdigI51uIXuohHUyxBfocSk5fYCPP",
-  "DeviceID": "SCUBE-001"
+  "DeviceID": "SCUBE-006"
 }

@@ -9,6 +9,7 @@
 #include <freertos/task.h>
 #include <freertos/semphr.h>
 #include <SensirionI2cScd4x.h>
+#include <memory>
 
 // macro definitions
 // make sure that we use the proper definition of NO_ERROR
@@ -84,6 +85,17 @@ static unsigned long lastSPS30RetryTime = 0;
 static unsigned long lastMCP3424RetryTime = 0;
 static unsigned long lastADS1110RetryTime = 0;
 static unsigned long lastINA219RetryTime = 0;
+
+// Helper to release MCP3424 device instances
+void clearMCP3424Devices() {
+    for (int i = 0; i < MAX_MCP3424_DEVICES; i++) {
+        if (mcp3424_devices[i] != nullptr) {
+            delete mcp3424_devices[i];
+            mcp3424_devices[i] = nullptr;
+        }
+    }
+}
+
 
 void initializeI2C() {
     Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
@@ -199,6 +211,7 @@ void initializeI2C() {
         }
         
         // Initialize MCP3424 devices based on detected addresses
+        clearMCP3424Devices();
         mcp3424Data.deviceCount = 0;
         
         for (uint8_t i = 0; i < 8; i++) {
@@ -223,6 +236,7 @@ void initializeI2C() {
                     
                     // Create new instance for this address
                     mcp3424_devices[mcp3424Data.deviceCount] = new MCP342x(addr);
+                    
                     mcp3424Data.addresses[mcp3424Data.deviceCount] = addr;
                     mcp3424Data.valid[mcp3424Data.deviceCount] = false;
                     
@@ -1680,12 +1694,20 @@ void scd41Task(void* parameters) {
                 temperature >= -40.0 && temperature <= 85.0 &&
                 relativeHumidity >= 0.0 && relativeHumidity <= 100.0) {
                 
-                // Update global data - only CO2, preserve temperature and humidity from SHT40
+                // Update dedicated SCD41 bucket
                 extern I2CSensorData i2cSensorData;
                 extern SHT40Data sht40Data;
+                extern SCD41Data scd41Data;
                 extern FeatureConfig config;
                 
-                // Only update CO2 from SCD41, keep temperature and humidity from SHT40 if available
+                // Fill dedicated SCD41 bucket with its native T/RH and CO2
+                scd41Data.co2 = (float)co2Concentration;
+                scd41Data.temperature = temperature;
+                scd41Data.humidity = relativeHumidity;
+                scd41Data.valid = true;
+                scd41Data.lastUpdate = millis();
+
+                // For shared I2CSensorData: keep SHT40 as primary env source when available
                 if (config.enableSHT40 && sht40Data.valid) {
                     i2cSensorData.temperature = sht40Data.temperature;
                     i2cSensorData.humidity = sht40Data.humidity;

@@ -54,7 +54,7 @@ void initializeFan() {
     fanData.glineEnabled = true; // Start with GLine enabled
     fanData.valid = true;
     fanData.lastUpdate = millis();
-    setFanSpeed(50);
+    setFanSpeed(45);
     
     safePrintln("Fan system initialized");
     safePrintln("PWM Pin: " + String(PWM_PIN) + " (Channel " + String(PWM_CHANNEL) + ")");

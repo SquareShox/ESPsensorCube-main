@@ -307,6 +307,99 @@ I2CSensorData CircularBuffer<I2CSensorData, FAST_BUFFER_SIZE>::divideByCount(con
     return result;
 }
 
+// SCD41 sensor averaging - FAST_BUFFER_SIZE specializations
+template<>
+SCD41Data CircularBuffer<SCD41Data, FAST_BUFFER_SIZE>::addWeighted(const SCD41Data& a, const SCD41Data& b, float weight) {
+    SCD41Data result = a;
+    if (b.valid) {
+        result.valid = true;
+        result.co2 += b.co2 * weight;
+        result.temperature += b.temperature * weight;
+        result.humidity += b.humidity * weight;
+    }
+    return result;
+}
+
+template<>
+SCD41Data CircularBuffer<SCD41Data, FAST_BUFFER_SIZE>::addSimple(const SCD41Data& a, const SCD41Data& b) {
+    SCD41Data result = a;
+    if (b.valid) {
+        result.valid = true;
+        result.co2 += b.co2;
+        result.temperature += b.temperature;
+        result.humidity += b.humidity;
+    }
+    return result;
+}
+
+template<>
+SCD41Data CircularBuffer<SCD41Data, FAST_BUFFER_SIZE>::divideByWeight(const SCD41Data& sum, float weight) {
+    SCD41Data result = sum;
+    if (weight > 0) {
+        result.co2 /= weight;
+        result.temperature /= weight;
+        result.humidity /= weight;
+    }
+    return result;
+}
+
+template<>
+SCD41Data CircularBuffer<SCD41Data, FAST_BUFFER_SIZE>::divideByCount(const SCD41Data& sum, size_t count) {
+    SCD41Data result = sum;
+    if (count > 0) {
+        result.co2 /= count;
+        result.temperature /= count;
+        result.humidity /= count;
+    }
+    return result;
+}
+
+// SCD41 sensor averaging - SLOW_BUFFER_SIZE specializations
+template<>
+SCD41Data CircularBuffer<SCD41Data, SLOW_BUFFER_SIZE>::addWeighted(const SCD41Data& a, const SCD41Data& b, float weight) {
+    SCD41Data result = a;
+    if (b.valid) {
+        result.valid = true;
+        result.co2 += b.co2 * weight;
+        result.temperature += b.temperature * weight;
+        result.humidity += b.humidity * weight;
+    }
+    return result;
+}
+
+template<>
+SCD41Data CircularBuffer<SCD41Data, SLOW_BUFFER_SIZE>::addSimple(const SCD41Data& a, const SCD41Data& b) {
+    SCD41Data result = a;
+    if (b.valid) {
+        result.valid = true;
+        result.co2 += b.co2;
+        result.temperature += b.temperature;
+        result.humidity += b.humidity;
+    }
+    return result;
+}
+
+template<>
+SCD41Data CircularBuffer<SCD41Data, SLOW_BUFFER_SIZE>::divideByWeight(const SCD41Data& sum, float weight) {
+    SCD41Data result = sum;
+    if (weight > 0) {
+        result.co2 /= weight;
+        result.temperature /= weight;
+        result.humidity /= weight;
+    }
+    return result;
+}
+
+template<>
+SCD41Data CircularBuffer<SCD41Data, SLOW_BUFFER_SIZE>::divideByCount(const SCD41Data& sum, size_t count) {
+    SCD41Data result = sum;
+    if (count > 0) {
+        result.co2 /= count;
+        result.temperature /= count;
+        result.humidity /= count;
+    }
+    return result;
+}
 // I2C sensor averaging - SLOW_BUFFER_SIZE specializations
 template<>
 I2CSensorData CircularBuffer<I2CSensorData, SLOW_BUFFER_SIZE>::addWeighted(const I2CSensorData& a, const I2CSensorData& b, float weight) {
@@ -1166,6 +1259,26 @@ CalibratedSensorData CircularBuffer<CalibratedSensorData, FAST_BUFFER_SIZE>::add
         // VOC
         result.VOC += b.VOC * weight;
         result.VOC_ppb += b.VOC_ppb * weight;
+        
+        // ODO
+        result.ODO += b.ODO * weight;
+        
+        // PM sensors (SPS30)
+        result.PM1 += b.PM1 * weight;
+        result.PM25 += b.PM25 * weight;
+        result.PM10 += b.PM10 * weight;
+        
+        // Environmental sensors
+       
+        result.DUST_TEMP += b.DUST_TEMP * weight;
+        result.DUST_HUMID += b.DUST_HUMID * weight;
+        result.DUST_PRESS += b.DUST_PRESS * weight;
+        
+       
+        // CO2 sensor
+        result.SCD_CO2 += b.SCD_CO2 * weight;
+        result.SCD_T += b.SCD_T * weight;
+        result.SCD_RH += b.SCD_RH * weight;
     }
     return result;
 }
@@ -1238,6 +1351,28 @@ CalibratedSensorData CircularBuffer<CalibratedSensorData, FAST_BUFFER_SIZE>::add
         // VOC
         result.VOC += b.VOC;
         result.VOC_ppb += b.VOC_ppb;
+        
+        // ODO
+        result.ODO += b.ODO;
+        
+        // PM sensors (SPS30)
+        result.PM1 += b.PM1;
+        result.PM25 += b.PM25;
+        result.PM10 += b.PM10;
+        
+        // Environmental sensors
+      
+        
+        result.DUST_TEMP += b.DUST_TEMP;
+        result.DUST_HUMID += b.DUST_HUMID;
+        result.DUST_PRESS += b.DUST_PRESS;
+        
+    
+        
+        // CO2 sensor
+        result.SCD_CO2 += b.SCD_CO2;
+        result.SCD_T += b.SCD_T;
+        result.SCD_RH += b.SCD_RH;
     }
     return result;
 }
@@ -1308,6 +1443,28 @@ CalibratedSensorData CircularBuffer<CalibratedSensorData, FAST_BUFFER_SIZE>::div
         // VOC
         result.VOC /= weight;
         result.VOC_ppb /= weight;
+        
+        // ODO
+        result.ODO /= weight;
+        
+        // PM sensors (SPS30)
+        result.PM1 /= weight;
+        result.PM25 /= weight;
+        result.PM10 /= weight;
+        
+        // Environmental sensors
+    
+        
+        result.DUST_TEMP /= weight;
+        result.DUST_HUMID /= weight;
+        result.DUST_PRESS /= weight;
+        
+  
+        
+        // CO2 sensor
+        result.SCD_CO2 /= weight;
+        result.SCD_T /= weight;
+        result.SCD_RH /= weight;
     }
     return result;
 }
@@ -1378,6 +1535,27 @@ CalibratedSensorData CircularBuffer<CalibratedSensorData, FAST_BUFFER_SIZE>::div
         // VOC
         result.VOC /= count;
         result.VOC_ppb /= count;
+        
+        // ODO
+        result.ODO /= count;
+        
+        // PM sensors (SPS30)
+        result.PM1 /= count;
+        result.PM25 /= count;
+        result.PM10 /= count;
+        
+        // Environmental sensors
+   
+        result.DUST_TEMP /= count;
+        result.DUST_HUMID /= count;
+        result.DUST_PRESS /= count;
+        
+   
+        
+        // CO2 sensor
+        result.SCD_CO2 /= count;
+        result.SCD_T /= count;
+        result.SCD_RH /= count;
     }
     return result;
 }
@@ -1446,6 +1624,27 @@ CalibratedSensorData CircularBuffer<CalibratedSensorData, SLOW_BUFFER_SIZE>::add
         result.K8_voltage += b.K8_voltage * weight;
         result.K9_voltage += b.K9_voltage * weight;
         result.K12_voltage += b.K12_voltage * weight;
+        
+        // ODO
+        result.ODO += b.ODO * weight;
+        
+        // PM sensors (SPS30)
+        result.PM1 += b.PM1 * weight;
+        result.PM25 += b.PM25 * weight;
+        result.PM10 += b.PM10 * weight;
+        
+        // Environmental sensors
+     
+        
+        result.DUST_TEMP += b.DUST_TEMP * weight;
+        result.DUST_HUMID += b.DUST_HUMID * weight;
+        result.DUST_PRESS += b.DUST_PRESS * weight;
+        
+   
+        // CO2 sensor
+        result.SCD_CO2 += b.SCD_CO2 * weight;
+        result.SCD_T += b.SCD_T * weight;
+        result.SCD_RH += b.SCD_RH * weight;
     }
     return result;
 }
@@ -1469,6 +1668,27 @@ CalibratedSensorData CircularBuffer<CalibratedSensorData, SLOW_BUFFER_SIZE>::add
         result.PID += b.PID;
         result.VOC += b.VOC;
         result.VOC_ppb += b.VOC_ppb;
+        
+        // ODO
+        result.ODO += b.ODO;
+        
+        // PM sensors (SPS30)
+        result.PM1 += b.PM1;
+        result.PM25 += b.PM25;
+        result.PM10 += b.PM10;
+        
+        // Environmental sensors
+    
+        result.DUST_TEMP += b.DUST_TEMP;
+        result.DUST_HUMID += b.DUST_HUMID;
+        result.DUST_PRESS += b.DUST_PRESS;
+        
+      
+        
+        // CO2 sensor
+        result.SCD_CO2 += b.SCD_CO2;
+        result.SCD_T += b.SCD_T;
+        result.SCD_RH += b.SCD_RH;
     }
     return result;
 }
@@ -1534,6 +1754,27 @@ CalibratedSensorData CircularBuffer<CalibratedSensorData, SLOW_BUFFER_SIZE>::div
         result.K8_voltage /= weight;
         result.K9_voltage /= weight;
         result.K12_voltage /= weight;
+        
+        // ODO
+        result.ODO /= weight;
+        
+        // PM sensors (SPS30)
+        result.PM1 /= weight;
+        result.PM25 /= weight;
+        result.PM10 /= weight;
+        
+        // Environmental sensors
+   
+        
+        result.DUST_TEMP /= weight;
+        result.DUST_HUMID /= weight;
+        result.DUST_PRESS /= weight;
+  
+        
+        // CO2 sensor
+        result.SCD_CO2 /= weight;
+        result.SCD_T /= weight;
+        result.SCD_RH /= weight;
     }
     return result;
 }
@@ -1599,6 +1840,27 @@ CalibratedSensorData CircularBuffer<CalibratedSensorData, SLOW_BUFFER_SIZE>::div
         result.K8_voltage /= count;
         result.K9_voltage /= count;
         result.K12_voltage /= count;
+        
+        // ODO
+        result.ODO /= count;
+        
+        // PM sensors (SPS30)
+        result.PM1 /= count;
+        result.PM25 /= count;
+        result.PM10 /= count;
+        
+        // Environmental sensors
+  
+        
+        result.DUST_TEMP /= count;
+        result.DUST_HUMID /= count;
+        result.DUST_PRESS /= count;
+        
+        
+        // CO2 sensor
+        result.SCD_CO2 /= count;
+        result.SCD_T /= count;
+        result.SCD_RH /= count;
     }
     return result;
 }
@@ -1611,6 +1873,7 @@ HCHOData CircularBuffer<HCHOData, FAST_BUFFER_SIZE>::addWeighted(const HCHOData&
         result.valid = true;
         result.hcho += b.hcho * weight;
         result.hcho_ppb += b.hcho_ppb * weight;
+        result.tvoc += b.tvoc * weight;
     }
     return result;
 }
@@ -1622,6 +1885,7 @@ HCHOData CircularBuffer<HCHOData, FAST_BUFFER_SIZE>::addSimple(const HCHOData& a
         result.valid = true;
         result.hcho += b.hcho;
         result.hcho_ppb += b.hcho_ppb;
+        result.tvoc += b.tvoc;
     }
     return result;
 }
@@ -1632,6 +1896,7 @@ HCHOData CircularBuffer<HCHOData, FAST_BUFFER_SIZE>::divideByWeight(const HCHODa
     if (weight > 0) {
         result.hcho /= weight;
         result.hcho_ppb /= weight;
+        result.tvoc /= weight;
     }
     return result;
 }
@@ -1642,6 +1907,7 @@ HCHOData CircularBuffer<HCHOData, FAST_BUFFER_SIZE>::divideByCount(const HCHODat
     if (count > 0) {
         result.hcho /= count;
         result.hcho_ppb /= count;
+        result.tvoc /= count;
     }
     return result;
 }
@@ -1654,6 +1920,7 @@ HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::addWeighted(const HCHOData&
         result.valid = true;
         result.hcho += b.hcho * weight;
         result.hcho_ppb += b.hcho_ppb * weight;
+        result.tvoc += b.tvoc * weight;
     }
     return result;
 }
@@ -1665,6 +1932,7 @@ HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::addSimple(const HCHOData& a
         result.valid = true;
         result.hcho += b.hcho;
         result.hcho_ppb += b.hcho_ppb;
+        result.tvoc += b.tvoc;
     }
     return result;
 }
@@ -1675,6 +1943,7 @@ HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::divideByWeight(const HCHODa
     if (weight > 0) {
         result.hcho /= weight;
         result.hcho_ppb /= weight;
+        result.tvoc /= weight;
     }
     return result;
 }
@@ -1685,6 +1954,7 @@ HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::divideByCount(const HCHODat
     if (count > 0) {
         result.hcho /= count;
         result.hcho_ppb /= count;
+        result.tvoc /= count;
     }
     return result;
 }
@@ -1808,6 +2078,7 @@ private:
     CircularBuffer<SHT40Data, FAST_BUFFER_SIZE>* sht40FastBuffer;
     CircularBuffer<CalibratedSensorData, FAST_BUFFER_SIZE>* calibFastBuffer;
     CircularBuffer<HCHOData, FAST_BUFFER_SIZE>* hchoFastBuffer;
+    CircularBuffer<SCD41Data, FAST_BUFFER_SIZE>* scd41FastBuffer;
     CircularBuffer<FanData, FAST_BUFFER_SIZE>* fanFastBuffer;
     
     // Slow buffers (5 minute averages) - conditionally allocated
@@ -1821,6 +2092,7 @@ private:
     CircularBuffer<SHT40Data, SLOW_BUFFER_SIZE>* sht40SlowBuffer;
     CircularBuffer<CalibratedSensorData, SLOW_BUFFER_SIZE>* calibSlowBuffer;
     CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>* hchoSlowBuffer;
+    CircularBuffer<SCD41Data, SLOW_BUFFER_SIZE>* scd41SlowBuffer;
     CircularBuffer<FanData, SLOW_BUFFER_SIZE>* fanSlowBuffer;
     
     // Sensor enabled flags (cached from config)
@@ -1834,8 +2106,11 @@ private:
     bool sht40Enabled;
     bool calibEnabled;
     bool hchoEnabled;
+    bool scd41Enabled;
     bool fanEnabled;
     
+    // Initialization guard
+    bool buffersInitialized;
     // Averaged data storage
     SolarData solarFastAvg, solarSlowAvg;
     I2CSensorData i2cFastAvg, i2cSlowAvg;
@@ -1847,6 +2122,7 @@ private:
     SHT40Data sht40FastAvg, sht40SlowAvg;
     CalibratedSensorData calibFastAvg, calibSlowAvg;
     HCHOData hchoFastAvg, hchoSlowAvg;
+    SCD41Data scd41FastAvg, scd41SlowAvg;
     FanData fanFastAvg, fanSlowAvg;
     
     unsigned long lastFastUpdate = 0;
@@ -1865,6 +2141,7 @@ public:
         sht40FastBuffer = nullptr;
         calibFastBuffer = nullptr;
         hchoFastBuffer = nullptr;
+        scd41FastBuffer = nullptr;
         fanFastBuffer = nullptr;
         
         solarSlowBuffer = nullptr;
@@ -1877,6 +2154,7 @@ public:
         sht40SlowBuffer = nullptr;
         calibSlowBuffer = nullptr;
         hchoSlowBuffer = nullptr;
+        scd41SlowBuffer = nullptr;
         fanSlowBuffer = nullptr;
         
         // Initialize all flags to false
@@ -1890,7 +2168,9 @@ public:
         sht40Enabled = false;
         calibEnabled = false;
         hchoEnabled = false;
+        scd41Enabled = false;
         fanEnabled = false;
+        buffersInitialized = false;
     }
     
     ~MovingAverageManager() {
@@ -1905,6 +2185,7 @@ public:
         freeCircularBufferPSRAM(sht40FastBuffer);
         freeCircularBufferPSRAM(calibFastBuffer);
         freeCircularBufferPSRAM(hchoFastBuffer);
+        freeCircularBufferPSRAM(scd41FastBuffer);
         freeCircularBufferPSRAM(fanFastBuffer);
         
         freeCircularBufferPSRAM(solarSlowBuffer);
@@ -1917,10 +2198,43 @@ public:
         freeCircularBufferPSRAM(sht40SlowBuffer);
         freeCircularBufferPSRAM(calibSlowBuffer);
         freeCircularBufferPSRAM(hchoSlowBuffer);
+        freeCircularBufferPSRAM(scd41SlowBuffer);
         freeCircularBufferPSRAM(fanSlowBuffer);
     }
     
     void initializeBuffers() {
+
+        if (buffersInitialized) {
+            Serial.println("Moving average buffers already initialized");
+            return;
+        }
+
+        // Free any existing buffers before reinitialization
+        freeCircularBufferPSRAM(solarFastBuffer); solarFastBuffer = nullptr;
+        freeCircularBufferPSRAM(i2cFastBuffer); i2cFastBuffer = nullptr;
+        freeCircularBufferPSRAM(sps30FastBuffer); sps30FastBuffer = nullptr;
+        freeCircularBufferPSRAM(ipsFastBuffer); ipsFastBuffer = nullptr;
+        freeCircularBufferPSRAM(mcp3424FastBuffer); mcp3424FastBuffer = nullptr;
+        freeCircularBufferPSRAM(ads1110FastBuffer); ads1110FastBuffer = nullptr;
+        freeCircularBufferPSRAM(ina219FastBuffer); ina219FastBuffer = nullptr;
+        freeCircularBufferPSRAM(sht40FastBuffer); sht40FastBuffer = nullptr;
+        freeCircularBufferPSRAM(calibFastBuffer); calibFastBuffer = nullptr;
+        freeCircularBufferPSRAM(hchoFastBuffer); hchoFastBuffer = nullptr;
+        freeCircularBufferPSRAM(scd41FastBuffer); scd41FastBuffer = nullptr;
+        freeCircularBufferPSRAM(fanFastBuffer); fanFastBuffer = nullptr;
+
+        freeCircularBufferPSRAM(solarSlowBuffer); solarSlowBuffer = nullptr;
+        freeCircularBufferPSRAM(i2cSlowBuffer); i2cSlowBuffer = nullptr;
+        freeCircularBufferPSRAM(sps30SlowBuffer); sps30SlowBuffer = nullptr;
+        freeCircularBufferPSRAM(ipsSlowBuffer); ipsSlowBuffer = nullptr;
+        freeCircularBufferPSRAM(mcp3424SlowBuffer); mcp3424SlowBuffer = nullptr;
+        freeCircularBufferPSRAM(ads1110SlowBuffer); ads1110SlowBuffer = nullptr;
+        freeCircularBufferPSRAM(ina219SlowBuffer); ina219SlowBuffer = nullptr;
+        freeCircularBufferPSRAM(sht40SlowBuffer); sht40SlowBuffer = nullptr;
+        freeCircularBufferPSRAM(calibSlowBuffer); calibSlowBuffer = nullptr;
+        freeCircularBufferPSRAM(hchoSlowBuffer); hchoSlowBuffer = nullptr;
+        freeCircularBufferPSRAM(scd41SlowBuffer); scd41SlowBuffer = nullptr;
+        freeCircularBufferPSRAM(fanSlowBuffer); fanSlowBuffer = nullptr;
         extern FeatureConfig config;
         
         // Cache enabled flags from config
@@ -1934,6 +2248,7 @@ public:
         sht40Enabled = config.enableSHT40;
         calibEnabled = calibConfig.enableMovingAverages;
         hchoEnabled = config.enableHCHO;
+        scd41Enabled = config.enableSCD41;
         fanEnabled = config.enableFan;
         
         Serial.println("Initializing moving average buffers for enabled sensors:");
@@ -2084,6 +2399,19 @@ public:
             }
         }
         
+        if (scd41Enabled) {
+            scd41FastBuffer = allocateCircularBufferPSRAM<CircularBuffer<SCD41Data, FAST_BUFFER_SIZE>>();
+            scd41SlowBuffer = allocateCircularBufferPSRAM<CircularBuffer<SCD41Data, SLOW_BUFFER_SIZE>>();
+            if (scd41FastBuffer && scd41SlowBuffer) {
+                Serial.println("  - SCD41 buffers allocated");
+            } else {
+                Serial.println("  - ERROR: Failed to allocate SCD41 buffers");
+                freeCircularBufferPSRAM(scd41FastBuffer); freeCircularBufferPSRAM(scd41SlowBuffer);
+                scd41FastBuffer = nullptr; scd41SlowBuffer = nullptr;
+                scd41Enabled = false;
+            }
+        }
+        
         // Calculate total memory usage estimation
         int enabledSensors = 0;
         if (solarEnabled) enabledSensors++;
@@ -2096,6 +2424,7 @@ public:
         if (sht40Enabled) enabledSensors++;
         if (calibEnabled) enabledSensors++;
         if (hchoEnabled) enabledSensors++;
+        if (scd41Enabled) enabledSensors++;
         
         // Rough estimation: each buffer pair uses ~2KB
         size_t estimatedMemory = enabledSensors * 2048;
@@ -2105,6 +2434,7 @@ public:
         Serial.print(" sensors, estimated memory usage: ~");
         Serial.print(estimatedMemory);
         Serial.println(" bytes");
+        buffersInitialized = true;
     }
     
     void updateSensorData() {
@@ -2121,6 +2451,7 @@ public:
         extern SHT40Data sht40Data;
         extern CalibratedSensorData calibratedData;
         extern HCHOData hchoData;
+        extern SCD41Data scd41Data;
         
         if (solarEnabled && solarFastBuffer && solarSlowBuffer && solarData.valid) {
             solarFastBuffer->push(solarData, currentTime);
@@ -2172,6 +2503,11 @@ public:
             hchoSlowBuffer->push(hchoData, currentTime);
         }
         
+        if (scd41Enabled && scd41FastBuffer && scd41SlowBuffer && scd41Data.valid) {
+            scd41FastBuffer->push(scd41Data, currentTime);
+            scd41SlowBuffer->push(scd41Data, currentTime);
+        }
+        
         if (fanEnabled && fanFastBuffer && fanSlowBuffer) {
             extern FanData fanData;
             if (fanData.valid) {
@@ -2217,6 +2553,9 @@ public:
             if (hchoEnabled && hchoFastBuffer) {
                 hchoFastAvg = hchoFastBuffer->getWeightedAverage(currentTime, FAST_PERIOD_MS);
             }
+            if (scd41Enabled && scd41FastBuffer) {
+                scd41FastAvg = scd41FastBuffer->getWeightedAverage(currentTime, FAST_PERIOD_MS);
+            }
             if (fanEnabled && fanFastBuffer) {
                 fanFastAvg = fanFastBuffer->getWeightedAverage(currentTime, FAST_PERIOD_MS);
             }
@@ -2258,6 +2597,9 @@ public:
             }
             if (hchoEnabled && hchoSlowBuffer) {
                 hchoSlowAvg = hchoSlowBuffer->getWeightedAverage(currentTime, SLOW_PERIOD_MS);
+            }
+            if (scd41Enabled && scd41SlowBuffer) {
+                scd41SlowAvg = scd41SlowBuffer->getWeightedAverage(currentTime, SLOW_PERIOD_MS);
             }
             if (fanEnabled && fanSlowBuffer) {
                 fanSlowAvg = fanSlowBuffer->getWeightedAverage(currentTime, SLOW_PERIOD_MS);
@@ -2362,6 +2704,15 @@ public:
         return HCHOData{}; 
     }
     
+    SCD41Data getSCD41FastAverage() const {
+        if (scd41Enabled && scd41FastBuffer) return scd41FastAvg; 
+        return SCD41Data{}; 
+    }
+    SCD41Data getSCD41SlowAverage() const {
+        if (scd41Enabled && scd41SlowBuffer) return scd41SlowAvg; 
+        return SCD41Data{}; 
+    }
+    
     FanData getFANFastAverage() const {
         if (fanEnabled && fanFastBuffer) return fanFastAvg; 
         return FanData{}; 
@@ -2400,6 +2751,9 @@ public:
         if (hchoEnabled && hchoFastBuffer) {
             Serial.print("HCHO="); Serial.print(hchoFastBuffer->size());
         }
+        if (scd41Enabled && scd41FastBuffer) {
+            Serial.print("SCD41="); Serial.print(scd41FastBuffer->size());
+        }
         Serial.println();
         
         Serial.print("Disabled sensors: ");
@@ -2412,6 +2766,7 @@ public:
         if (!ina219Enabled) Serial.print("INA219 ");
         if (!sht40Enabled) Serial.print("SHT40 ");
         if (!hchoEnabled) Serial.print("HCHO ");
+        if (!scd41Enabled) Serial.print("SCD41 ");
         Serial.println();
     }
 };
@@ -2495,6 +2850,15 @@ SHT40Data getSHT40FastAverage() {
 
 SHT40Data getSHT40SlowAverage() {
     return movingAverageManager.getSHT40SlowAverage();
+}
+
+
+SCD41Data getSCD41FastAverage() {
+    return movingAverageManager.getSCD41FastAverage();
+}
+
+SCD41Data getSCD41SlowAverage() {
+    return movingAverageManager.getSCD41SlowAverage();
 }
 
 

@@ -8,6 +8,7 @@
 #include <common_js.h>
 #include <sensors.h>
 #include <calib.h>
+#include <calib_constants.h>
 #include <network_config.h>
 #include <config.h>
 #include <AsyncTCP.h>
@@ -235,6 +236,8 @@ String getAllSensorJson() {
     scd41["valid"] = scd41SensorStatus;
     if (scd41SensorStatus) {
         scd41["co2"] = i2cSensorData.co2;
+        scd41["temperature"] = scd41Data.temperature;
+        scd41["humidity"] = scd41Data.humidity;
     }
     
     // MCP3424 (all devices)
@@ -295,6 +298,7 @@ String getAllSensorJson() {
         if (hchoSensorStatus && avgData.valid) {
             hcho["hcho_mg"] = avgData.hcho;
             hcho["hcho_ppb"] = avgData.hcho_ppb;
+            hcho["tvoc_mg"] = avgData.tvoc;
             hcho["age"] = (millis() - avgData.lastUpdate) / 1000;
         }
     } else {
@@ -302,6 +306,7 @@ String getAllSensorJson() {
         if (hchoSensorStatus && hchoData.valid) {
             hcho["hcho_mg"] = hchoData.hcho;
             hcho["hcho_ppb"] = hchoData.hcho_ppb;
+            hcho["tvoc_mg"] = hchoData.tvoc;
             hcho["age"] = (millis() - hchoData.lastUpdate) / 1000;
         }
     }
@@ -438,6 +443,27 @@ String getAllSensorJson() {
             if (!isnan(calibratedData.HCHO)) special["HCHO_ppb"] = calibratedData.HCHO;
             if (!isnan(calibratedData.PID)) special["PID"] = round(calibratedData.PID * 1000) / 1000.0;
             if (!isnan(calibratedData.PID_mV)) special["PID_mV"] = round(calibratedData.PID_mV * 100) / 100.0;
+            
+            // ODO
+            if (!isnan(calibratedData.ODO)) special["ODO"] = round(calibratedData.ODO * 10) / 10.0;
+            
+            // PM sensors (SPS30)
+            if (!isnan(calibratedData.PM1)) special["PM1"] = round(calibratedData.PM1 * 10) / 10.0;
+            if (!isnan(calibratedData.PM25)) special["PM25"] = round(calibratedData.PM25 * 10) / 10.0;
+            if (!isnan(calibratedData.PM10)) special["PM10"] = round(calibratedData.PM10 * 10) / 10.0;
+            
+            // Environmental sensors
+         
+            
+            if (!isnan(calibratedData.DUST_TEMP)) special["DUST_TEMP"] = round(calibratedData.DUST_TEMP * 10) / 10.0;
+            if (!isnan(calibratedData.DUST_HUMID)) special["DUST_HUMID"] = round(calibratedData.DUST_HUMID * 10) / 10.0;
+            if (!isnan(calibratedData.DUST_PRESS)) special["DUST_PRESS"] = round(calibratedData.DUST_PRESS * 10) / 10.0;
+         
+            
+            // CO2 sensor
+            if (!isnan(calibratedData.SCD_CO2)) special["SCD_CO2"] = round(calibratedData.SCD_CO2 * 10) / 10.0;
+            if (!isnan(calibratedData.SCD_T)) special["SCD_T"] = round(calibratedData.SCD_T * 10) / 10.0;
+            if (!isnan(calibratedData.SCD_RH)) special["SCD_RH"] = round(calibratedData.SCD_RH * 10) / 10.0;
         }
     }
     
@@ -506,14 +532,49 @@ void WiFiReconnectTask(void *parameter) {
             safePrintln("WiFi disconnected, attempting to reconnect...");
             WiFi.disconnect();
             delay(1000);
-            WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
             
-            int retryCount = 0;
-            while (WiFi.status() != WL_CONNECTED && retryCount < 20) {
-                retryCount++;
-                delay(1000);
-                safePrint("Reconnecting to WiFi... attempt ");
-                safePrintln(String(retryCount));
+            // Ustaw hostname na Device ID + MAC adres przed ponownym połączeniem
+            String hostname = String(config.DeviceID) + "-" + WiFi.macAddress().substring(12); // Ostatnie 6 znaków MAC
+            WiFi.setHostname(hostname.c_str());
+            safePrintln("Hostname reset to: " + hostname);
+            
+            // Próbuj połączyć się z konfiguracją z LittleFS, potem z domyślną
+            bool connected = false;
+            
+            // Sprawdź czy LittleFS jest dostępny
+            if (initLittleFS()) {
+                // Load WiFi credentials z konfiguracji
+                char ssid[32], password[64];
+                if (loadWiFiConfig(ssid, password, sizeof(ssid), sizeof(password))) {
+                    safePrintln("WiFi reconnect: using config from LittleFS");
+                    WiFi.begin(ssid, password);
+                    
+                    int retryCount = 0;
+                    while (WiFi.status() != WL_CONNECTED && retryCount < 5) {
+                        retryCount++;
+                        delay(1000);
+                        safePrint("Reconnecting to WiFi (config)... attempt ");
+                        safePrintln(String(retryCount));
+                    }
+                    
+                    if (WiFi.status() == WL_CONNECTED) {
+                        connected = true;
+                    }
+                }
+            }
+            
+            // Jeśli nie udało się połączyć z konfiguracją, spróbuj z domyślną
+            if (!connected) {
+                safePrintln("WiFi reconnect: trying default credentials");
+                WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+                
+                int retryCount = 0;
+                while (WiFi.status() != WL_CONNECTED && retryCount < 5) {
+                    retryCount++;
+                    delay(1000);
+                    safePrint("Reconnecting to WiFi (default)... attempt ");
+                    safePrintln(String(retryCount));
+                }
             }
             
             if (WiFi.status() == WL_CONNECTED) {
@@ -535,6 +596,11 @@ void WiFiReconnectTask(void *parameter) {
 
 void initializeWiFi() {
     if (!config.enableWiFi) return;
+    
+    // Ustaw hostname na Device ID + MAC adres
+    String hostname = String(config.DeviceID) + "-" + WiFi.macAddress().substring(15); // Ostatnie 6 znaków MAC
+    WiFi.setHostname(hostname.c_str());
+    safePrintln("Hostname set to: " + hostname);
     
     // Initialize LittleFS
     if (!initLittleFS()) {
@@ -563,6 +629,29 @@ void initializeWiFi() {
             WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
         }
     }
+    
+    
+    // Skanuj i wyświetl dostępne sieci WiFi
+    safePrintln("=== Skanowanie sieci WiFi ===");
+    int n = WiFi.scanNetworks();
+    if (n == 0) {
+        safePrintln("Nie znaleziono sieci WiFi");
+    } else {
+        safePrintln("Znaleziono " + String(n) + " sieci WiFi:");
+        // Wyświetl pierwsze 5 sieci
+        int maxNetworks = (n > 5) ? 5 : n;
+        for (int i = 0; i < maxNetworks; ++i) {
+            safePrint(String(i + 1) + ". " + WiFi.SSID(i));
+            safePrint(" (");
+            safePrint(String(WiFi.RSSI(i)));
+            safePrint(" dBm) ");
+            safePrintln((WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? "OPEN" : "SECURED");
+        }
+        if (n > 5) {
+            safePrintln("... i " + String(n - 5) + " więcej sieci");
+        }
+    }
+    safePrintln("=== Koniec skanowania ===");
     
     int retryCount = 0;
     while (WiFi.status() != WL_CONNECTED && retryCount < 10) {
@@ -609,6 +698,281 @@ void initializeWebServer() {
     });
     server.on("/test", HTTP_GET, [](AsyncWebServerRequest *request) {
         request->send(200, "text/plain", "WebSocket test: " + String(ws.count()) + " clients connected");
+    });
+    
+    // Calibration constants endpoints
+    server.on("/api/calib-constants", HTTP_GET, [](AsyncWebServerRequest *request) {
+        DynamicJsonDocument doc(16384);
+        
+        // Add all calibration constants to JSON
+        doc["RL_TGS03"] = calibConstants.RL_TGS03;
+        doc["RL_TGS02"] = calibConstants.RL_TGS02;
+        doc["RL_TGS12"] = calibConstants.RL_TGS12;
+        doc["TGS03_B1"] = calibConstants.TGS03_B1;
+        doc["TGS03_A"] = calibConstants.TGS03_A;
+        doc["TGS02_B1"] = calibConstants.TGS02_B1;
+        doc["TGS02_A"] = calibConstants.TGS02_A;
+        doc["TGS12_B1"] = calibConstants.TGS12_B1;
+        doc["TGS12_A"] = calibConstants.TGS12_A;
+        doc["CO_B0"] = calibConstants.CO_B0;
+        doc["CO_B1"] = calibConstants.CO_B1;
+        doc["CO_B2"] = calibConstants.CO_B2;
+        doc["CO_B3"] = calibConstants.CO_B3;
+        doc["NO_B0"] = calibConstants.NO_B0;
+        doc["NO_B1"] = calibConstants.NO_B1;
+        doc["NO_B2"] = calibConstants.NO_B2;
+        doc["NO_B3"] = calibConstants.NO_B3;
+        doc["NO2_B0"] = calibConstants.NO2_B0;
+        doc["NO2_B1"] = calibConstants.NO2_B1;
+        doc["NO2_B2"] = calibConstants.NO2_B2;
+        doc["NO2_B3"] = calibConstants.NO2_B3;
+        doc["O3_B0"] = calibConstants.O3_B0;
+        doc["O3_B1"] = calibConstants.O3_B1;
+        doc["O3_B2"] = calibConstants.O3_B2;
+        doc["O3_B3"] = calibConstants.O3_B3;
+        doc["O3_D"] = calibConstants.O3_D;
+        doc["SO2_B0"] = calibConstants.SO2_B0;
+        doc["SO2_B1"] = calibConstants.SO2_B1;
+        doc["SO2_B2"] = calibConstants.SO2_B2;
+        doc["SO2_B3"] = calibConstants.SO2_B3;
+        doc["NH3_B0"] = calibConstants.NH3_B0;
+        doc["NH3_B1"] = calibConstants.NH3_B1;
+        doc["NH3_B2"] = calibConstants.NH3_B2;
+        doc["NH3_B3"] = calibConstants.NH3_B3;
+        doc["H2S_B0"] = calibConstants.H2S_B0;
+        doc["H2S_B1"] = calibConstants.H2S_B1;
+        doc["H2S_B2"] = calibConstants.H2S_B2;
+        doc["H2S_B3"] = calibConstants.H2S_B3;
+        doc["PID_OFFSET"] = calibConstants.PID_OFFSET;
+        doc["PID_B"] = calibConstants.PID_B;
+        doc["PID_A"] = calibConstants.PID_A;
+        doc["PID_CF"] = calibConstants.PID_CF;
+        doc["HCHO_B1"] = calibConstants.HCHO_B1;
+        doc["HCHO_A"] = calibConstants.HCHO_A;
+        doc["HCHO_PPB_CF"] = calibConstants.HCHO_PPB_CF;
+        // PM sensor constants - new naming convention
+        doc["PM1_A"] = calibConstants.PM1_A;
+        doc["PM1_B"] = calibConstants.PM1_B;
+        doc["PM25_A"] = calibConstants.PM25_A;
+        doc["PM25_B"] = calibConstants.PM25_B;
+        doc["PM10_A"] = calibConstants.PM10_A;
+        doc["PM10_B"] = calibConstants.PM10_B;
+        
+        // Environmental sensor constants - new naming convention
+        // Ambient sensors
+        doc["AMBIENT_TEMP_A"] = calibConstants.AMBIENT_TEMP_A;
+        doc["AMBIENT_TEMP_B"] = calibConstants.AMBIENT_TEMP_B;
+        doc["AMBIENT_HUMID_A"] = calibConstants.AMBIENT_HUMID_A;
+        doc["AMBIENT_HUMID_B"] = calibConstants.AMBIENT_HUMID_B;
+        doc["AMBIENT_PRESS_A"] = calibConstants.AMBIENT_PRESS_A;
+        doc["AMBIENT_PRESS_B"] = calibConstants.AMBIENT_PRESS_B;
+        
+        // Dust sensors
+        doc["DUST_TEMP_A"] = calibConstants.DUST_TEMP_A;
+        doc["DUST_TEMP_B"] = calibConstants.DUST_TEMP_B;
+        doc["DUST_HUMID_A"] = calibConstants.DUST_HUMID_A;
+        doc["DUST_HUMID_B"] = calibConstants.DUST_HUMID_B;
+        doc["DUST_PRESS_A"] = calibConstants.DUST_PRESS_A;
+        doc["DUST_PRESS_B"] = calibConstants.DUST_PRESS_B;
+        
+        // Gas sensors
+        doc["GAS_TEMP_A"] = calibConstants.GAS_TEMP_A;
+        doc["GAS_TEMP_B"] = calibConstants.GAS_TEMP_B;
+        doc["GAS_HUMID_A"] = calibConstants.GAS_HUMID_A;
+        doc["GAS_HUMID_B"] = calibConstants.GAS_HUMID_B;
+        doc["GAS_PRESS_A"] = calibConstants.GAS_PRESS_A;
+        doc["GAS_PRESS_B"] = calibConstants.GAS_PRESS_B;
+        
+        // CO2 sensor constants - new naming convention
+        doc["SCD_CO2_A"] = calibConstants.SCD_CO2_A;
+        doc["SCD_CO2_B"] = calibConstants.SCD_CO2_B;
+        doc["SCD_T_A"] = calibConstants.SCD_T_A;
+        doc["SCD_T_B"] = calibConstants.SCD_T_B;
+        doc["SCD_RH_A"] = calibConstants.SCD_RH_A;
+        doc["SCD_RH_B"] = calibConstants.SCD_RH_B;
+        doc["ODO_A0"] = calibConstants.ODO_A0;
+        doc["ODO_A1"] = calibConstants.ODO_A1;
+        doc["ODO_A2"] = calibConstants.ODO_A2;
+        doc["ODO_A3"] = calibConstants.ODO_A3;
+        doc["ODO_A4"] = calibConstants.ODO_A4;
+        doc["ODO_A5"] = calibConstants.ODO_A5;
+        doc["B4_TO"] = calibConstants.B4_TO;
+        doc["B4_B"] = calibConstants.B4_B;
+        doc["B4_RO"] = calibConstants.B4_RO;
+        doc["B4_RS"] = calibConstants.B4_RS;
+        doc["B4_K"] = calibConstants.B4_K;
+        doc["B4_COK"] = calibConstants.B4_COK;
+        doc["TGS_TO"] = calibConstants.TGS_TO;
+        doc["TGS_B"] = calibConstants.TGS_B;
+        doc["TGS_COK"] = calibConstants.TGS_COK;
+        doc["B4_LSB"] = calibConstants.B4_LSB;
+        doc["TGS_LSB"] = calibConstants.TGS_LSB;
+        doc["GAS_MIN"] = calibConstants.GAS_MIN;
+        doc["GAS_MAX"] = calibConstants.GAS_MAX;
+        doc["HCHO_MIN"] = calibConstants.HCHO_MIN;
+        doc["HCHO_MAX"] = calibConstants.HCHO_MAX;
+        doc["PID_MIN"] = calibConstants.PID_MIN;
+        doc["PID_MAX"] = calibConstants.PID_MAX;
+        doc["PM_MIN"] = calibConstants.PM_MIN;
+        doc["PM_MAX"] = calibConstants.PM_MAX;
+        doc["ENV_MIN"] = calibConstants.ENV_MIN;
+        doc["ENV_MAX"] = calibConstants.ENV_MAX;
+        doc["SCD_CO2_MIN"] = calibConstants.SCD_CO2_MIN;
+        doc["SCD_CO2_MAX"] = calibConstants.SCD_CO2_MAX;
+        doc["SCD_T_MIN"] = calibConstants.SCD_T_MIN;
+        doc["SCD_T_MAX"] = calibConstants.SCD_T_MAX;
+        doc["SCD_RH_MIN"] = calibConstants.SCD_RH_MIN;
+        doc["SCD_RH_MAX"] = calibConstants.SCD_RH_MAX;
+        doc["ODO_MIN"] = calibConstants.ODO_MIN;
+        doc["ODO_MAX"] = calibConstants.ODO_MAX;
+        
+        String response;
+        serializeJson(doc, response);
+        request->send(200, "application/json", response);
+    });
+    
+    server.on("/api/calib-constants", HTTP_POST, [](AsyncWebServerRequest *request) {
+        if (request->hasParam("data", true)) {
+            String jsonData = request->getParam("data", true)->value();
+            DynamicJsonDocument doc(16384);
+            DeserializationError error = deserializeJson(doc, jsonData);
+            
+            if (error) {
+                request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+                return;
+            }
+            
+            // Update calibration constants from JSON
+            calibConstants.RL_TGS03 = doc["RL_TGS03"] | calibConstants.RL_TGS03;
+            calibConstants.RL_TGS02 = doc["RL_TGS02"] | calibConstants.RL_TGS02;
+            calibConstants.RL_TGS12 = doc["RL_TGS12"] | calibConstants.RL_TGS12;
+            calibConstants.TGS03_B1 = doc["TGS03_B1"] | calibConstants.TGS03_B1;
+            calibConstants.TGS03_A = doc["TGS03_A"] | calibConstants.TGS03_A;
+            calibConstants.TGS02_B1 = doc["TGS02_B1"] | calibConstants.TGS02_B1;
+            calibConstants.TGS02_A = doc["TGS02_A"] | calibConstants.TGS02_A;
+            calibConstants.TGS12_B1 = doc["TGS12_B1"] | calibConstants.TGS12_B1;
+            calibConstants.TGS12_A = doc["TGS12_A"] | calibConstants.TGS12_A;
+            calibConstants.CO_B0 = doc["CO_B0"] | calibConstants.CO_B0;
+            calibConstants.CO_B1 = doc["CO_B1"] | calibConstants.CO_B1;
+            calibConstants.CO_B2 = doc["CO_B2"] | calibConstants.CO_B2;
+            calibConstants.CO_B3 = doc["CO_B3"] | calibConstants.CO_B3;
+            calibConstants.NO_B0 = doc["NO_B0"] | calibConstants.NO_B0;
+            calibConstants.NO_B1 = doc["NO_B1"] | calibConstants.NO_B1;
+            calibConstants.NO_B2 = doc["NO_B2"] | calibConstants.NO_B2;
+            calibConstants.NO_B3 = doc["NO_B3"] | calibConstants.NO_B3;
+            calibConstants.NO2_B0 = doc["NO2_B0"] | calibConstants.NO2_B0;
+            calibConstants.NO2_B1 = doc["NO2_B1"] | calibConstants.NO2_B1;
+            calibConstants.NO2_B2 = doc["NO2_B2"] | calibConstants.NO2_B2;
+            calibConstants.NO2_B3 = doc["NO2_B3"] | calibConstants.NO2_B3;
+            calibConstants.O3_B0 = doc["O3_B0"] | calibConstants.O3_B0;
+            calibConstants.O3_B1 = doc["O3_B1"] | calibConstants.O3_B1;
+            calibConstants.O3_B2 = doc["O3_B2"] | calibConstants.O3_B2;
+            calibConstants.O3_B3 = doc["O3_B3"] | calibConstants.O3_B3;
+            calibConstants.O3_D = doc["O3_D"] | calibConstants.O3_D;
+            calibConstants.SO2_B0 = doc["SO2_B0"] | calibConstants.SO2_B0;
+            calibConstants.SO2_B1 = doc["SO2_B1"] | calibConstants.SO2_B1;
+            calibConstants.SO2_B2 = doc["SO2_B2"] | calibConstants.SO2_B2;
+            calibConstants.SO2_B3 = doc["SO2_B3"] | calibConstants.SO2_B3;
+            calibConstants.NH3_B0 = doc["NH3_B0"] | calibConstants.NH3_B0;
+            calibConstants.NH3_B1 = doc["NH3_B1"] | calibConstants.NH3_B1;
+            calibConstants.NH3_B2 = doc["NH3_B2"] | calibConstants.NH3_B2;
+            calibConstants.NH3_B3 = doc["NH3_B3"] | calibConstants.NH3_B3;
+            calibConstants.H2S_B0 = doc["H2S_B0"] | calibConstants.H2S_B0;
+            calibConstants.H2S_B1 = doc["H2S_B1"] | calibConstants.H2S_B1;
+            calibConstants.H2S_B2 = doc["H2S_B2"] | calibConstants.H2S_B2;
+            calibConstants.H2S_B3 = doc["H2S_B3"] | calibConstants.H2S_B3;
+            calibConstants.PID_OFFSET = doc["PID_OFFSET"] | calibConstants.PID_OFFSET;
+            calibConstants.PID_B = doc["PID_B"] | calibConstants.PID_B;
+            calibConstants.PID_A = doc["PID_A"] | calibConstants.PID_A;
+            calibConstants.PID_CF = doc["PID_CF"] | calibConstants.PID_CF;
+            calibConstants.HCHO_B1 = doc["HCHO_B1"] | calibConstants.HCHO_B1;
+            calibConstants.HCHO_A = doc["HCHO_A"] | calibConstants.HCHO_A;
+            calibConstants.HCHO_PPB_CF = doc["HCHO_PPB_CF"] | calibConstants.HCHO_PPB_CF;
+            // PM sensor constants - new naming convention
+            calibConstants.PM1_A = doc["PM1_A"] | calibConstants.PM1_A;
+            calibConstants.PM1_B = doc["PM1_B"] | calibConstants.PM1_B;
+            calibConstants.PM25_A = doc["PM25_A"] | calibConstants.PM25_A;
+            calibConstants.PM25_B = doc["PM25_B"] | calibConstants.PM25_B;
+            calibConstants.PM10_A = doc["PM10_A"] | calibConstants.PM10_A;
+            calibConstants.PM10_B = doc["PM10_B"] | calibConstants.PM10_B;
+            
+            // Environmental sensor constants - new naming convention
+            // Ambient sensors
+            calibConstants.AMBIENT_TEMP_A = doc["AMBIENT_TEMP_A"] | calibConstants.AMBIENT_TEMP_A;
+            calibConstants.AMBIENT_TEMP_B = doc["AMBIENT_TEMP_B"] | calibConstants.AMBIENT_TEMP_B;
+            calibConstants.AMBIENT_HUMID_A = doc["AMBIENT_HUMID_A"] | calibConstants.AMBIENT_HUMID_A;
+            calibConstants.AMBIENT_HUMID_B = doc["AMBIENT_HUMID_B"] | calibConstants.AMBIENT_HUMID_B;
+            calibConstants.AMBIENT_PRESS_A = doc["AMBIENT_PRESS_A"] | calibConstants.AMBIENT_PRESS_A;
+            calibConstants.AMBIENT_PRESS_B = doc["AMBIENT_PRESS_B"] | calibConstants.AMBIENT_PRESS_B;
+            
+            // Dust sensors
+            calibConstants.DUST_TEMP_A = doc["DUST_TEMP_A"] | calibConstants.DUST_TEMP_A;
+            calibConstants.DUST_TEMP_B = doc["DUST_TEMP_B"] | calibConstants.DUST_TEMP_B;
+            calibConstants.DUST_HUMID_A = doc["DUST_HUMID_A"] | calibConstants.DUST_HUMID_A;
+            calibConstants.DUST_HUMID_B = doc["DUST_HUMID_B"] | calibConstants.DUST_HUMID_B;
+            calibConstants.DUST_PRESS_A = doc["DUST_PRESS_A"] | calibConstants.DUST_PRESS_A;
+            calibConstants.DUST_PRESS_B = doc["DUST_PRESS_B"] | calibConstants.DUST_PRESS_B;
+            
+            // Gas sensors
+            calibConstants.GAS_TEMP_A = doc["GAS_TEMP_A"] | calibConstants.GAS_TEMP_A;
+            calibConstants.GAS_TEMP_B = doc["GAS_TEMP_B"] | calibConstants.GAS_TEMP_B;
+            calibConstants.GAS_HUMID_A = doc["GAS_HUMID_A"] | calibConstants.GAS_HUMID_A;
+            calibConstants.GAS_HUMID_B = doc["GAS_HUMID_B"] | calibConstants.GAS_HUMID_B;
+            calibConstants.GAS_PRESS_A = doc["GAS_PRESS_A"] | calibConstants.GAS_PRESS_A;
+            calibConstants.GAS_PRESS_B = doc["GAS_PRESS_B"] | calibConstants.GAS_PRESS_B;
+            
+            // CO2 sensor constants - new naming convention
+            calibConstants.SCD_CO2_A = doc["SCD_CO2_A"] | calibConstants.SCD_CO2_A;
+            calibConstants.SCD_CO2_B = doc["SCD_CO2_B"] | calibConstants.SCD_CO2_B;
+            calibConstants.SCD_T_A = doc["SCD_T_A"] | calibConstants.SCD_T_A;
+            calibConstants.SCD_T_B = doc["SCD_T_B"] | calibConstants.SCD_T_B;
+            calibConstants.SCD_RH_A = doc["SCD_RH_A"] | calibConstants.SCD_RH_A;
+            calibConstants.SCD_RH_B = doc["SCD_RH_B"] | calibConstants.SCD_RH_B;
+            calibConstants.ODO_A0 = doc["ODO_A0"] | calibConstants.ODO_A0;
+            calibConstants.ODO_A1 = doc["ODO_A1"] | calibConstants.ODO_A1;
+            calibConstants.ODO_A2 = doc["ODO_A2"] | calibConstants.ODO_A2;
+            calibConstants.ODO_A3 = doc["ODO_A3"] | calibConstants.ODO_A3;
+            calibConstants.ODO_A4 = doc["ODO_A4"] | calibConstants.ODO_A4;
+            calibConstants.ODO_A5 = doc["ODO_A5"] | calibConstants.ODO_A5;
+            calibConstants.B4_TO = doc["B4_TO"] | calibConstants.B4_TO;
+            calibConstants.B4_B = doc["B4_B"] | calibConstants.B4_B;
+            calibConstants.B4_RO = doc["B4_RO"] | calibConstants.B4_RO;
+            calibConstants.B4_RS = doc["B4_RS"] | calibConstants.B4_RS;
+            calibConstants.B4_K = doc["B4_K"] | calibConstants.B4_K;
+            calibConstants.B4_COK = doc["B4_COK"] | calibConstants.B4_COK;
+            calibConstants.TGS_TO = doc["TGS_TO"] | calibConstants.TGS_TO;
+            calibConstants.TGS_B = doc["TGS_B"] | calibConstants.TGS_B;
+            calibConstants.TGS_COK = doc["TGS_COK"] | calibConstants.TGS_COK;
+            calibConstants.B4_LSB = doc["B4_LSB"] | calibConstants.B4_LSB;
+            calibConstants.TGS_LSB = doc["TGS_LSB"] | calibConstants.TGS_LSB;
+            calibConstants.GAS_MIN = doc["GAS_MIN"] | calibConstants.GAS_MIN;
+            calibConstants.GAS_MAX = doc["GAS_MAX"] | calibConstants.GAS_MAX;
+            calibConstants.HCHO_MIN = doc["HCHO_MIN"] | calibConstants.HCHO_MIN;
+            calibConstants.HCHO_MAX = doc["HCHO_MAX"] | calibConstants.HCHO_MAX;
+            calibConstants.PID_MIN = doc["PID_MIN"] | calibConstants.PID_MIN;
+            calibConstants.PID_MAX = doc["PID_MAX"] | calibConstants.PID_MAX;
+            calibConstants.PM_MIN = doc["PM_MIN"] | calibConstants.PM_MIN;
+            calibConstants.PM_MAX = doc["PM_MAX"] | calibConstants.PM_MAX;
+            calibConstants.ENV_MIN = doc["ENV_MIN"] | calibConstants.ENV_MIN;
+            calibConstants.ENV_MAX = doc["ENV_MAX"] | calibConstants.ENV_MAX;
+            calibConstants.SCD_CO2_MIN = doc["SCD_CO2_MIN"] | calibConstants.SCD_CO2_MIN;
+            calibConstants.SCD_CO2_MAX = doc["SCD_CO2_MAX"] | calibConstants.SCD_CO2_MAX;
+            calibConstants.SCD_T_MIN = doc["SCD_T_MIN"] | calibConstants.SCD_T_MIN;
+            calibConstants.SCD_T_MAX = doc["SCD_T_MAX"] | calibConstants.SCD_T_MAX;
+            calibConstants.SCD_RH_MIN = doc["SCD_RH_MIN"] | calibConstants.SCD_RH_MIN;
+            calibConstants.SCD_RH_MAX = doc["SCD_RH_MAX"] | calibConstants.SCD_RH_MAX;
+            calibConstants.ODO_MIN = doc["ODO_MIN"] | calibConstants.ODO_MIN;
+            calibConstants.ODO_MAX = doc["ODO_MAX"] | calibConstants.ODO_MAX;
+            
+            // Save to file
+            if (saveCalibrationConstants(calibConstants)) {
+                request->send(200, "application/json", "{\"success\":true,\"message\":\"Calibration constants saved\"}");
+            } else {
+                request->send(500, "application/json", "{\"error\":\"Failed to save calibration constants\"}");
+            }
+        } else {
+            request->send(400, "application/json", "{\"error\":\"No data provided\"}");
+        }
     });
     server.on("/api/history", HTTP_GET, [](AsyncWebServerRequest *request) {
         String sensor = "scd41";  // Default to scd41 (CO2 sensor)
@@ -663,7 +1027,7 @@ void initializeWebServer() {
         request->send(200);
     }, [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
         if (!index) {
-            safePrint("Update Start: " + filename);
+            safePrint("Firmware Update Start: " + filename);
             if (!Update.begin()) {
                 Update.printError(Serial);
             }
@@ -675,11 +1039,39 @@ void initializeWebServer() {
         }
         if (final) {
             if (Update.end(true)) {
-                safePrint("Update Success: " + String(index + len) + "B");
-                safePrintln("Update complete! Rebooting...");
-                request->send(200, "text/plain", "Update complete! Rebooting...\n");
+                safePrint("Firmware Update Success: " + String(index + len) + "B");
+                safePrintln("Firmware update complete! Rebooting...");
+                request->send(200, "text/plain", "Firmware update complete! Rebooting...\n");
                 delay(100);
                 ESP.restart();
+            } else {
+                Update.printError(Serial);
+            }
+        }
+    });
+    
+    // Filesystem update endpoint
+    server.on("/updatefs", HTTP_POST, [](AsyncWebServerRequest *request) {
+        request->send(200);
+    }, [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+        if (!index) {
+            safePrint("Filesystem Update Start: " + filename);
+            // Begin filesystem update - use U_FS for filesystem updates
+                            if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_SPIFFS)) {
+                Update.printError(Serial);
+            }
+        }
+        if (!Update.hasError()) {
+            if (Update.write(data, len) != len) {
+                Update.printError(Serial);
+            }
+        }
+        if (final) {
+            if (Update.end(true)) {
+                safePrint("Filesystem Update Success: " + String(index + len) + "B");
+                safePrintln("Filesystem update complete!");
+                request->send(200, "text/plain", "Filesystem update complete!\n");
+                // Filesystem update doesn't require restart
             } else {
                 Update.printError(Serial);
             }

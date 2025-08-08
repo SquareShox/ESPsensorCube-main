@@ -11,6 +11,9 @@ NetworkConfig networkConfig;
 // Global MCP3424 configuration
 MCP3424Config mcp3424Config;
 
+// WiFi config change flag (used to throttle Modbus updates of credentials)
+volatile bool wifiConfigChanged = false;
+
 // File paths
 const char* NETWORK_CONFIG_FILE = "/network.json";
 const char* WIFI_CONFIG_FILE = "/wifi.json";
@@ -20,6 +23,53 @@ const char* SYSTEM_CONFIG_FILE = "/system.json";
 // Forward declarations
 void safePrint(const String& message);
 void safePrintln(const String& message);
+
+// Helper: robust open-for-write with recovery (mount/format/retry)
+static bool ensureWritableFSAndOpenForWrite(const char* path, File& outFile) {
+    // Try normal mount if not mounted
+    if (!LittleFS.begin()) {
+        safePrintln("LittleFS not mounted, attempting mount (no format)...");
+        if (!LittleFS.begin()) {
+            safePrintln("Mount failed, attempting format+mount...");
+            if (!LittleFS.begin(true)) {
+                safePrintln("Format+mount failed");
+                return false;
+            }
+        }
+    }
+
+    // First attempt to open
+    outFile = LittleFS.open(path, "w");
+    if (outFile) return true;
+
+    // Retry after a clean remount
+    safePrintln("open() failed, retrying after remount...");
+    LittleFS.end();
+    if (!LittleFS.begin(true)) {
+        safePrintln("Remount after format failed");
+        return false;
+    }
+    outFile = LittleFS.open(path, "w");
+    if (outFile) return true;
+
+    // Remove and retry (in case of stale inode)
+    safePrintln("open() still failing, attempting remove+recreate...");
+    LittleFS.remove(path);
+    outFile = LittleFS.open(path, "w");
+    if (outFile) return true;
+
+    // Final: quick write test to detect RO state
+    File test = LittleFS.open("/.writetest.tmp", "w");
+    if (test) {
+        test.println("t");
+        test.close();
+        LittleFS.remove("/.writetest.tmp");
+        safePrintln(String("FS writable but failed to create: ") + path);
+    } else {
+        safePrintln("FS appears read-only or full; cannot create files");
+    }
+    return false;
+}
 
 // Check and repair LittleFS if needed
 bool checkAndRepairLittleFS() {
@@ -160,18 +210,9 @@ bool initLittleFS() {
 
 // Save network configuration to LittleFS
 bool saveNetworkConfig(const NetworkConfig& config) {
-    // Check if LittleFS is mounted
-    if (!LittleFS.begin()) {
-        safePrintln("LittleFS not mounted, attempting to mount...");
-        if (!LittleFS.begin(true)) {
-            safePrintln("Failed to mount LittleFS for network config save");
-            return false;
-        }
-    }
-    
-    File file = LittleFS.open(NETWORK_CONFIG_FILE, "w");
-    if (!file) {
-        safePrintln("Failed to open network config file for writing");
+    File file;
+    if (!ensureWritableFSAndOpenForWrite(NETWORK_CONFIG_FILE, file)) {
+        safePrintln("Failed to open network config file for writing (after recovery)");
         safePrintln("LittleFS status: " + String(LittleFS.usedBytes()) + "/" + String(LittleFS.totalBytes()) + " bytes");
         return false;
     }
@@ -233,67 +274,12 @@ bool loadNetworkConfig(NetworkConfig& config) {
 
 // Save WiFi configuration to LittleFS
 bool saveWiFiConfig(const char* ssid, const char* password) {
-    // Check if LittleFS is mounted
-    if (!LittleFS.begin()) {
-        safePrintln("LittleFS not mounted, attempting to mount...");
-        if (!LittleFS.begin(true)) {
-            safePrintln("Failed to mount LittleFS for WiFi config save");
-            return false;
-        }
-    }
-    
-    // Check if we can create/write files
-    File testFile = LittleFS.open("/test.txt", "w");
-    if (!testFile) {
-        safePrintln("Cannot create test file - LittleFS write permission issue");
-        safePrintln("Free space: " + String(LittleFS.totalBytes() - LittleFS.usedBytes()) + " bytes");
-        
-        // Try to format and remount
-        safePrintln("Attempting to format LittleFS...");
-        LittleFS.end();
-        if (LittleFS.begin(true)) {
-            safePrintln("LittleFS formatted and remounted successfully");
-        } else {
-            safePrintln("Failed to format LittleFS");
-            return false;
-        }
-    } else {
-        testFile.close();
-        LittleFS.remove("/test.txt");
-    }
-    
-    // Debug: Print file path being used
-    safePrintln("Attempting to create WiFi config file: " + String(WIFI_CONFIG_FILE));
-    safePrintln("LittleFS mounted: " + String(LittleFS.totalBytes() > 0 ? "YES" : "NO"));
-    
-    // Try to create WiFi config file with retry
-    File file = LittleFS.open(WIFI_CONFIG_FILE, "w");
-    if (!file) {
+    // Robust open with recovery
+    File file;
+    if (!ensureWritableFSAndOpenForWrite(WIFI_CONFIG_FILE, file)) {
         safePrintln("Failed to open WiFi config file for writing: " + String(WIFI_CONFIG_FILE));
         safePrintln("LittleFS status: " + String(LittleFS.usedBytes()) + "/" + String(LittleFS.totalBytes()) + " bytes");
         safePrintln("Free space: " + String(LittleFS.totalBytes() - LittleFS.usedBytes()) + " bytes");
-        
-        // List files to debug
-        safePrintln("LittleFS files:");
-        File root = LittleFS.open("/");
-        File fileItem = root.openNextFile();
-        while (fileItem) {
-            safePrintln("  " + String(fileItem.name()) + " (" + String(fileItem.size()) + " bytes)");
-            fileItem = root.openNextFile();
-        }
-        
-        // Try alternative path
-        safePrintln("Trying alternative file creation...");
-        File altFile = LittleFS.open("/wificonfig.txt", "w");
-        if (altFile) {
-            altFile.println("test");
-            altFile.close();
-            LittleFS.remove("/wificonfig.txt");
-            safePrintln("Alternative file creation successful");
-        } else {
-            safePrintln("Alternative file creation also failed");
-        }
-        
         return false;
     }
     
@@ -310,6 +296,8 @@ bool saveWiFiConfig(const char* ssid, const char* password) {
     }
     
     safePrintln("WiFi config saved successfully");
+    // Mark as changed so other subsystems (e.g., Modbus) can react once
+    wifiConfigChanged = true;
     return true;
 }
 
@@ -441,8 +429,8 @@ String listLittleFSFiles() {
 
 // Save MCP3424 configuration to LittleFS
 bool saveMCP3424Config(const MCP3424Config& config) {
-    File file = LittleFS.open(MCP3424_CONFIG_FILE, "w");
-    if (!file) {
+    File file;
+    if (!ensureWritableFSAndOpenForWrite(MCP3424_CONFIG_FILE, file)) {
         safePrintln("Failed to open MCP3424 config file for writing");
         return false;
     }
@@ -589,14 +577,14 @@ void initializeDefaultMCP3424Mapping() {
     // Assign devices to gas types with specific I2C addresses
     // Format: deviceIndex, i2cAddress, gasType, description, enabled
     // NOTE: MCP3424 valid addresses are 0x68-0x6F only!
-    addMCP3424DeviceWithAddress(0, 0x68, "NO", "NO Sensor (K1)", false);   // Default disabled
-    addMCP3424DeviceWithAddress(1, 0x6A, "O3", "O3 Sensor (K2)", false);   // Default disabled
-    addMCP3424DeviceWithAddress(2, 0x6B, "NO2", "NO2 Sensor (K3)", false); // Default disabled
-    addMCP3424DeviceWithAddress(3, 0x6C, "CO", "CO Sensor (K4)", false);   // Default disabled
-    addMCP3424DeviceWithAddress(4, 0x6D, "SO2", "SO2 Sensor (K5)", false); // Default disabled
-    addMCP3424DeviceWithAddress(5, 0x6E, "TGS1", "TGS Sensor 1", false);   // Default disabled
-    addMCP3424DeviceWithAddress(6, 0x6F, "TGS2", "TGS Sensor 2", false);   // Default disabled
-    addMCP3424DeviceWithAddress(7, 0x69, "TGS3", "TGS Sensor 3", false);   // Fixed: 0x69 not 0x70!
+    addMCP3424DeviceWithAddress(0, 0x68, "NH3", "NH3 Sensor (K1)", false);   // Default disabled
+    addMCP3424DeviceWithAddress(1, 0x6A, "NO2", "NO2 Sensor (K2)", false);   // Default disabled
+    addMCP3424DeviceWithAddress(2, 0x6B, "CO", "CO Sensor (K3)", false);     // Default disabled
+    addMCP3424DeviceWithAddress(3, 0x6C, "SO2", "SO2 Sensor (K4)", false);   // Default disabled
+    addMCP3424DeviceWithAddress(4, 0x6D, "TGS2", "TGS Sensor 2", false);     // Default disabled
+    addMCP3424DeviceWithAddress(5, 0x6E, "H2S", "H2S Sensor (K5)", false);   // Default disabled
+    addMCP3424DeviceWithAddress(6, 0x6F, "NO", "NO Sensor (K6)", false);     // Default disabled
+    addMCP3424DeviceWithAddress(7, 0x69, "TGS3", "TGS Sensor 3", false);     // Fixed: 0x69 not 0x70!
     
     mcp3424Config.configValid = true;
     safePrintln("Default MCP3424 device assignment with I2C addresses initialized");
@@ -617,13 +605,13 @@ void initializeDefaultMCP3424Mapping() {
     safePrintln("==================================");
     
     safePrintln("=== MCP3424 Default Address Mapping (All DISABLED by default) ===");
-    safePrintln("0x68 -> Device 0 -> NO (K1)");
-    safePrintln("0x6A -> Device 1 -> O3 (K2)");
-    safePrintln("0x6B -> Device 2 -> NO2 (K3)");
-    safePrintln("0x6C -> Device 3 -> CO (K4)");
-    safePrintln("0x6D -> Device 4 -> SO2 (K5)");
-    safePrintln("0x6E -> Device 5 -> TGS1");
-    safePrintln("0x6F -> Device 6 -> TGS2");
+    safePrintln("0x68 -> Device 0 -> NH3 (K1)");
+    safePrintln("0x6A -> Device 1 -> NO2 (K2)");
+    safePrintln("0x6B -> Device 2 -> CO (K3)");
+    safePrintln("0x6C -> Device 3 -> SO2 (K4)");
+    safePrintln("0x6D -> Device 4 -> TGS2");
+    safePrintln("0x6E -> Device 5 -> H2S (K5)");
+    safePrintln("0x6F -> Device 6 -> NO (K6)");
     safePrintln("0x69 -> Device 7 -> TGS3 (FIXED: was 0x70 which is invalid)");
     safePrintln("Use web interface to enable specific devices as needed.");
     safePrintln("=================================================================");
@@ -682,37 +670,46 @@ bool addMCP3424DeviceWithAddress(uint8_t deviceIndex, uint8_t i2cAddress, const 
 
 // Get MCP3424 device index by gas type
 int8_t getMCP3424DeviceByGasType(const char* gasType) {
-    // safePrint("getMCP3424DeviceByGasType(\"");
-    // safePrint(gasType);
-    // safePrint("\") - searching through all 8 devices:");
-    
-    // Search through ALL 8 devices (not just deviceCount)
+    bool debugNO = false;
+
+    if (debugNO) {
+        safePrint("getMCP3424DeviceByGasType(\"");
+        safePrint(gasType);
+        safePrintln("\") - searching through all 8 devices:");
+    }
+
     for (uint8_t i = 0; i < 8; i++) {
-        // safePrint("  Device ");
-        // safePrint(String(i));
-        // safePrint(": gasType=\"");
-        // safePrint(mcp3424Config.devices[i].gasType);
-        // safePrint("\", enabled=");
-        // safePrint(mcp3424Config.devices[i].enabled ? "true" : "false");
-        // safePrint(", autoDetected=");
-        // safePrint(mcp3424Config.devices[i].autoDetected ? "true" : "false");
-        // safePrint(", deviceIndex=");
-        // safePrint(String(mcp3424Config.devices[i].deviceIndex));
-        // safePrint(", I2C=0x");
-        // safePrintln(String(mcp3424Config.devices[i].i2cAddress, HEX));
-        
+        if (debugNO) {
+            safePrint("  Device ");
+            safePrint(String(i));
+            safePrint(": gasType=\"");
+            safePrint(mcp3424Config.devices[i].gasType);
+            safePrint("\", enabled=");
+            safePrint(mcp3424Config.devices[i].enabled ? "true" : "false");
+            safePrint(", autoDetected=");
+            safePrint(mcp3424Config.devices[i].autoDetected ? "true" : "false");
+            safePrint(", deviceIndex=");
+            safePrint(String(mcp3424Config.devices[i].deviceIndex));
+            safePrint(", I2C=0x");
+            safePrintln(String(mcp3424Config.devices[i].i2cAddress, HEX));
+        }
+
         if (strcmp(mcp3424Config.devices[i].gasType, gasType) == 0 && 
             mcp3424Config.devices[i].enabled && 
             mcp3424Config.devices[i].autoDetected) {
-            // safePrint("  -> FOUND device ");
-            // safePrint(String(mcp3424Config.devices[i].deviceIndex));
-            // safePrint(" (I2C 0x");
-            // safePrint(String(mcp3424Config.devices[i].i2cAddress, HEX));
-            // safePrintln(")");
+            if (debugNO) {
+                safePrint("  -> FOUND device ");
+                safePrint(String(mcp3424Config.devices[i].deviceIndex));
+                safePrint(" (I2C 0x");
+                safePrint(String(mcp3424Config.devices[i].i2cAddress, HEX));
+                safePrintln(")");
+            }
             return mcp3424Config.devices[i].deviceIndex;
         }
     }
-   // safePrintln("  -> NOT FOUND");
+    if (debugNO) {
+        safePrintln("  -> NOT FOUND");
+    }
     return -1; // Device not found, disabled, or not detected
 }
 
@@ -900,6 +897,22 @@ void displayMCP3424MappingInfo() {
     safePrintln("===================================");
 }
 
+// Check if MCP3424 device is valid (exists in data array and has valid data)
+bool isMCP3424DeviceValid(uint8_t deviceIndex) {
+    extern MCP3424Data mcp3424Data;
+    extern MCP3424Config mcp3424Config;
+    
+    // Find the actual data array index for this device index
+    for (uint8_t i = 0; i < mcp3424Data.deviceCount; i++) {
+        if (mcp3424Data.addresses[i] == mcp3424Config.devices[deviceIndex].i2cAddress) {
+            return mcp3424Data.valid[i];
+        }
+    }
+    
+    // Device not found in data array
+    return false;
+}
+
 // Get MCP3424 value by device and channel (existing function)
 float getMCP3424Value(uint8_t deviceIndex, uint8_t channel) {
     extern MCP3424Data mcp3424Data;
@@ -932,8 +945,8 @@ float getMCP3424Value(uint8_t deviceIndex, uint8_t channel) {
 
 // Save system configuration to LittleFS
 bool saveSystemConfig(const FeatureConfig& config) {
-    File file = LittleFS.open(SYSTEM_CONFIG_FILE, "w");
-    if (!file) {
+    File file;
+    if (!ensureWritableFSAndOpenForWrite(SYSTEM_CONFIG_FILE, file)) {
         safePrintln("Failed to open system config file for writing");
         return false;
     }

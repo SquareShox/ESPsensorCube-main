@@ -4,10 +4,11 @@
 #include <mean.h>
 #include <calib.h>
 #include <time.h>
-
+#include <network_config.h>
 // Forward declarations for safe printing functions
 void safePrint(const String& message);
 void safePrintln(const String& message);
+
 
 // Global Modbus objects and data
 ModbusSerial mb(Serial2, MODBUS_SLAVE_ID);
@@ -18,6 +19,7 @@ unsigned int modbusRegistersIPS[REG_COUNT_IPS];
 // Modbus activity tracking
 unsigned long lastModbusActivity = 0;
 bool hasHadModbusActivity = false;
+bool offoveride = true;
 
 // Network flag for display
 extern bool turnOnNetwork;
@@ -258,7 +260,7 @@ void updateModbusI2CRegisters() {
     }
     
     // Use dedicated I2C register block
-    int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3+3;
+    int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + 3;
     
     // Header registers - nowy format
     mb.setHreg(baseReg, i2cSensorStatus ? 1 : 0); // Status
@@ -268,13 +270,13 @@ void updateModbusI2CRegisters() {
     unsigned long updateTime = millis();
     mb.setHreg(baseReg + 2, updateTime & 0xFFFF); // Lower 16 bits
     mb.setHreg(baseReg + 3, (updateTime >> 16) & 0xFFFF); // Upper 16 bits
-    
+
     if (dataToUse.valid) {
         mb.setHreg(baseReg + 4, (int16_t)(dataToUse.temperature * 100)); // Temperature * 100
         mb.setHreg(baseReg + 5, (uint16_t)(dataToUse.humidity * 100)); // Humidity * 100
         mb.setHreg(baseReg + 6, (uint16_t)(dataToUse.pressure * 10)); // Pressure * 10
         mb.setHreg(baseReg + 7, (uint16_t)(dataToUse.co2)); // CO2
-       // safePrintln("CO2: " + String(dataToUse.co2));
+        // safePrintln("CO2: " + String(dataToUse.co2));
         mb.setHreg(baseReg + 8, (uint16_t)dataToUse.type); // Sensor type
         
         // Add current time and date from ESP32 built-in time functions
@@ -291,6 +293,9 @@ void updateModbusI2CRegisters() {
                 mb.setHreg(baseReg + 10, (uint16_t)(day * 100 + month)); // Date as DDMM
                 mb.setHreg(baseReg + 11, (uint16_t)year); // Year
                 mb.setHreg(baseReg + 12, (uint16_t)getEpochTime()); // Epoch time (lower 16 bits)
+                //print epoch time
+             //   safePrint("Epoch time: ");
+             //   safePrintln(String(getEpochTime()));
                 //network on flag 
                 mb.setHreg(baseReg + 13, turnOnNetwork ? 1 : 0);
             } else {
@@ -310,11 +315,120 @@ void updateModbusI2CRegisters() {
             mb.setHreg(baseReg + 12, 0); // No epoch time
             mb.setHreg(baseReg + 13, turnOnNetwork ? 1 : 0); // No network on flag
         }
-    } else {
+    } 
+    else if (isTimeSet()) {
+        struct tm timeinfo;
+        if (getLocalTime(&timeinfo)) {
+            int hours = timeinfo.tm_hour;
+            int minutes = timeinfo.tm_min;
+            int day = timeinfo.tm_mday;
+            int month = timeinfo.tm_mon + 1;
+            int year = timeinfo.tm_year + 1900;
+            
+            mb.setHreg(baseReg + 9, (uint16_t)(hours * 100 + minutes)); // Time as HHMM
+            mb.setHreg(baseReg + 10, (uint16_t)(day * 100 + month)); // Date as DDMM
+            mb.setHreg(baseReg + 11, (uint16_t)year); // Year
+            mb.setHreg(baseReg + 12, (uint16_t)getEpochTime()); // Epoch time (lower 16 bits)
+            //print epoch time
+           // safePrint("Epoch time: ");
+           // safePrintln(String(getEpochTime()));
+            //network on flag 
+            mb.setHreg(baseReg + 13, turnOnNetwork ? 1 : 0);
+        } else {
+            // Fallback if getLocalTime fails
+            mb.setHreg(baseReg + 9, 1200); // 12:00
+            mb.setHreg(baseReg + 10, 1801);  // 18/01 (dzisiejszy dzien)
+            mb.setHreg(baseReg + 11, 2024); // 2024
+            mb.setHreg(baseReg + 12, 0); // No epoch time
+            mb.setHreg(baseReg + 13, turnOnNetwork ? 1 : 0); // No network on flag
+            //write netowrk data to modbus like netw
+        }
+    } 
+    else {
         // Clear data registers if invalid
         for (int i = 4; i < 14; i++) {
             mb.setHreg(baseReg + i, 0);
         }
+        // Default time and date if time not synchronized
+        mb.setHreg(baseReg + 9, 1200); // 12:00
+        mb.setHreg(baseReg + 10, 1801);  // 18/01 (dzisiejszy dzien)
+        mb.setHreg(baseReg + 11, 2024); // 2024
+        mb.setHreg(baseReg + 12, 0); // No epoch time
+        mb.setHreg(baseReg + 13, turnOnNetwork ? 1 : 0); // No network on flag
+    }
+
+    // --- WiFi credentials over Modbus (placed next to turnOnNetwork flag) ---
+    // Layout within I2C block (REG_COUNT_I2C = 50):
+    // baseReg+14: creds flags (bit0: present, bit1: passwordTruncated)
+    // baseReg+15: ssidLen (0..32)
+    // baseReg+16..31: SSID data (UTF-8 bytes, 2 chars per register => 32 chars max)
+    // baseReg+32: passLen (0..63)
+    // baseReg+33..49: PASSWORD data (2 chars per register => 34 chars max, may be truncated)
+    {
+        extern volatile bool wifiConfigChanged;
+        static bool sentOnceAfterBoot = false;
+        bool shouldSend = false;
+
+        // Send once after boot, and then only when config changes
+        if (!sentOnceAfterBoot) {
+            shouldSend = true;
+            sentOnceAfterBoot = true;
+        } else if (wifiConfigChanged) {
+            shouldSend = true;
+        }
+
+        if (!shouldSend) {
+            // Keep flags/region zeroed if not sending this cycle
+            // for (int r = 14; r < 50; r++) {
+            //     mb.setHreg(baseReg + r, 0);
+            // }
+            return;
+        }
+
+        char ssid[32] = {0};
+        char pwd[64] = {0};
+        bool credsLoaded = loadWiFiConfig(ssid, pwd, sizeof(ssid), sizeof(pwd));
+
+        uint16_t flags = 0;
+        if (credsLoaded) {
+            flags |= 0x0001; // present
+        }
+
+        // Clear region first
+        for (int r = 14; r < 50; r++) {
+            mb.setHreg(baseReg + r, 0);
+        }
+
+        if (credsLoaded) {
+            // SSID
+            size_t ssidLen = strnlen(ssid, sizeof(ssid));
+            if (ssidLen > 32) ssidLen = 32;
+            mb.setHreg(baseReg + 15, (uint16_t)ssidLen);
+            for (size_t i = 0; i < ssidLen; i += 2) {
+                uint16_t word = (uint8_t)ssid[i];
+                if (i + 1 < ssidLen) word |= ((uint16_t)(uint8_t)ssid[i + 1]) << 8;
+                mb.setHreg(baseReg + 16 + (i / 2), word);
+            }
+
+            // PASSWORD
+            size_t passLen = strnlen(pwd, sizeof(pwd));
+            const size_t passMaxChars = 34 * 2; // 34 regs -> 68 bytes
+            size_t passToSend = passLen > passMaxChars ? passMaxChars : passLen;
+            if (passLen > passMaxChars) {
+                flags |= 0x0002; // passwordTruncated
+            }
+            mb.setHreg(baseReg + 32, (uint16_t)passLen); // store original length
+            for (size_t i = 0; i < passToSend; i += 2) {
+                uint16_t word = (uint8_t)pwd[i];
+                if (i + 1 < passToSend) word |= ((uint16_t)(uint8_t)pwd[i + 1]) << 8;
+                mb.setHreg(baseReg + 33 + (i / 2), word);
+            }
+        }
+
+        mb.setHreg(baseReg + 14, flags);
+
+        // Reset change flag after successful publish
+        wifiConfigChanged = false;
     }
 }
 
@@ -326,6 +440,7 @@ void updateModbusMCP3424Registers() {
         // safePrintln(config.enableMCP3424 ? "ON" : "OFF");
         return;
     }
+    if(offoveride) return;
     
     // Get appropriate data based on current selection
     MCP3424Data dataToUse;
@@ -342,7 +457,7 @@ void updateModbusMCP3424Registers() {
     }
     
     // Use registers after IPS data for MCP3424 ADC data
-    int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS;
+    int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS +3;
     
     // Header registers - nowy format
     mb.setHreg(baseReg, mcp3424SensorStatus ? 1 : 0); // Status
@@ -408,7 +523,7 @@ void updateModbusADS1110Registers() {
     }
     
     // Use registers after MCP3424 data for ADS1110 data
-    int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424;
+    int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 +3;
     
     // Header registers - nowy format
     mb.setHreg(baseReg, ads1110SensorStatus ? 1 : 0); // Status
@@ -454,7 +569,7 @@ void updateModbusINA219Registers() {
     }
    
     // Use registers after ADS1110 data for INA219 data
-    int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110;
+    int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 ;
     
     // Header registers - nowy format
     mb.setHreg(baseReg, ina219SensorStatus ? 1 : 0); // Status
@@ -498,7 +613,7 @@ void updateModbusSPS30Registers() {
         // safePrintln(config.enableSPS30 ? "ON" : "OFF");
         return;
     }
-    
+    if(offoveride) return;
     // Get appropriate data based on current selection
     SPS30Data dataToUse;
     switch (currentDataType) {
@@ -524,7 +639,7 @@ void updateModbusSPS30Registers() {
     // }
     
     // Use registers after INA219 data for SPS30 data
-    int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219;
+    int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 +3;
     
     // Header registers - nowy format
     mb.setHreg(baseReg, sps30SensorStatus ? 1 : 0); // Status
@@ -571,9 +686,9 @@ void updateModbusIPSRegisters() {
             dataToUse = getIPSSlowAverage();
             break;
     }
-    
+    if(offoveride) return;
     // Use registers after I2C data for IPS sensor data
-    int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C;
+    int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C +3;
     
     // Header registers - nowy format
     modbusRegistersIPS[0] = ipsSensorStatus ? 1 : 0; // Status flag
@@ -661,7 +776,7 @@ void updateModbusIPSRegisters() {
 
 void updateModbusSHT40Registers() {
     if (!config.enableModbus || !config.enableSHT40) return;
-    
+    if(offoveride) return;
     // Get appropriate data based on current selection
     SHT40Data dataToUse;
     switch (currentDataType) {
@@ -727,7 +842,7 @@ void updateModbusSHT40Registers() {
 
 void updateModbusHCHORegisters() {
     if (!config.enableModbus || !config.enableHCHO) return;
-    
+    if(offoveride) return;
     // Get appropriate data based on current selection
     HCHOData dataToUse;
     switch (currentDataType) {
@@ -800,8 +915,8 @@ void updateModbusCalibrationRegisters() {
             break;
     }
 
-    int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30 + REG_COUNT_SHT40;
-
+    //int baseReg = REG_COUNT_SOLAR + REG_COUNT_OPCN3 + REG_COUNT_I2C + REG_COUNT_IPS + REG_COUNT_MCP3424 + REG_COUNT_ADS1110 + REG_COUNT_INA219 + REG_COUNT_SPS30 + REG_COUNT_SHT40 +3;
+    int baseReg = 550;
     mb.setHreg(baseReg, calibConfig.enableCalibration ? 1 : 0); // Status flag
     mb.setHreg(baseReg + 1, (uint16_t)currentDataType); // Typ danych
 
@@ -809,45 +924,109 @@ void updateModbusCalibrationRegisters() {
     unsigned long updateTime = millis();
     mb.setHreg(baseReg + 2, updateTime & 0xFFFF); // Lower 16 bits
     mb.setHreg(baseReg + 3, (updateTime >> 16) & 0xFFFF); // Upper 16 bits
+    
+    // Flagi statusowe czujników - rejestry 4-9
+    // Sprawdź czy czujniki są włączone i dostępne
+    extern bool sps30SensorStatus;
+    extern bool scd41SensorStatus;
+    extern bool hchoSensorStatus;
+    extern bool mcp3424SensorStatus;
+    
+    // Sprawdź konkretne czujniki gazowe używając getMCP3424DeviceByGasType()
+    bool hasNOSensor = false;
+    bool hasNO2Sensor = false;
+    bool hasCOSensor = false;
+    bool hasTVOCSensor = false;
+    
+    if (mcp3424SensorStatus) {
+        // Sprawdź czy konkretne czujniki gazowe są przypisane i dostępne
+        int8_t noDevice = getMCP3424DeviceByGasType("NO");
+     
+        int8_t no2Device = getMCP3424DeviceByGasType("NO2");
+        int8_t coDevice = getMCP3424DeviceByGasType("CO");
+        int8_t tgs2Device = getMCP3424DeviceByGasType("TGS2");
+        
+        // Sprawdź czy urządzenia są dostępne i mają ważne dane
+        extern MCP3424Data mcp3424Data;
+        hasNOSensor = (noDevice >= 0 && isMCP3424DeviceValid(noDevice));
+       
+        hasNO2Sensor = (no2Device >= 0 && isMCP3424DeviceValid(no2Device));
+        hasCOSensor = (coDevice >= 0 && isMCP3424DeviceValid(coDevice));
+        hasTVOCSensor = (tgs2Device >= 0 && isMCP3424DeviceValid(tgs2Device));
+    }
+    
+    mb.setHreg(baseReg + 4, sps30SensorStatus ? 1 : 0);        // PM sensors (SPS30)
+    mb.setHreg(baseReg + 5, scd41SensorStatus ? 1 : 0);         // CO2 sensor (SCD41)
+    mb.setHreg(baseReg + 6, hasNOSensor ? 1 : 0);               // NO sensor (MCP3424)
+    mb.setHreg(baseReg + 7, hasNO2Sensor ? 1 : 0);              // NO2 sensor (MCP3424)
+    mb.setHreg(baseReg + 8, hasCOSensor ? 1 : 0);               // CO sensor (MCP3424)
+    mb.setHreg(baseReg + 9, hasTVOCSensor ? 1 : 0);             // TVOC sensor (TGS2)
+    mb.setHreg(baseReg + 10, hchoSensorStatus ? 1 : 0);         // HCHO sensor
 
     if (dataToUse.valid) {
-        mb.setHreg(baseReg + 4, (int16_t)(dataToUse.CO * 100));
-        mb.setHreg(baseReg + 5, (int16_t)(dataToUse.NO * 100));
-        mb.setHreg(baseReg + 6, (int16_t)(dataToUse.NO2 * 100));
-        mb.setHreg(baseReg + 7, (int16_t)(dataToUse.O3 * 100));
-        mb.setHreg(baseReg + 8, (int16_t)(dataToUse.SO2 * 100));
-        mb.setHreg(baseReg + 9, (int16_t)(dataToUse.H2S * 100));
-        mb.setHreg(baseReg + 10, (int16_t)(dataToUse.NH3 * 100));
-        mb.setHreg(baseReg + 11, (int16_t)(dataToUse.HCHO * 100));
+        mb.setHreg(baseReg + 11, (int16_t)(dataToUse.CO * 100));
+        mb.setHreg(baseReg + 12, (int16_t)(dataToUse.NO * 100));
+        mb.setHreg(baseReg + 13, (int16_t)(dataToUse.NO2 * 100));
+        mb.setHreg(baseReg + 14, (int16_t)(dataToUse.O3 * 100));
+        mb.setHreg(baseReg + 15, (int16_t)(dataToUse.SO2 * 100));
+        mb.setHreg(baseReg + 16, (int16_t)(dataToUse.H2S * 100));
+        mb.setHreg(baseReg + 17, (int16_t)(dataToUse.NH3 * 100));
+        mb.setHreg(baseReg + 18, (int16_t)(dataToUse.HCHO * 100));
        // Serial.println(dataToUse.HCHO*100);
-        mb.setHreg(baseReg + 12, (int16_t)(dataToUse.PID * 100));
-        mb.setHreg(baseReg + 13, (int16_t)(dataToUse.TGS02 * 100));
-        mb.setHreg(baseReg + 14, (int16_t)(dataToUse.TGS03 * 100));
-        mb.setHreg(baseReg + 15, (int16_t)(dataToUse.TGS12 * 100));
-        mb.setHreg(baseReg + 16, (int16_t)(dataToUse.TGS02_ohm * 100));
-        mb.setHreg(baseReg + 17, (int16_t)(dataToUse.TGS03_ohm * 100));
-        mb.setHreg(baseReg + 18, (int16_t)(dataToUse.TGS12_ohm * 100));
-        // mb.setHreg(baseReg + 19, (int16_t)(dataToUse.TGS02_ppm * 100));
-        // mb.setHreg(baseReg + 20, (int16_t)(dataToUse.TGS03_ppm * 100));
-        // mb.setHreg(baseReg + 21, (int16_t)(dataToUse.TGS12_ppm * 100));
-        // mb.setHreg(baseReg + 22, (int16_t)(dataToUse.TGS02_ppb * 100));
-        // mb.setHreg(baseReg + 23, (int16_t)(dataToUse.TGS03_ppb * 100));
-        // mb.setHreg(baseReg + 24, (int16_t)(dataToUse.TGS12_ppb * 100));
-        mb.setHreg(baseReg + 25, (int16_t)(dataToUse.CO_ppb * 100));
-        mb.setHreg(baseReg + 26, (int16_t)(dataToUse.NO_ppb * 100));
-        mb.setHreg(baseReg + 27, (int16_t)(dataToUse.NO2_ppb * 100));
-        mb.setHreg(baseReg + 28, (int16_t)(dataToUse.O3_ppb * 100));
-        mb.setHreg(baseReg + 29, (int16_t)(dataToUse.SO2_ppb * 100));
-        mb.setHreg(baseReg + 30, (int16_t)(dataToUse.H2S_ppb * 100));
-        mb.setHreg(baseReg + 31, (int16_t)(dataToUse.NH3_ppb * 100));
-        mb.setHreg(baseReg + 32, (int16_t)(dataToUse.HCHO * 100));
-        mb.setHreg(baseReg + 33, (int16_t)(dataToUse.PID * 100));
-        mb.setHreg(baseReg + 34, (int16_t)(dataToUse.VOC * 100));        // VOC ug/m3
-        mb.setHreg(baseReg + 35, (int16_t)(dataToUse.VOC_ppb * 100));    // VOC ppb
+        mb.setHreg(baseReg + 19, (int16_t)(dataToUse.PID * 100));
+        mb.setHreg(baseReg + 20, (int16_t)(dataToUse.TGS02 * 100));
+        mb.setHreg(baseReg + 21, (int16_t)(dataToUse.TGS03 * 100));
+        mb.setHreg(baseReg + 22, (int16_t)(dataToUse.TGS12 * 100));
+        mb.setHreg(baseReg + 23, (int16_t)(dataToUse.TGS02_ohm * 100));
+        mb.setHreg(baseReg + 24, (int16_t)(dataToUse.TGS03_ohm * 100));
+        mb.setHreg(baseReg + 25, (int16_t)(dataToUse.TGS12_ohm * 100));
+        // mb.setHreg(baseReg + 26, (int16_t)(dataToUse.TGS02_ppm * 100));
+        // mb.setHreg(baseReg + 27, (int16_t)(dataToUse.TGS03_ppm * 100));
+        // mb.setHreg(baseReg + 28, (int16_t)(dataToUse.TGS12_ppm * 100));
+        // mb.setHreg(baseReg + 29, (int16_t)(dataToUse.TGS02_ppb * 100));
+        // mb.setHreg(baseReg + 30, (int16_t)(dataToUse.TGS03_ppb * 100));
+        // mb.setHreg(baseReg + 31, (int16_t)(dataToUse.TGS12_ppb * 100));
+        mb.setHreg(baseReg + 32, (int16_t)(dataToUse.CO_ppb * 100));
+        mb.setHreg(baseReg + 33, (int16_t)(dataToUse.NO_ppb * 100));
+        mb.setHreg(baseReg + 34, (int16_t)(dataToUse.NO2_ppb * 100));
+        mb.setHreg(baseReg + 35, (int16_t)(dataToUse.O3_ppb * 100));
+        mb.setHreg(baseReg + 36, (int16_t)(dataToUse.SO2_ppb * 100));
+        mb.setHreg(baseReg + 37, (int16_t)(dataToUse.H2S_ppb * 100));
+        mb.setHreg(baseReg + 38, (int16_t)(dataToUse.NH3_ppb * 100));
+        mb.setHreg(baseReg + 39, (int16_t)(dataToUse.HCHO * 100));
+        mb.setHreg(baseReg + 40, (int16_t)(dataToUse.PID * 100));
+        mb.setHreg(baseReg + 41, (int16_t)(dataToUse.VOC ));        // VOC ug/m3
+        mb.setHreg(baseReg + 42, (int16_t)(dataToUse.VOC_ppb  ));    // TVOC ppb (TGS02)
+        mb.setHreg(baseReg + 43, (int16_t)(dataToUse.ODO * 100));        // ODO value
+        
+        // PM sensors (SPS30) - rejestry 44-46
+        mb.setHreg(baseReg + 44, (int16_t)(dataToUse.PM1 * 100));        // PM1.0 [ug/m3]
+        mb.setHreg(baseReg + 45, (int16_t)(dataToUse.PM25 * 100));       // PM2.5 [ug/m3]
+        mb.setHreg(baseReg + 46, (int16_t)(dataToUse.PM10 * 100));       // PM10 [ug/m3]
+        
+        // Environmental sensors - rejestry 47-55
+        mb.setHreg(baseReg + 47, (int16_t)(dataToUse.AMBIENT_TEMP * 100));  // Temperatura zewnętrzna [°C]
+        mb.setHreg(baseReg + 48, (int16_t)(dataToUse.AMBIENT_HUMID * 100)); // Wilgotność zewnętrzna [%]
+        mb.setHreg(baseReg + 49, (int16_t)(dataToUse.AMBIENT_PRESS * 100)); // Ciśnienie zewnętrzne [hPa]
+        
+        mb.setHreg(baseReg + 50, (int16_t)(dataToUse.DUST_TEMP *100));     // Temperatura toru pylowego [°C]
+        mb.setHreg(baseReg + 51, (int16_t)(dataToUse.DUST_HUMID *10));    // Wilgotność toru pylowego [%]
+        mb.setHreg(baseReg + 52, (int16_t)(dataToUse.DUST_PRESS *10));    // Ciśnienie toru pylowego [hPa]
+     
+     
+        
+        mb.setHreg(baseReg + 53, (int16_t)(dataToUse.GAS_TEMP * 100));      // Temperatura toru gazowego [°C]
+        mb.setHreg(baseReg + 54, (int16_t)(dataToUse.GAS_HUMID * 100));     // Wilgotność toru gazowego [%]
+        mb.setHreg(baseReg + 55, (int16_t)(dataToUse.GAS_PRESS * 100));     // Ciśnienie toru gazowego [hPa]
+        
+        // CO2 sensor (SCD41) - rejestry 56-58
+        mb.setHreg(baseReg + 56, (int16_t)(dataToUse.SCD_CO2 ));       // CO2 [ppm]
+        mb.setHreg(baseReg + 57, (int16_t)(dataToUse.SCD_T * 100));         // SCD temperatura [°C]
+        mb.setHreg(baseReg + 58, (int16_t)(dataToUse.SCD_RH * 100));        // SCD wilgotność [%]
 
     } else {
         // Clear data registers if invalid
-        for (int i = 4; i < 36; i++) {
+        for (int i = 4; i < 59; i++) {
             mb.setHreg(baseReg + i, 0);
         }
     }

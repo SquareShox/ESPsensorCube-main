@@ -448,6 +448,14 @@ const char *dashboard_html = R"rawliteral(
           <div class="data-value" id="hcho-value">--<span class="data-unit">mg/m³</span></div>
         </div>
         <div class="data-item">
+          <div class="data-label">HCHO</div>
+          <div class="data-value" id="hcho-ppb">--<span class="data-unit">ppb</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">TVOC</div>
+          <div class="data-value" id="hcho-tvoc">--<span class="data-unit">mg/m³</span></div>
+        </div>
+        <div class="data-item">
           <div class="data-label">Age</div>
           <div class="data-value" id="hcho-age">--<span class="data-unit">s</span></div>
         </div>
@@ -526,6 +534,10 @@ const char *dashboard_html = R"rawliteral(
         <div class="data-item">
           <div class="data-label">NH3</div>
           <div class="data-value" id="calib-nh3">--<span class="data-unit">ppb</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">VOC</div>
+          <div class="data-value" id="calib-voc">--<span class="data-unit">ppb</span></div>
         </div>
       </div>
       <div class="last-update" id="calib-gases-update">Ostatnia aktualizacja: --</div>
@@ -611,81 +623,143 @@ const char *dashboard_html = R"rawliteral(
       <div class="last-update" id="calib-temps-update">Ostatnia aktualizacja: --</div>
     </div>
 
-    <!-- Fan Control Card -->
-    <div class="sensor-card" id="fan-control-card">
+    <!-- Calibration PM Sensors Card -->
+    <div class="sensor-card" id="calib-pm-card" style="display: none;">
       <div class="sensor-header">
-        <div class="sensor-icon power-icon">🌀</div>
-        <div class="sensor-title">Sterowanie Wentylatorem & GLine</div>
-        <div class="status-indicator" id="fan-control-status"></div>
+        <div class="sensor-icon air-icon">💨</div>
+        <div class="sensor-title">Skalibrowane PM (SPS30)</div>
+        <div class="status-indicator" id="calib-pm-status"></div>
       </div>
       <div class="sensor-data">
         <div class="data-item">
-          <div class="data-label">Status Wentylatora</div>
-          <div class="data-value" id="fan-status">--</div>
+          <div class="data-label">PM1.0</div>
+          <div class="data-value" id="calib-pm1">--<span class="data-unit">µg/m³</span></div>
         </div>
         <div class="data-item">
-          <div class="data-label">Prędkość</div>
-          <div class="data-value" id="fan-speed">--<span class="data-unit">%</span></div>
+          <div class="data-label">PM2.5</div>
+          <div class="data-value" id="calib-pm25">--<span class="data-unit">µg/m³</span></div>
         </div>
         <div class="data-item">
-          <div class="data-label">RPM</div>
-          <div class="data-value" id="fan-rpm">--<span class="data-unit">rpm</span></div>
-        </div>
-        <div class="data-item">
-          <div class="data-label">Status GLine</div>
-          <div class="data-value" id="gline-status">--</div>
-        </div>
-        <div class="data-item">
-          <div class="data-label">Tryb Sleep</div>
-          <div class="data-value" id="sleep-status">--</div>
-        </div>
-        <div class="data-item">
-          <div class="data-label">Koniec Sleep</div>
-          <div class="data-value" id="sleep-end">--</div>
+          <div class="data-label">PM10</div>
+          <div class="data-value" id="calib-pm10">--<span class="data-unit">µg/m³</span></div>
         </div>
       </div>
-      <div class="control-panel">
-        <div class="control-section">
-          <h4>Sterowanie Wentylatorem</h4>
-          <div class="control-buttons">
-            <button class="control-btn" onclick="setFanSpeed(0)">Wyłącz</button>
-            <button class="control-btn" onclick="setFanSpeed(25)">25%</button>
-            <button class="control-btn" onclick="setFanSpeed(50)">50%</button>
-            <button class="control-btn" onclick="setFanSpeed(75)">75%</button>
-            <button class="control-btn" onclick="setFanSpeed(100)">100%</button>
-          </div>
-          <div class="slider-container">
-            <input type="range" id="fan-speed-slider" min="0" max="100" value="50" class="speed-slider">
-            <span id="slider-value">50%</span>
-          </div>
-        </div>
-        <div class="control-section">
-          <h4>Sterowanie GLine</h4>
-          <div class="control-buttons">
-            <button class="control-btn" onclick="setGLine(false)">Wyłącz GLine</button>
-            <button class="control-btn" onclick="setGLine(true)">Włącz GLine</button>
-          </div>
-        </div>
-        <div class="control-section">
-          <h4>Tryb Sleep</h4>
-          <div class="sleep-controls">
-            <div class="sleep-input">
-              <label>Opóźnienie (s):</label>
-              <input type="number" id="sleep-delay" min="0" max="3600" value="60" class="sleep-input-field">
-            </div>
-            <div class="sleep-input">
-              <label>Czas trwania (s):</label>
-              <input type="number" id="sleep-duration" min="60" max="7200" value="300" class="sleep-input-field">
-            </div>
-            <div class="control-buttons">
-              <button class="control-btn" onclick="startSleep()">Start Sleep</button>
-              <button class="control-btn" onclick="stopSleep()">Stop Sleep</button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="last-update" id="fan-control-update">Ostatnia aktualizacja: --</div>
+      <div class="last-update" id="calib-pm-update">Ostatnia aktualizacja: --</div>
     </div>
+
+    <!-- Calibration Environmental Sensors Card -->
+    <div class="sensor-card" id="calib-env-card" style="display: none;">
+      <div class="sensor-header">
+        <div class="sensor-icon env-icon">🌡️</div>
+        <div class="sensor-title">Skalibrowane Środowiskowe</div>
+        <div class="status-indicator" id="calib-env-status"></div>
+      </div>
+      <div class="sensor-data">
+        <div class="data-item">
+          <div class="data-label">AMBIENT Temp</div>
+          <div class="data-value" id="calib-ambient-temp">--<span class="data-unit">°C</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">AMBIENT Humid</div>
+          <div class="data-value" id="calib-ambient-humid">--<span class="data-unit">%</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">AMBIENT Press</div>
+          <div class="data-value" id="calib-ambient-press">--<span class="data-unit">hPa</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">DUST Temp</div>
+          <div class="data-value" id="calib-dust-temp">--<span class="data-unit">°C</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">DUST Humid</div>
+          <div class="data-value" id="calib-dust-humid">--<span class="data-unit">%</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">DUST Press</div>
+          <div class="data-value" id="calib-dust-press">--<span class="data-unit">hPa</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">GAS Temp</div>
+          <div class="data-value" id="calib-gas-temp">--<span class="data-unit">°C</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">GAS Humid</div>
+          <div class="data-value" id="calib-gas-humid">--<span class="data-unit">%</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">GAS Press</div>
+          <div class="data-value" id="calib-gas-press">--<span class="data-unit">hPa</span></div>
+        </div>
+      </div>
+      <div class="last-update" id="calib-env-update">Ostatnia aktualizacja: --</div>
+    </div>
+
+    <!-- Calibration CO2 Sensor Card -->
+    <div class="sensor-card" id="calib-co2-card" style="display: none;">
+      <div class="sensor-header">
+        <div class="sensor-icon env-icon">🌬️</div>
+        <div class="sensor-title">Skalibrowany CO2 (SCD41)</div>
+        <div class="status-indicator" id="calib-co2-status"></div>
+      </div>
+      <div class="sensor-data">
+        <div class="data-item">
+          <div class="data-label">CO2</div>
+          <div class="data-value" id="calib-co2">--<span class="data-unit">ppm</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">Temperatura</div>
+          <div class="data-value" id="calib-co2-temp">--<span class="data-unit">°C</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">Wilgotność</div>
+          <div class="data-value" id="calib-co2-humid">--<span class="data-unit">%</span></div>
+        </div>
+      </div>
+      <div class="last-update" id="calib-co2-update">Ostatnia aktualizacja: --</div>
+    </div>
+
+    <!-- Calibration Special Sensors Card -->
+    <div class="sensor-card" id="calib-special-card" style="display: none;">
+      <div class="sensor-header">
+        <div class="sensor-icon env-icon">🔬</div>
+        <div class="sensor-title">Czujniki Specjalne</div>
+        <div class="status-indicator" id="calib-special-status"></div>
+      </div>
+      <div class="sensor-data">
+        <div class="data-item">
+          <div class="data-label">HCHO</div>
+          <div class="data-value" id="calib-hcho">--<span class="data-unit">ppb</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">PID</div>
+          <div class="data-value" id="calib-pid">--<span class="data-unit">ppm</span></div>
+        </div>
+        <div class="data-item">
+          <div class="data-label">PID mV</div>
+          <div class="data-value" id="calib-pid-mv">--<span class="data-unit">mV</span></div>
+        </div>
+      </div>
+      <div class="last-update" id="calib-special-update">Ostatnia aktualizacja: --</div>
+    </div>
+
+    <!-- Calibration ODO Card -->
+    <div class="sensor-card" id="calib-odo-card" style="display: none;">
+      <div class="sensor-header">
+        <div class="sensor-icon env-icon">🌊</div>
+        <div class="sensor-title">ODO (Dissolved Oxygen)</div>
+        <div class="status-indicator" id="calib-odo-status"></div>
+      </div>
+      <div class="sensor-data">
+        <div class="data-item">
+          <div class="data-label">ODO</div>
+          <div class="data-value" id="calib-odo">--<span class="data-unit">mg/L</span></div>
+        </div>
+      </div>
+      <div class="last-update" id="calib-odo-update">Ostatnia aktualizacja: --</div>
+    </div>
+
+
   </div>
 
 <script>
@@ -843,8 +917,8 @@ function connectWebSocket() {
           hideCard('opcn3-card');
         }
         
-        // I2C environmental sensors
-        if (data.sensorsEnabled.i2c) {
+        // I2C environmental sensors (SHT40 status)
+        if (data.sensorsEnabled.sht40) {
           showCard('i2c-card');
         } else {
           hideCard('i2c-card');
@@ -897,10 +971,30 @@ function connectWebSocket() {
           showCard('calib-gases-card');
           showCard('calib-tgs-card');
           showCard('calib-temps-card');
+          
+          // Show special sensors cards if enabled
+          if (data.calibration.config && data.calibration.config.specialSensors) {
+            showCard('calib-pm-card');
+            showCard('calib-env-card');
+            showCard('calib-co2-card');
+            showCard('calib-odo-card');
+            showCard('calib-special-card');
+          } else {
+            hideCard('calib-pm-card');
+            hideCard('calib-env-card');
+            hideCard('calib-co2-card');
+            hideCard('calib-odo-card');
+            hideCard('calib-special-card');
+          }
         } else {
           hideCard('calib-gases-card');
           hideCard('calib-tgs-card');
           hideCard('calib-temps-card');
+          hideCard('calib-pm-card');
+          hideCard('calib-env-card');
+          hideCard('calib-co2-card');
+          hideCard('calib-odo-card');
+          hideCard('calib-special-card');
         }
       }
       
@@ -935,11 +1029,11 @@ function connectWebSocket() {
         updateStatus('opcn3-status', false);
       }
       
-      // I2C environmental data
-      if (data.i2c && data.i2c.valid) {
-        updateValue('env-temp', data.i2c.temperature || 0, 1);
-        updateValue('env-humidity', data.i2c.humidity || 0, 1);
-        updateValue('env-pressure', data.i2c.pressure || 0, 1);
+      // I2C environmental data (SHT40)
+      if (data.sht40 && data.sht40.valid) {
+        updateValue('env-temp', data.sht40.temperature, 1);
+        updateValue('env-humidity', data.sht40.humidity, 1);
+        updateValue('env-pressure', data.sht40.pressure, 1);
         updateStatus('i2c-status', true);
         document.getElementById('i2c-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
       } else {
@@ -949,9 +1043,13 @@ function connectWebSocket() {
       // SCD41 CO2 data
       if (data.scd41 && data.scd41.valid) {
         console.log('SCD41 data:', data.scd41);
-        updateValue('scd41-co2', data.scd41.co2 || 0, 0);
-        updateValue('scd41-temp', data.scd41.temperature || 0, 1);
-        updateValue('scd41-humidity', data.scd41.humidity || 0, 1);
+        updateValue('scd41-co2', data.scd41.co2, 0);
+        if (typeof data.scd41.temperature !== 'undefined') {
+          updateValue('scd41-temp', data.scd41.temperature, 1);
+        }
+        if (typeof data.scd41.humidity !== 'undefined') {
+          updateValue('scd41-humidity', data.scd41.humidity, 1);
+        }
         updateStatus('scd41-status', true);
         document.getElementById('scd41-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
       } else {
@@ -1012,7 +1110,9 @@ function connectWebSocket() {
       
       // HCHO sensor data
       if (data.hcho && data.hcho.valid) {
-        updateValue('hcho-value', data.hcho.HCHO || 0, 3);
+        updateValue('hcho-value', data.hcho.hcho_mg || 0, 3);
+        updateValue('hcho-ppb', data.hcho.hcho_ppb || 0, 1);
+        updateValue('hcho-tvoc', data.hcho.tvoc_mg || 0, 3);
         updateValue('hcho-age', data.hcho.age || 0, 0);
         updateStatus('hcho-status', true);
         document.getElementById('hcho-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
@@ -1045,6 +1145,7 @@ function connectWebSocket() {
           updateValue('calib-so2', data.calibration.gases_ppb.SO2 || 0, 1);
           updateValue('calib-h2s', data.calibration.gases_ppb.H2S || 0, 1);
           updateValue('calib-nh3', data.calibration.gases_ppb.NH3 || 0, 1);
+          updateValue('calib-voc', data.calibration.gases_ppb.VOC || 0, 1);
           updateStatus('calib-gases-status', true);
           document.getElementById('calib-gases-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
         } else {
@@ -1079,6 +1180,54 @@ function connectWebSocket() {
           document.getElementById('calib-temps-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
         } else {
           updateStatus('calib-temps-status', false);
+        }
+        
+        // Special sensors (PM, Environmental, CO2, ODO)
+        if (data.calibration.special) {
+          // PM sensors
+          updateValue('calib-pm1', data.calibration.special.PM1 || 0, 1);
+          updateValue('calib-pm25', data.calibration.special.PM25 || 0, 1);
+          updateValue('calib-pm10', data.calibration.special.PM10 || 0, 1);
+          updateStatus('calib-pm-status', true);
+          document.getElementById('calib-pm-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
+          
+          // Environmental sensors
+          updateValue('calib-ambient-temp', data.calibration.special.AMBIENT_TEMP || 0, 1);
+          updateValue('calib-ambient-humid', data.calibration.special.AMBIENT_HUMID || 0, 1);
+          updateValue('calib-ambient-press', data.calibration.special.AMBIENT_PRESS || 0, 1);
+          updateValue('calib-dust-temp', data.calibration.special.DUST_TEMP || 0, 1);
+          updateValue('calib-dust-humid', data.calibration.special.DUST_HUMID || 0, 1);
+          updateValue('calib-dust-press', data.calibration.special.DUST_PRESS || 0, 1);
+          updateValue('calib-gas-temp', data.calibration.special.GAS_TEMP || 0, 1);
+          updateValue('calib-gas-humid', data.calibration.special.GAS_HUMID || 0, 1);
+          updateValue('calib-gas-press', data.calibration.special.GAS_PRESS || 0, 1);
+          updateStatus('calib-env-status', true);
+          document.getElementById('calib-env-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
+          
+          // CO2 sensor
+          updateValue('calib-co2', data.calibration.special.SCD_CO2 || 0, 1);
+          updateValue('calib-co2-temp', data.calibration.special.SCD_T || 0, 1);
+          updateValue('calib-co2-humid', data.calibration.special.SCD_RH || 0, 1);
+          updateStatus('calib-co2-status', true);
+          document.getElementById('calib-co2-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
+          
+          // Special sensors (HCHO, PID)
+          updateValue('calib-hcho', data.calibration.special.HCHO_ppb || 0, 1);
+          updateValue('calib-pid', data.calibration.special.PID || 0, 3);
+          updateValue('calib-pid-mv', data.calibration.special.PID_mV || 0, 1);
+          updateStatus('calib-special-status', true);
+          document.getElementById('calib-special-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
+          
+          // ODO
+          updateValue('calib-odo', data.calibration.special.ODO || 0, 1);
+          updateStatus('calib-odo-status', true);
+          document.getElementById('calib-odo-update').textContent = `Ostatnia aktualizacja: ${formatTime(lastUpdateTime)}`;
+        } else {
+          updateStatus('calib-pm-status', false);
+          updateStatus('calib-env-status', false);
+          updateStatus('calib-co2-status', false);
+          updateStatus('calib-odo-status', false);
+          updateStatus('calib-special-status', false);
         }
       } else {
         updateStatus('calib-gases-status', false);

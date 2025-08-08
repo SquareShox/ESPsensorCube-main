@@ -500,30 +500,74 @@ const char *update_html = R"rawliteral(
     <div class="control-card">
       <div class="card-header">
         <div class="card-icon update-icon">📦</div>
-        <div class="card-title">Aktualizacja Firmware</div>
+        <div class="card-title">Aktualizacja Systemu</div>
       </div>
       <div class="card-description">
-        Wybierz plik .bin z nową wersją firmware do aktualizacji systemu
+        Aktualizacja firmware (.bin) lub filesystem (.bin) urządzenia
       </div>
       
-      <form method="POST" action="/update" enctype="multipart/form-data" id="updateForm">
-        <div class="file-input-container">
-          <input type="file" name="update" class="file-input" accept=".bin" id="firmwareFile">
+      <!-- Firmware Update Section -->
+      <div class="control-section">
+        <h4>🔧 Aktualizacja Firmware</h4>
+        <p style="color: #666; font-size: 0.9em; margin-bottom: 15px;">
+          Wybierz plik .bin z nową wersją firmware do aktualizacji systemu
+        </p>
+        
+        <form method="POST" action="/update" enctype="multipart/form-data" id="firmwareUpdateForm">
+          <div class="file-input-container">
+            <input type="file" name="update" class="file-input" accept=".bin" id="firmwareFile">
+          </div>
+          
+          <button type="submit" class="btn btn-warning" id="firmwareUpdateBtn" disabled>
+            📤 Aktualizuj Firmware
+          </button>
+        </form>
+        
+        <div class="progress-bar" id="firmwareProgressBar">
+          <div class="progress-fill" id="firmwareProgressFill"></div>
         </div>
         
-        <button type="submit" class="btn btn-warning" id="updateBtn" disabled>
-          📤 Aktualizuj Firmware
-        </button>
-</form>
-
-      <div class="progress-bar" id="progressBar">
-        <div class="progress-fill" id="progressFill"></div>
-</div>
-
-      <div class="status-text" id="updateStatus">
-        Status: Gotowy do aktualizacji
+        <div class="status-text" id="firmwareUpdateStatus">
+          Status: Gotowy do aktualizacji firmware
+        </div>
       </div>
-</div>
+      
+      <!-- Filesystem Update Section -->
+      <div class="control-section">
+        <h4>💾 Aktualizacja Filesystem</h4>
+        <p style="color: #666; font-size: 0.9em; margin-bottom: 15px;">
+          Wybierz plik .bin z nową wersją filesystem (LittleFS) do aktualizacji
+        </p>
+        
+        <form method="POST" action="/updatefs" enctype="multipart/form-data" id="filesystemUpdateForm">
+          <div class="file-input-container">
+            <input type="file" name="update" class="file-input" accept=".bin" id="filesystemFile">
+          </div>
+          
+          <button type="submit" class="btn btn-info" id="filesystemUpdateBtn" disabled>
+            💾 Aktualizuj Filesystem
+          </button>
+        </form>
+        
+        <div class="progress-bar" id="filesystemProgressBar">
+          <div class="progress-fill" id="filesystemProgressFill"></div>
+        </div>
+        
+        <div class="status-text" id="filesystemUpdateStatus">
+          Status: Gotowy do aktualizacji filesystem
+        </div>
+      </div>
+      
+      <!-- Update Info -->
+      <div class="status-section">
+        <h4>ℹ️ Informacje o Aktualizacji</h4>
+        <div class="status-text">
+          <strong>Firmware:</strong> Aktualizuje kod programu urządzenia<br>
+          <strong>Filesystem:</strong> Aktualizuje pliki konfiguracyjne i dane<br>
+          <strong>Uwaga:</strong> Aktualizacja firmware wymaga restartu systemu
+        </div>
+      </div>
+    </div>
 
     <!-- System Control Card -->
     <div class="control-card">
@@ -638,6 +682,7 @@ const char *update_html = R"rawliteral(
         <strong>Uptime:</strong> <span id="uptime">--</span><br>
         <strong>Free Heap:</strong> <span id="freeHeap">--</span> KB<br>
         <strong>WiFi Signal:</strong> <span id="wifiSignal">--</span> dBm<br>
+        <strong>Filesystem:</strong> <span id="filesystemInfo">--</span><br>
         <strong>Last Update:</strong> <span id="lastUpdate">--</span>
       </div>
       
@@ -671,6 +716,10 @@ const char *update_html = R"rawliteral(
       
       <button class="btn btn-warning" id="refreshInfo">
         🔄 Odśwież Info
+      </button>
+      
+      <button class="btn btn-info" onclick="getFilesystemInfo()">
+        💾 Sprawdź Filesystem
       </button>
     </div>
 
@@ -926,6 +975,52 @@ const char *update_html = R"rawliteral(
         </div>
       </div>
     </div>
+
+    <!-- Calibration Constants Card -->
+    <div class="control-card">
+      <div class="card-header">
+        <div class="card-icon charts-icon">🔧</div>
+        <div class="card-title">Stałe Kalibracyjne</div>
+      </div>
+      <div class="card-description">
+        Zarządzanie stałymi kalibracyjnymi z pliku JSON
+      </div>
+      
+      <div class="config-sections">
+        <div class="config-section">
+          <h4>📊 Zarządzanie Stałymi</h4>
+          <div class="config-buttons">
+            <button class="btn btn-primary" onclick="loadCalibrationConstants()">
+              📥 Wczytaj Stałe
+            </button>
+            <button class="btn btn-success" onclick="saveCalibrationConstants()">
+              💾 Zapisz Stałe
+            </button>
+            <button class="btn btn-info" onclick="downloadCalibrationConstants()">
+              📤 Pobierz Plik
+            </button>
+            <button class="btn btn-warning" onclick="resetCalibrationConstants()">
+              🔄 Resetuj do Domyślnych
+            </button>
+          </div>
+        </div>
+        
+        <div class="config-section">
+          <h4>📝 Edytor Stałych</h4>
+          <div style="margin-bottom: 15px;">
+            <textarea id="calibConstantsEditor" rows="15" style="width: 100%; font-family: monospace; font-size: 12px; padding: 10px; border: 2px solid #ddd; border-radius: 8px;" placeholder="Wklej tutaj JSON ze stałymi kalibracyjnymi..."></textarea>
+          </div>
+          <div class="config-buttons">
+            <button class="btn btn-primary" onclick="applyCalibrationConstants()">
+              ✅ Zastosuj Zmiany
+            </button>
+            <button class="btn btn-secondary" onclick="formatCalibrationConstants()">
+              🎨 Formatuj JSON
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
 <script>
@@ -984,6 +1079,14 @@ function connectWebSocket() {
         } else {
           showAlert(data.error || `Błąd wykonania komendy ${data.cmd}`, 'error');
         }
+      } else if (data.cmd === 'filesystemInfo') {
+        // Handle filesystem info response
+        if (data.success) {
+          document.getElementById('filesystemInfo').textContent = data.filesystemInfo || '--';
+          showAlert('Informacje o filesystem zaktualizowane', 'success');
+        } else {
+          showAlert('Błąd pobierania informacji o filesystem: ' + (data.error || 'Nieznany błąd'), 'error');
+        }
       } else if (data.cmd === 'system') {
         // Handle legacy system commands (backward compatibility)
         updateFanStatusDisplay(data);
@@ -1009,12 +1112,14 @@ function updateSystemInfo(data = null) {
     const freeHeap = data.freeHeap || (data.data && data.data.freeHeap) || 0;
     const wifiSignal = data.wifiSignal || (data.data && data.data.wifiSignal) || 0;
     const deviceID = data.DeviceID || (data.data && data.data.DeviceID) || '--';
+    const filesystemInfo = data.filesystemInfo || (data.data && data.data.filesystemInfo) || '--';
     
     document.getElementById('deviceID').textContent = deviceID;
     document.getElementById('deviceIDInput').value = deviceID; // Fill the input field
     document.getElementById('uptime').textContent = formatUptime(uptime);
     document.getElementById('freeHeap').textContent = Math.round(freeHeap / 1024);
     document.getElementById('wifiSignal').textContent = wifiSignal;
+    document.getElementById('filesystemInfo').textContent = filesystemInfo;
     document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('pl-PL');
     
     // Update low power mode status if available
@@ -1162,18 +1267,17 @@ function testBatteryNotification() {
   }
 }
 
-function restartSystem() {
-  if (confirm('Czy na pewno chcesz zrestartować system?')) {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/restart", true);
-    xhr.send();
-    document.getElementById('systemStatus').innerHTML = 'System restartuje się...';
-  }
-}
+
 
 function refreshSystemInfo() {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({cmd: "status"}));
+  }
+}
+
+function getFilesystemInfo() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({cmd: "filesystemInfo"}));
   }
 }
 
@@ -1353,28 +1457,63 @@ function restartSystemMain() {
   }
 }
 
-// File input handling
+// File input handling for firmware update
 document.getElementById('firmwareFile').addEventListener('change', function(e) {
   const file = e.target.files[0];
-  const updateBtn = document.getElementById('updateBtn');
+  const updateBtn = document.getElementById('firmwareUpdateBtn');
   
   if (file && file.name.endsWith('.bin')) {
     updateBtn.disabled = false;
-    document.getElementById('updateStatus').innerHTML = `Wybrano: ${file.name}`;
+    document.getElementById('firmwareUpdateStatus').innerHTML = `Wybrano: ${file.name}`;
   } else {
     updateBtn.disabled = true;
-    document.getElementById('updateStatus').innerHTML = 'Status: Wybierz plik .bin';
+    document.getElementById('firmwareUpdateStatus').innerHTML = 'Status: Wybierz plik .bin';
   }
 });
 
-// Update form handling
-document.getElementById('updateForm').addEventListener('submit', function(e) {
-  const progressBar = document.getElementById('progressBar');
-  const progressFill = document.getElementById('progressFill');
-  const updateStatus = document.getElementById('updateStatus');
+// File input handling for filesystem update
+document.getElementById('filesystemFile').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  const updateBtn = document.getElementById('filesystemUpdateBtn');
+  
+  if (file && file.name.endsWith('.bin')) {
+    updateBtn.disabled = false;
+    document.getElementById('filesystemUpdateStatus').innerHTML = `Wybrano: ${file.name}`;
+  } else {
+    updateBtn.disabled = true;
+    document.getElementById('filesystemUpdateStatus').innerHTML = 'Status: Wybierz plik .bin';
+  }
+});
+
+// Firmware update form handling
+document.getElementById('firmwareUpdateForm').addEventListener('submit', function(e) {
+  const progressBar = document.getElementById('firmwareProgressBar');
+  const progressFill = document.getElementById('firmwareProgressFill');
+  const updateStatus = document.getElementById('firmwareUpdateStatus');
   
   progressBar.style.display = 'block';
-  updateStatus.innerHTML = 'Status: Aktualizacja w toku...';
+  updateStatus.innerHTML = 'Status: Aktualizacja firmware w toku...';
+  
+  // Simulate progress (in real implementation, this would come from server)
+  let progress = 0;
+  const progressInterval = setInterval(() => {
+    progress += Math.random() * 10;
+    if (progress > 90) progress = 90;
+    progressFill.style.width = progress + '%';
+  }, 500);
+  
+  // Clear interval after form submission
+  setTimeout(() => clearInterval(progressInterval), 5000);
+});
+
+// Filesystem update form handling
+document.getElementById('filesystemUpdateForm').addEventListener('submit', function(e) {
+  const progressBar = document.getElementById('filesystemProgressBar');
+  const progressFill = document.getElementById('filesystemProgressFill');
+  const updateStatus = document.getElementById('filesystemUpdateStatus');
+  
+  progressBar.style.display = 'block';
+  updateStatus.innerHTML = 'Status: Aktualizacja filesystem w toku...';
   
   // Simulate progress (in real implementation, this would come from server)
   let progress = 0;
@@ -1640,7 +1779,7 @@ function setNetworkFlag(enabled) {
 
 // Event listeners
 document.getElementById('toggleAutoReset').addEventListener('click', toggleAutoReset);
-document.getElementById('restartBtn').addEventListener('click', restartSystem);
+document.getElementById('restartBtn').addEventListener('click', restartSystemMain);
 document.getElementById('refreshInfo').addEventListener('click', function() {
   refreshSystemInfo();
   loadSystemConfigMain(); // Also refresh configuration
@@ -1664,12 +1803,248 @@ window.addEventListener('load', function() {
   setTimeout(() => {
     loadPushbulletConfig();
     getFanStatus(); // Load initial fan status
+    getFilesystemInfo(); // Load initial filesystem info
   }, 2000);
 });
 
 window.addEventListener('beforeunload', function() {
   if (ws) ws.close();
 });
+
+// Calibration Constants Functions
+function loadCalibrationConstants() {
+  fetch('/api/calib-constants')
+    .then(response => response.json())
+    .then(data => {
+      const editor = document.getElementById('calibConstantsEditor');
+      editor.value = JSON.stringify(data, null, 2);
+      showAlert('Stałe kalibracyjne wczytane pomyślnie', 'success');
+    })
+    .catch(error => {
+      console.error('Error loading calibration constants:', error);
+      showAlert('Błąd wczytywania stałych kalibracyjnych', 'error');
+    });
+}
+
+function saveCalibrationConstants() {
+  const editor = document.getElementById('calibConstantsEditor');
+  const jsonData = editor.value.trim();
+  
+  try {
+    const data = JSON.parse(jsonData);
+    
+    fetch('/api/calib-constants', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: 'data=' + encodeURIComponent(jsonData)
+    })
+    .then(response => response.json())
+    .then(result => {
+      if (result.success) {
+        showAlert('Stałe kalibracyjne zapisane pomyślnie', 'success');
+      } else {
+        showAlert('Błąd zapisywania stałych kalibracyjnych: ' + (result.error || 'Nieznany błąd'), 'error');
+      }
+    })
+    .catch(error => {
+      console.error('Error saving calibration constants:', error);
+      showAlert('Błąd zapisywania stałych kalibracyjnych', 'error');
+    });
+  } catch (error) {
+    showAlert('Nieprawidłowy format JSON', 'error');
+  }
+}
+
+function downloadCalibrationConstants() {
+  const editor = document.getElementById('calibConstantsEditor');
+  const jsonData = editor.value.trim();
+  
+  if (!jsonData) {
+    showAlert('Brak danych do pobrania', 'error');
+    return;
+  }
+  
+  try {
+    const data = JSON.parse(jsonData);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'calib_nums.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showAlert('Plik pobrany pomyślnie', 'success');
+  } catch (error) {
+    showAlert('Błąd podczas pobierania pliku', 'error');
+  }
+}
+
+function resetCalibrationConstants() {
+  if (confirm('Czy na pewno chcesz zresetować stałe kalibracyjne do wartości domyślnych?')) {
+    fetch('/api/calib-constants')
+      .then(response => response.json())
+      .then(data => {
+        // Reset to default values (all 1.0 for multipliers, 0.0 for offsets)
+        const defaults = {
+          RL_TGS03: 10000.0,
+          RL_TGS02: 3300.0,
+          RL_TGS12: 10000.0,
+          TGS03_B1: 1.0,
+          TGS03_A: 0.0,
+          TGS02_B1: 1.0,
+          TGS02_A: 0.0,
+          TGS12_B1: 1.0,
+          TGS12_A: 0.0,
+          CO_B0: 0.0,
+          CO_B1: 1.0,
+          CO_B2: 0.0,
+          CO_B3: 0.0,
+          NO_B0: 0.0,
+          NO_B1: 1.0,
+          NO_B2: 0.0,
+          NO_B3: 0.0,
+          NO2_B0: 0.0,
+          NO2_B1: 1.0,
+          NO2_B2: 0.0,
+          NO2_B3: 0.0,
+          O3_B0: 0.0,
+          O3_B1: 1.0,
+          O3_B2: 0.0,
+          O3_B3: 0.0,
+          O3_D: 0.0,
+          SO2_B0: 0.0,
+          SO2_B1: 1.0,
+          SO2_B2: 0.0,
+          SO2_B3: 0.0,
+          NH3_B0: 0.0,
+          NH3_B1: 1.0,
+          NH3_B3: 0.0,
+          H2S_B0: 0.0,
+          H2S_B1: 1.0,
+          H2S_B2: 0.0,
+          H2S_B3: 0.0,
+          CO_PPB_DIV: 1.0,
+          NO_PPB_DIV: 1.0,
+          NO2_PPB_DIV: 1.0,
+          O3_PPB_DIV: 1.0,
+          SO2_PPB_DIV: 1.0,
+          H2S_PPB_DIV: 1.0,
+          NH3_PPB_DIV: 1.0,
+          PID_OFFSET: 0.0,
+          PID_B: 0.0,
+          PID_A: 1.0,
+          PID_CF: 1.0,
+          HCHO_B1: 1.0,
+          HCHO_A: 0.0,
+          HCHO_PPB_CF: 1.0,
+          PM1_B1: 1.0,
+          PM1_A: 0.0,
+          PM25_B1: 1.0,
+          PM25_A: 0.0,
+          PM10_B1: 1.0,
+          PM10_A: 0.0,
+          AMBIENT_TEMP_B1: 1.0,
+          AMBIENT_TEMP_A: 0.0,
+          AMBIENT_HUMID_B1: 1.0,
+          AMBIENT_HUMID_A: 0.0,
+          AMBIENT_PRESS_B1: 1.0,
+          AMBIENT_PRESS_A: 0.0,
+          DUST_TEMP_B1: 1.0,
+          DUST_TEMP_A: 0.0,
+          DUST_HUMID_B1: 1.0,
+          DUST_HUMID_A: 0.0,
+          DUST_PRESS_B1: 1.0,
+          DUST_PRESS_A: 0.0,
+          GAS_TEMP_B1: 1.0,
+          GAS_TEMP_A: 0.0,
+          GAS_HUMID_B1: 1.0,
+          GAS_HUMID_A: 0.0,
+          GAS_PRESS_B1: 1.0,
+          GAS_PRESS_A: 0.0,
+          SCD_CO2_B1: 1.0,
+          SCD_CO2_A: 0.0,
+          SCD_TEMP_B1: 1.0,
+          SCD_TEMP_A: 0.0,
+          SCD_RH_B1: 1.0,
+          SCD_RH_A: 0.0,
+          ODO_A0: 0.0,
+          ODO_A1: 1.0,
+          ODO_A2: 1.0,
+          ODO_A3: 1.0,
+          ODO_A4: 1.0,
+          ODO_A5: 1.0,
+          B4_TO: 25.0,
+          B4_B: 3380.0,
+          B4_RO: 10.0,
+          B4_RS: 33.0,
+          B4_K: 3.2,
+          B4_COK: 273.15,
+          TGS_TO: 25.0,
+          TGS_B: 3380.0,
+          TGS_RO: 10.0,
+          TGS_COK: 273.15,
+          B4_LSB: 3.90625,
+          TGS_LSB: 3.90625,
+          TGS_K: 5.0,
+          TEMP_MIN: -30.0,
+          TEMP_MAX: 1000.0,
+          VOLTAGE_MIN: 0.0,
+          VOLTAGE_MAX: 7000.0,
+          GAS_MIN: 0.0,
+          GAS_MAX: 50000.0,
+          PPB_MIN: 0.0,
+          PPB_MAX: 50000.0,
+          TGS_MIN: 0.0,
+          TGS_MAX: 1000000.0,
+          HCHO_MIN: 0.0,
+          HCHO_MAX: 40000.0,
+          PID_MIN: 0.0,
+          PID_MAX: 40000.0,
+          PM_MIN: 0.0,
+          PM_MAX: 5000.0,
+          ENV_TEMP_MIN: -100.0,
+          ENV_TEMP_MAX: 100.0,
+          ENV_HUMID_MIN: 0.0,
+          ENV_HUMID_MAX: 100.0,
+          ENV_PRESS_MIN: 0.0,
+          ENV_PRESS_MAX: 2000.0,
+          CO2_MIN: 0.0,
+          CO2_MAX: 60000.0,
+          ODO_MIN: 0.0,
+          ODO_MAX: 1000000.0
+        };
+        
+        const editor = document.getElementById('calibConstantsEditor');
+        editor.value = JSON.stringify(defaults, null, 2);
+        showAlert('Stałe kalibracyjne zresetowane do wartości domyślnych', 'success');
+      })
+      .catch(error => {
+        console.error('Error resetting calibration constants:', error);
+        showAlert('Błąd resetowania stałych kalibracyjnych', 'error');
+      });
+  }
+}
+
+function applyCalibrationConstants() {
+  saveCalibrationConstants();
+}
+
+function formatCalibrationConstants() {
+  const editor = document.getElementById('calibConstantsEditor');
+  const jsonData = editor.value.trim();
+  
+  try {
+    const data = JSON.parse(jsonData);
+    editor.value = JSON.stringify(data, null, 2);
+    showAlert('JSON sformatowany pomyślnie', 'success');
+  } catch (error) {
+    showAlert('Nieprawidłowy format JSON', 'error');
+  }
+}
 </script>
 </body>
 </html>

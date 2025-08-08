@@ -10,6 +10,8 @@
 #include <network_config.h>
 #include <esp_task_wdt.h>
 #include <Wire.h>
+#include <LittleFS.h>
+#include <mean.h>
 
 // Forward declarations for safe printing functions
 void safePrint(const String& message);
@@ -112,6 +114,8 @@ extern CalibratedSensorData getCalibratedFastAverage();
 extern CalibratedSensorData getCalibratedSlowAverage();
 extern HCHOData getHCHOFastAverage();
 extern HCHOData getHCHOSlowAverage();
+extern SCD41Data getSCD41FastAverage();
+extern SCD41Data getSCD41SlowAverage();
 extern FanData getFANFastAverage();
 extern FanData getFANSlowAverage();
 
@@ -204,14 +208,16 @@ void handleGetSensorData(AsyncWebSocketClient* client, JsonDocument& doc) {
             sps30["valid"] = true;
         }
         
-        // SCD41 (CO2 sensor)
-        if (scd41SensorStatus && i2cSensorData.valid && i2cSensorData.type == SENSOR_SCD41) {
+        // SCD41 (CO2 sensor) - dedicated bucket, always show when valid
+        if (scd41SensorStatus) {
+            extern SCD41Data scd41Data;
+            if (scd41Data.valid) {
             JsonObject scd41 = data.createNestedObject("scd41");
-            scd41["temperature"] = i2cSensorData.temperature;
-            scd41["humidity"] = i2cSensorData.humidity;
-            scd41["pressure"] = i2cSensorData.pressure;
-            scd41["co2"] = i2cSensorData.co2;
+            scd41["temperature"] = scd41Data.temperature;
+            scd41["humidity"] = scd41Data.humidity;
+            scd41["co2"] = scd41Data.co2;
             scd41["valid"] = true;
+            }
         }
         
         // MCP3424
@@ -256,6 +262,7 @@ void handleGetSensorData(AsyncWebSocketClient* client, JsonDocument& doc) {
             JsonObject hcho = data.createNestedObject("hcho");
             hcho["hcho_mg"] = hchoData.hcho;
             hcho["hcho_ppb"] = hchoData.hcho_ppb;
+            hcho["tvoc_mg"] = hchoData.tvoc;
             hcho["valid"] = true;
         }
         
@@ -285,6 +292,29 @@ void handleGetSensorData(AsyncWebSocketClient* client, JsonDocument& doc) {
             calib["VOC_ppb"] = calibratedData.VOC_ppb;
             calib["HCHO"] = calibratedData.HCHO;
             calib["PID"] = calibratedData.PID;
+            
+            // ODO
+            calib["ODO"] = calibratedData.ODO;
+            
+            // PM sensors (SPS30)
+            calib["PM1"] = calibratedData.PM1;
+            calib["PM25"] = calibratedData.PM25;
+            calib["PM10"] = calibratedData.PM10;
+            
+            // Environmental sensors
+       
+            
+            calib["DUST_TEMP"] = calibratedData.DUST_TEMP;
+            calib["DUST_HUMID"] = calibratedData.DUST_HUMID;
+            calib["DUST_PRESS"] = calibratedData.DUST_PRESS;
+            
+         
+            
+            // CO2 sensor
+            calib["SCD_CO2"] = calibratedData.SCD_CO2;
+            calib["SCD_T"] = calibratedData.SCD_T;
+            calib["SCD_RH"] = calibratedData.SCD_RH;
+            
             calib["valid"] = true;
         }
         
@@ -796,20 +826,24 @@ void handleGetAverages(AsyncWebSocketClient* client, JsonDocument& doc) {
         }
     }
 
-    // CO2 (osobna sekcja)
+    // SCD41 (dedykowany kubelek averages)
     if (sensorType == "scd41" || sensorType == "all") {
         if (avgType == "fast") {
-            I2CSensorData avg = getI2CFastAverage();
+            SCD41Data avg = getSCD41FastAverage();
             if (avg.valid) {
                 JsonObject scd41 = data.createNestedObject("scd41");
                 scd41["co2"] = avg.co2;
+                scd41["temperature"] = avg.temperature;
+                scd41["humidity"] = avg.humidity;
                 scd41["valid"] = true;
             }
         } else {
-            I2CSensorData avg = getI2CSlowAverage();
+            SCD41Data avg = getSCD41SlowAverage();
             if (avg.valid) {
                 JsonObject scd41 = data.createNestedObject("scd41");
                 scd41["co2"] = avg.co2;
+                scd41["temperature"] = avg.temperature;
+                scd41["humidity"] = avg.humidity;
                 scd41["valid"] = true;
             }
         }
@@ -883,6 +917,7 @@ void handleGetAverages(AsyncWebSocketClient* client, JsonDocument& doc) {
                 JsonObject hcho = data.createNestedObject("hcho");
                 hcho["hcho_mg"] = avg.hcho;
                 hcho["hcho_ppb"] = avg.hcho_ppb;
+                hcho["tvoc_mg"] = avg.tvoc;
                 hcho["valid"] = true;
             }
         } else {
@@ -891,6 +926,7 @@ void handleGetAverages(AsyncWebSocketClient* client, JsonDocument& doc) {
                 JsonObject hcho = data.createNestedObject("hcho");
                 hcho["hcho_mg"] = avg.hcho;
                 hcho["hcho_ppb"] = avg.hcho_ppb;
+                hcho["tvoc_mg"] = avg.tvoc;
                 hcho["valid"] = true;
             }
         }
@@ -929,48 +965,128 @@ void handleGetAverages(AsyncWebSocketClient* client, JsonDocument& doc) {
     }
     
     // K_channels - wszystkie kanały K jako osobne klucze
+    // if (sensorType == "mcp3424" || sensorType == "all") {
+    //     if (avgType == "fast") {
+    //         MCP3424Data avg = getMCP3424FastAverage();
+            
+    //         if (avg.deviceCount > 0) {
+    //             JsonObject k_channels = data.createNestedObject("K_channels");
+                
+    //             // Użyj systemu mapowania adresów I2C do typów gazów
+    //             const char* gasTypes[] = {"NO", "O3", "NO2", "CO", "SO2", "TGS1", "TGS2", "TGS3"};
+    //             const char* gasNames[] = {"K1", "K2", "K3", "K4", "K5", "K6", "K7", "K8"};
+                
+    //             for (int i = 0; i < 8; i++) {
+    //                 int8_t deviceIndex = getMCP3424DeviceByGasType(gasTypes[i]);
+                    
+    //                 // Fallback: jeśli gasType mapping nie działa, użyj deviceIndex bezpośrednio
+    //                 if (deviceIndex == -1 && i < (int)avg.deviceCount && avg.valid[i]) {
+    //                     deviceIndex = i;
+    //                 }
+                    
+    //                 if (deviceIndex >= 0 && deviceIndex < (int)avg.deviceCount) {
+    //                     if (avg.valid[deviceIndex]) {
+    //                         // Find actual device index in config based on I2C address
+    //                         uint8_t i2cAddress = avg.addresses[deviceIndex];
+    //                         int actualDeviceIndex = -1;
+                            
+    //                         // Search for this I2C address in MCP3424 config to get device index
+    //                         extern MCP3424Config mcp3424Config;
+    //                         for (int d = 0; d < 8; d++) {
+    //                             if (mcp3424Config.devices[d].i2cAddress == i2cAddress) {
+    //                                 actualDeviceIndex = d;
+    //                                 break;
+    //                             }
+    //                         }
+                            
+    //                         // K number = device index + 1 (Device 0->K1, Device 4->K5, Device 6->K7)
+    //                         uint8_t kNumber = (actualDeviceIndex >= 0) ? (actualDeviceIndex + 1) : (deviceIndex + 1);
+                            
+    //                         for (uint8_t ch = 0; ch < 4; ch++) {
+    //                             String key = "K" + String(kNumber) + "_" + String(ch+1);
+    //                             float value = avg.channels[deviceIndex][ch];
+    //                             k_channels[key] = value;
+    //                         }
+    //                     }
+    //                 }
+    //             }
+    //             k_channels["valid"] = true;
+    //         }
+    //     } else {
+    //         MCP3424Data avg = getMCP3424SlowAverage();
+            
+    //         if (avg.deviceCount > 0) {
+    //             JsonObject k_channels = data.createNestedObject("K_channels");
+                
+    //             // Użyj systemu mapowania adresów I2C do typów gazów
+    //             const char* gasTypes[] = {"NO", "O3", "NO2", "CO", "SO2", "TGS1", "TGS2", "TGS3"};
+    //             const char* gasNames[] = {"K1", "K2", "K3", "K4", "K5", "K6", "K7", "K8"};
+                
+    //             for (int i = 0; i < 8; i++) {
+    //                 int8_t deviceIndex = getMCP3424DeviceByGasType(gasTypes[i]);
+                    
+    //                 // Fallback: jeśli gasType mapping nie działa, użyj deviceIndex bezpośrednio
+    //                 if (deviceIndex == -1 && i < (int)avg.deviceCount && avg.valid[i]) {
+    //                     deviceIndex = i;
+    //                 }
+                    
+    //                 if (deviceIndex >= 0 && deviceIndex < (int)avg.deviceCount) {
+    //                     if (avg.valid[deviceIndex]) {
+    //                         // Find actual device index in config based on I2C address
+    //                         uint8_t i2cAddress = avg.addresses[deviceIndex];
+    //                         int actualDeviceIndex = -1;
+                            
+    //                         // Search for this I2C address in MCP3424 config to get device index
+    //                         extern MCP3424Config mcp3424Config;
+    //                         for (int d = 0; d < 8; d++) {
+    //                             if (mcp3424Config.devices[d].i2cAddress == i2cAddress) {
+    //                                 actualDeviceIndex = d;
+    //                                 break;
+    //                             }
+    //                         }
+                            
+    //                         // K number = device index + 1 (Device 0->K1, Device 4->K5, Device 6->K7)
+    //                         uint8_t kNumber = (actualDeviceIndex >= 0) ? (actualDeviceIndex + 1) : (deviceIndex + 1);
+                            
+    //                         for (uint8_t ch = 0; ch < 4; ch++) {
+    //                             String key = "K" + String(kNumber) + "_" + String(ch+1);
+    //                             float value = avg.channels[deviceIndex][ch];
+    //                             k_channels[key] = value;
+    //                         }
+    //                     }
+    //                 }
+    //             }
+    //             k_channels["valid"] = true;
+    //         }
+    //     }
+    // }
+
     if (sensorType == "mcp3424" || sensorType == "all") {
         if (avgType == "fast") {
             MCP3424Data avg = getMCP3424FastAverage();
-            
+
             if (avg.deviceCount > 0) {
                 JsonObject k_channels = data.createNestedObject("K_channels");
-                
-                // Użyj systemu mapowania adresów I2C do typów gazów
-                const char* gasTypes[] = {"NO", "O3", "NO2", "CO", "SO2", "TGS1", "TGS2", "TGS3"};
-                const char* gasNames[] = {"K1", "K2", "K3", "K4", "K5", "K6", "K7", "K8"};
-                
-                for (int i = 0; i < 8; i++) {
-                    int8_t deviceIndex = getMCP3424DeviceByGasType(gasTypes[i]);
-                    
-                    // Fallback: jeśli gasType mapping nie działa, użyj deviceIndex bezpośrednio
-                    if (deviceIndex == -1 && i < (int)avg.deviceCount && avg.valid[i]) {
-                        deviceIndex = i;
+
+                for (uint8_t deviceIndex = 0; deviceIndex < MAX_MCP3424_DEVICES; deviceIndex++) {
+                    uint8_t i2cAddress = getMCP3424I2CAddressByDeviceIndex(deviceIndex);
+                    if (i2cAddress == 0x00) {
+                        continue; // Device not configured
                     }
-                    
-                    if (deviceIndex >= 0 && deviceIndex < (int)avg.deviceCount) {
-                        if (avg.valid[deviceIndex]) {
-                            // Find actual device index in config based on I2C address
-                            uint8_t i2cAddress = avg.addresses[deviceIndex];
-                            int actualDeviceIndex = -1;
-                            
-                            // Search for this I2C address in MCP3424 config to get device index
-                            extern MCP3424Config mcp3424Config;
-                            for (int d = 0; d < 8; d++) {
-                                if (mcp3424Config.devices[d].i2cAddress == i2cAddress) {
-                                    actualDeviceIndex = d;
-                                    break;
-                                }
-                            }
-                            
-                            // K number = device index + 1 (Device 0->K1, Device 4->K5, Device 6->K7)
-                            uint8_t kNumber = (actualDeviceIndex >= 0) ? (actualDeviceIndex + 1) : (deviceIndex + 1);
-                            
-                            for (uint8_t ch = 0; ch < 4; ch++) {
-                                String key = "K" + String(kNumber) + "_" + String(ch+1);
-                                float value = avg.channels[deviceIndex][ch];
-                                k_channels[key] = value;
-                            }
+
+                    int idx = -1;
+                    for (uint8_t j = 0; j < avg.deviceCount; j++) {
+                        if (avg.addresses[j] == i2cAddress) {
+                            idx = j;
+                            break;
+                        }
+                    }
+
+                    if (idx >= 0 && avg.valid[idx]) {
+                        uint8_t kNumber = deviceIndex + 1;
+                        for (uint8_t ch = 0; ch < 4; ch++) {
+                            String key = "K" + String(kNumber) + "_" + String(ch + 1);
+                            k_channels[key] = avg.channels[idx][ch];
                         }
                     }
                 }
@@ -978,45 +1094,29 @@ void handleGetAverages(AsyncWebSocketClient* client, JsonDocument& doc) {
             }
         } else {
             MCP3424Data avg = getMCP3424SlowAverage();
-            
+
             if (avg.deviceCount > 0) {
                 JsonObject k_channels = data.createNestedObject("K_channels");
-                
-                // Użyj systemu mapowania adresów I2C do typów gazów
-                const char* gasTypes[] = {"NO", "O3", "NO2", "CO", "SO2", "TGS1", "TGS2", "TGS3"};
-                const char* gasNames[] = {"K1", "K2", "K3", "K4", "K5", "K6", "K7", "K8"};
-                
-                for (int i = 0; i < 8; i++) {
-                    int8_t deviceIndex = getMCP3424DeviceByGasType(gasTypes[i]);
-                    
-                    // Fallback: jeśli gasType mapping nie działa, użyj deviceIndex bezpośrednio
-                    if (deviceIndex == -1 && i < (int)avg.deviceCount && avg.valid[i]) {
-                        deviceIndex = i;
+
+                for (uint8_t deviceIndex = 0; deviceIndex < MAX_MCP3424_DEVICES; deviceIndex++) {
+                    uint8_t i2cAddress = getMCP3424I2CAddressByDeviceIndex(deviceIndex);
+                    if (i2cAddress == 0x00) {
+                        continue; // Device not configured
                     }
-                    
-                    if (deviceIndex >= 0 && deviceIndex < (int)avg.deviceCount) {
-                        if (avg.valid[deviceIndex]) {
-                            // Find actual device index in config based on I2C address
-                            uint8_t i2cAddress = avg.addresses[deviceIndex];
-                            int actualDeviceIndex = -1;
-                            
-                            // Search for this I2C address in MCP3424 config to get device index
-                            extern MCP3424Config mcp3424Config;
-                            for (int d = 0; d < 8; d++) {
-                                if (mcp3424Config.devices[d].i2cAddress == i2cAddress) {
-                                    actualDeviceIndex = d;
-                                    break;
-                                }
-                            }
-                            
-                            // K number = device index + 1 (Device 0->K1, Device 4->K5, Device 6->K7)
-                            uint8_t kNumber = (actualDeviceIndex >= 0) ? (actualDeviceIndex + 1) : (deviceIndex + 1);
-                            
-                            for (uint8_t ch = 0; ch < 4; ch++) {
-                                String key = "K" + String(kNumber) + "_" + String(ch+1);
-                                float value = avg.channels[deviceIndex][ch];
-                                k_channels[key] = value;
-                            }
+
+                    int idx = -1;
+                    for (uint8_t j = 0; j < avg.deviceCount; j++) {
+                        if (avg.addresses[j] == i2cAddress) {
+                            idx = j;
+                            break;
+                        }
+                    }
+
+                    if (idx >= 0 && avg.valid[idx]) {
+                        uint8_t kNumber = deviceIndex + 1;
+                        for (uint8_t ch = 0; ch < 4; ch++) {
+                            String key = "K" + String(kNumber) + "_" + String(ch + 1);
+                            k_channels[key] = avg.channels[idx][ch];
                         }
                     }
                 }
@@ -1139,6 +1239,28 @@ void handleGetAverages(AsyncWebSocketClient* client, JsonDocument& doc) {
                 // VOC
                 calibrated["VOC"] = avg.VOC;
                 calibrated["VOC_ppb"] = avg.VOC_ppb;
+                
+                // ODO
+                calibrated["ODO"] = avg.ODO;
+                
+                // PM sensors (SPS30)
+                calibrated["PM1"] = avg.PM1;
+                calibrated["PM25"] = avg.PM25;
+                calibrated["PM10"] = avg.PM10;
+                
+                // Environmental sensors
+             
+                
+                calibrated["DUST_TEMP"] = avg.DUST_TEMP;
+                calibrated["DUST_HUMID"] = avg.DUST_HUMID;
+                calibrated["DUST_PRESS"] = avg.DUST_PRESS;
+                
+             
+                
+                // CO2 sensor
+                calibrated["SCD_CO2"] = avg.SCD_CO2;
+                calibrated["SCD_T"] = avg.SCD_T;
+                calibrated["SCD_RH"] = avg.SCD_RH;
                 
                 calibrated["valid"] = true;
             }
@@ -2541,6 +2663,35 @@ void handleWebSocketMessageInTask(AsyncWebSocketClient* client, DynamicJsonDocum
         String responseStr;
         serializeJson(response, responseStr);
         client->text(responseStr);
+        
+    } else if (cmd == "filesystemInfo") {
+        // Handle filesystem info request
+        DynamicJsonDocument response(1024);
+        response["cmd"] = "filesystemInfo";
+        response["success"] = true;
+        response["timestamp"] = time(nullptr); // Epoch timestamp
+        
+        // Get filesystem information
+        size_t totalBytes = LittleFS.totalBytes();
+        size_t usedBytes = LittleFS.usedBytes();
+        size_t freeBytes = totalBytes - usedBytes;
+        float usedPercent = (totalBytes > 0) ? ((float)usedBytes / totalBytes) * 100.0f : 0.0f;
+        
+        response["totalBytes"] = totalBytes;
+        response["usedBytes"] = usedBytes;
+        response["freeBytes"] = freeBytes;
+        response["usedPercent"] = round(usedPercent * 10) / 10.0f; // Round to 1 decimal place
+        
+        // Format filesystem info string
+        String filesystemInfo = String(usedBytes) + "/" + String(totalBytes) + " bytes (" + 
+                               String(usedPercent, 1) + "%)";
+        response["filesystemInfo"] = filesystemInfo;
+        
+        String responseStr;
+        serializeJson(response, responseStr);
+        client->text(responseStr);
+        
+        safePrintln("Filesystem info requested: " + filesystemInfo);
         
     } else {
         DynamicJsonDocument errorResponse(1024);
