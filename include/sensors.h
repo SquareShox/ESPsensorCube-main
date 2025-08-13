@@ -80,6 +80,7 @@ void initializeHCHO();
 bool readHCHO();
 bool isHCHODataValid();
 void resetHCHOData();
+void resetHCHOFailCount();
 
 // Serial sensors functions
 void initializeSerialSensors();

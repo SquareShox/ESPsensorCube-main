@@ -11,13 +11,14 @@ CalibratedSensorData calibratedData;
 
 // Global konfiguracja kalibracji
 CalibrationConfig calibConfig;
+#define DEBUG
 
 // External global MCP3424 data
 extern MCP3424Data mcp3424Data;
 // External global calibration constants
 extern CalibrationConstants calibConstants;
 //#define DEBUG
-const char* gasTypes[] = {"NO", "O3", "NO2", "CO", "SO2", "TGS1", "TGS2", "TGS3"};
+const char* gasTypes[] = {"NO", "O3", "NO2", "CO", "SO2", "TGS1", "TGS2", "TGS3", "NH3", "H2S"};
 const char* gasNames[] = {"K1", "K2", "K3", "K4", "K5", "K6", "K7", "K8"};
 // Implementacja wzorów z calib_functions.tcl
 
@@ -196,9 +197,8 @@ void calibrateTGSVoltage() {
             float c4 = getMCP3424Value(i, 3);
             assignKVoltageByDeviceIndex(i, TGSv4_mV(c4));
         } else if (strcmp(gt, "TGS2") == 0) {
-            float c3 = getMCP3424Value(i, 2);
             float c4 = getMCP3424Value(i, 3);
-            assignKVoltageByDeviceIndex(i, TGSv4_mV_FIX(c3, c4));
+            assignKVoltageByDeviceIndex(i, TGSv4_mV(c4));
         } else if (strcmp(gt, "TGS3") == 0) {
             float c4 = getMCP3424Value(i, 3);
             assignKVoltageByDeviceIndex(i, TGSv4_mV(c4));
@@ -223,9 +223,10 @@ void calibrateTGSSensors() {
         float K7_3 = getMCP3424Value(deviceTGS2, 2);
         float K7_4 = getMCP3424Value(deviceTGS2, 3);
         // TGSv4_ppm_FIX implementation zgodnie z calib.tcl linie 184-193
-        float R_02 = calibConstants.RL_TGS02 * (2.0f * K7_3 + K7_4) / K7_4;
-        float Sr_02 = calibConstants.RL_TGS02 / (R_02 + 0) + 0; // A=RL_TGS02, B=0, C=0
-        calibratedData.TGS02 = calibConstants.TGS02_B1 * Sr_02 + calibConstants.TGS02_A;
+        float R_02 = TGSv4_ohm(K7_3, K7_4, calibConstants.RL_TGS02);
+        // float Sr_02 = calibConstants.RL_TGS02 / (R_02 + 0) + 0; // A=RL_TGS02, B=0, C=0
+        // calibratedData.TGS02 = calibConstants.TGS02_B1 * Sr_02 + calibConstants.TGS02_A;
+        calibratedData.TGS02 = TGSv4_ppm(K7_3, K7_4, calibConstants.RL_TGS02, calibConstants.RL_TGS02, 0, 0, calibConstants.TGS02_B1, calibConstants.TGS02_A);
         calibratedData.TGS02_ohm = R_02;
     }
     
@@ -253,24 +254,11 @@ void calibrateGases() {
         calibratedData.CO = fmax(calibConstants.GAS_MIN, fmin(calibratedData.CO, calibConstants.GAS_MAX));
         
         #ifdef DEBUG
-        Serial.print("[DEBUG] CO calculation - device=");
-        Serial.print(deviceCO);
-        Serial.print(", K4_1=");
-        Serial.print(K4_1, 6);
-        Serial.print(", K4_2=");
-        Serial.print(K4_2, 6);
-        Serial.print(", K4_3=");
-        Serial.print(K4_3, 6);
-        Serial.print(", K4_4=");
-        Serial.print(K4_4, 6);
-        Serial.print(", T_CO=");
-        Serial.print(T_CO, 6);
-        Serial.print(", CO=");
-        Serial.println(calibratedData.CO, 6);
+  
         #endif
     } else {
         #ifdef DEBUG
-        Serial.println("[DEBUG] CO - device not found");
+       
         #endif
     }
     
@@ -291,6 +279,8 @@ void calibrateGases() {
         float K3_2 = getMCP3424Value(deviceNO2, 1); // AUX
         float T_NO2 = calibratedData.K3_temp;
         calibratedData.NO2 = calibConstants.NO2_B0 + calibConstants.NO2_B1 * K3_1 + calibConstants.NO2_B2 * K3_2 + calibConstants.NO2_B3 * T_NO2;
+        // Zastosuj kompensacje temperatury dedykowana dla NO2
+       // calibratedData.NO2 = Linear_basic(A4_NO2(T_NO2), calibratedData.NO2, B4_NO2(T_NO2));
         calibratedData.NO2 = fmax(calibConstants.GAS_MIN, fmin(calibratedData.NO2, calibConstants.GAS_MAX));
     }
     
@@ -301,6 +291,8 @@ void calibrateGases() {
         float K2_2 = getMCP3424Value(deviceO3, 1); // AUX
         float T_O3 = calibratedData.K2_temp;
         calibratedData.O3 = calibConstants.O3_B0 + calibConstants.O3_B1 * K2_1 + calibConstants.O3_B2 * K2_2 + calibConstants.O3_B3 * T_O3 + calibConstants.O3_D * calibratedData.NO2;
+        // Zastosuj kompensacje temperatury dedykowana dla O3
+      //  calibratedData.O3 = Linear_basic(A4_O3(T_O3), calibratedData.O3, B4_O3(T_O3));
         calibratedData.O3 = fmax(calibConstants.GAS_MIN, fmin(calibratedData.O3, calibConstants.GAS_MAX));
     }
     
@@ -313,13 +305,15 @@ void calibrateGases() {
         float K5_4 = getMCP3424Value(deviceSO2, 3); // VCC
         float T_SO2 = B4_T(K5_3, K5_4);
         calibratedData.SO2 = calibConstants.SO2_B0 + calibConstants.SO2_B1 * K5_1 + calibConstants.SO2_B2 * K5_2 + calibConstants.SO2_B3 * T_SO2;
+        // Zastosuj kompensacje temperatury dedykowana dla SO2
+      //  calibratedData.SO2 = Linear_basic(A4_SO2(T_SO2), calibratedData.SO2, B4_SO2(T_SO2));
         calibratedData.SO2 = fmax(calibConstants.GAS_MIN, fmin(calibratedData.SO2, calibConstants.GAS_MAX));
         
     }
     
     // NH3 - używamy dedykowanego wzoru (może być osobny czujnik lub SO2)
     // Próbuj znaleźć dedykowany czujnik NH3, w przeciwnym razie użyj SO2
-    int8_t deviceNH3 = deviceSO2; // Defaultowo używamy SO2
+    int8_t deviceNH3 = getMCP3424DeviceByGasType(gasTypes[8]);
     
     if (deviceNH3 >= 0) {
         float Kx_1 = getMCP3424Value(deviceNH3, 0); // WRK
@@ -332,7 +326,7 @@ void calibrateGases() {
     
     // H2S - używamy dedykowanego wzoru (może być osobny czujnik lub SO2)
     // Próbuj znaleźć dedykowany czujnik H2S, w przeciwnym razie użyj SO2
-    int8_t deviceH2S = deviceSO2; // Defaultowo używamy SO2
+    int8_t deviceH2S = getMCP3424DeviceByGasType(gasTypes[9]);
     
     if (deviceH2S >= 0) {
         float Kx_1 = getMCP3424Value(deviceH2S, 0); // WRK
@@ -341,6 +335,8 @@ void calibrateGases() {
         float Kx_4 = getMCP3424Value(deviceH2S, 3); // VCC
         float T_H2S = B4_T(Kx_3, Kx_4);
         calibratedData.H2S = calibConstants.H2S_B0 + calibConstants.H2S_B1 * Kx_1 + calibConstants.H2S_B2 * Kx_2 + calibConstants.H2S_B3 * T_H2S;
+        // Zastosuj kompensacje temperatury dedykowana dla H2S
+      //  calibratedData.H2S = Linear_basic(A4_H2S(T_H2S), calibratedData.H2S, B4_H2S(T_H2S));
         calibratedData.H2S = fmax(calibConstants.GAS_MIN, fmin(calibratedData.H2S, calibConstants.GAS_MAX));
     }
 }
@@ -495,39 +491,27 @@ void performCalibration() {
         return;
     }
     
-    if (!mcp3424Data.deviceCount || (millis() - mcp3424Data.lastUpdate) > 5000) {
-        // Brak danych lub dane nieaktualne
-  
-        calibratedData.valid = false;
-        return;
-    }
-    
-    // Kalibracja podstawowych pomiarow (zawsze wlaczone gdy kalibracja aktywna)
+// Kalibracja HCHO i PID (kontrolowane przez config)
+    if (calibConfig.enableSpecialSensors) {
 
-    calibrateB4Temperature();
-    calibrateB4Voltage();
-    calibrateTGSTemperature();
-    calibrateTGSVoltage();
-    
-    // Kalibracja czujnikow TGS (kontrolowane przez config)
-    if (calibConfig.enableTGSSensors) {
-   
-        calibrateTGSSensors();
+        calibrateSpecialSensors();
     }
     
-    // Kalibracja gazow elektrochemicznych (kontrolowane przez config)
-    if (calibConfig.enableGasSensors) {
-     
-        calibrateGases();
-        
-        // Konwersja na ppb (tylko jesli gazy wlaczone)
-        if (calibConfig.enablePPBConversion) {
-         
-            calibrateGasesPPB();
-        }
+    // Kalibracja czujnikow PM (kontrolowane przez config)
+    if (calibConfig.enableSpecialSensors) {
+        calibratePMSensors();
     }
     
-    // Kalibracja HCHO i PID (kontrolowane przez config)
+    // Kalibracja czujnikow środowiskowych (kontrolowane przez config)  
+    if (calibConfig.enableSpecialSensors) {
+        calibrateEnvironmentalSensors();
+    }
+    
+    // Kalibracja CO2 (kontrolowane przez config)
+    if (calibConfig.enableSpecialSensors) {
+        calibrateCO2Sensor();
+    }
+        // Kalibracja HCHO i PID (kontrolowane przez config)
     if (calibConfig.enableSpecialSensors) {
 
         calibrateSpecialSensors();
@@ -548,9 +532,92 @@ void performCalibration() {
         calibrateCO2Sensor();
     }
     
+
+    if (mcp3424Data.deviceCount > 0 && (millis() - mcp3424Data.lastUpdate) < 5000) {
+        // Brak danych lub dane nieaktualne
+
+         // Kalibracja podstawowych pomiarow (zawsze wlaczone gdy kalibracja aktywna)
+
+    calibrateB4Temperature();
+    calibrateB4Voltage();
+    calibrateTGSTemperature();
+    calibrateTGSVoltage();
+    
+    // Kalibracja czujnikow TGS (kontrolowane przez config)
+        if (calibConfig.enableTGSSensors) {
+   
+            calibrateTGSSensors();
+        }
+        
+        // Kalibracja gazow elektrochemicznych (kontrolowane przez config)
+        if (calibConfig.enableGasSensors) {
+         
+            calibrateGases();
+            
+            // Konwersja na ppb (tylko jesli gazy wlaczone)
+            if (calibConfig.enablePPBConversion) {
+             
+                calibrateGasesPPB();
+            }
+        }
+        //calibratedData.valid = false;
+       
+    }
+    
+   
+    
+    
+    
     calibratedData.valid = true;
     calibratedData.lastUpdate = millis();
 
+    // Periodic debug logging (every 10s) for calibration outputs
+    // Focus on ohms and ppb/ppm; skip PM and SCD as requested
+    #ifdef DEBUG
+    {
+        static unsigned long lastCalibDebug = 0;
+        unsigned long now = millis();
+        if (now - lastCalibDebug >= 10000) {
+            lastCalibDebug = now;
+            if (calibratedData.valid) {
+                Serial.println("[CALIB] --- Periodic (10s) calibration snapshot ---");
+                // Ohms from TGS sensors (if computed)
+                Serial.print("[CALIB] Ohms: ");
+                Serial.print("TGS02_ohm="); Serial.print(calibratedData.TGS02_ohm, 2); Serial.print(", ");
+                Serial.print("TGS03_ohm="); Serial.print(calibratedData.TGS03_ohm, 2); Serial.print(", ");
+                Serial.print("TGS12_ohm="); Serial.println(calibratedData.TGS12_ohm, 2);
+
+                // Gases (ug/m3) - main calibrated values
+                Serial.print("[CALIB] ug/m3: ");
+                Serial.print("CO="); Serial.print(calibratedData.CO, 2); Serial.print(", ");
+                Serial.print("NO="); Serial.print(calibratedData.NO, 2); Serial.print(", ");
+                Serial.print("NO2="); Serial.print(calibratedData.NO2, 2); Serial.print(", ");
+                Serial.print("O3="); Serial.print(calibratedData.O3, 2); Serial.print(", ");
+                Serial.print("SO2="); Serial.print(calibratedData.SO2, 2); Serial.print(", ");
+                Serial.print("H2S="); Serial.print(calibratedData.H2S, 2); Serial.print(", ");
+                Serial.print("NH3="); Serial.print(calibratedData.NH3, 2); Serial.print(", ");
+                Serial.print("VOC(ug/m3)="); Serial.println(calibratedData.VOC, 2);
+
+                // Gases (ppb)
+                Serial.print("[CALIB] ppb: ");
+                Serial.print("CO_ppb="); Serial.print(calibratedData.CO_ppb, 1); Serial.print(", ");
+                Serial.print("NO_ppb="); Serial.print(calibratedData.NO_ppb, 1); Serial.print(", ");
+                Serial.print("NO2_ppb="); Serial.print(calibratedData.NO2_ppb, 1); Serial.print(", ");
+                Serial.print("O3_ppb="); Serial.print(calibratedData.O3_ppb, 1); Serial.print(", ");
+                Serial.print("SO2_ppb="); Serial.print(calibratedData.SO2_ppb, 1); Serial.print(", ");
+                Serial.print("H2S_ppb="); Serial.print(calibratedData.H2S_ppb, 1); Serial.print(", ");
+                Serial.print("NH3_ppb="); Serial.print(calibratedData.NH3_ppb, 1); Serial.print(", ");
+                Serial.print("VOC_ppb="); Serial.println(calibratedData.VOC_ppb, 1);
+
+                // Specials
+                Serial.print("[CALIB] HCHO_ppb="); Serial.print(calibratedData.HCHO, 1);
+                Serial.print(", ODO="); Serial.println(calibratedData.ODO, 1);
+            } else {
+                Serial.println("[CALIB] Data invalid - skipping snapshot");
+            }
+        }
+    }
+    #endif
 }
 
 // Funkcje dostepowe
@@ -629,8 +696,8 @@ void calibrateEnvironmentalSensors() {
         calibratedData.AMBIENT_PRESS = fmax(calibConstants.ENV_MIN, fmin(calibratedData.AMBIENT_PRESS, calibConstants.ENV_MAX));
         
         #ifdef DEBUG
-        Serial.printf("Ambient: T=%.2f°C, RH=%.2f%%, P=%.2f hPa\n", 
-                     calibratedData.AMBIENT_TEMP, calibratedData.AMBIENT_HUMID, calibratedData.AMBIENT_PRESS);
+        // Serial.printf("Ambient: T=%.2f°C, RH=%.2f%%, P=%.2f hPa\n", 
+        //              calibratedData.AMBIENT_TEMP, calibratedData.AMBIENT_HUMID, calibratedData.AMBIENT_PRESS);
         #endif
     } else if (i2cSensorData.valid) {
         // Fallback do głównych danych I2C
@@ -684,8 +751,8 @@ void calibrateCO2Sensor() {
         calibratedData.SCD_RH = fmax(calibConstants.SCD_RH_MIN, fmin(calibratedData.SCD_RH, calibConstants.SCD_RH_MAX));
         
         #ifdef DEBUG
-        Serial.printf("SCD41: CO2=%.0f ppm, T=%.2f°C, RH=%.2f%%\n", 
-                     calibratedData.SCD_CO2, calibratedData.SCD_T, calibratedData.SCD_RH);
+        // Serial.printf("SCD41: CO2=%.0f ppm, T=%.2f°C, RH=%.2f%%\n", 
+        //              calibratedData.SCD_CO2, calibratedData.SCD_T, calibratedData.SCD_RH);
         #endif
     } else {
         // Brak danych z SCD41

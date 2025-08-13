@@ -18,11 +18,18 @@ extern FeatureConfig config;
 unsigned long lastHCHORead = 0;
 bool hchoInitialized = false;
 
+// Licznik nieudanych prob dla HCHO sensora
+static int hchoFailCount = 0;
+static const int MAX_HCHO_FAILS = 20; // Po 20 nieudanych probach zmien status na false
+
 void initializeHCHO() {
     if (!config.enableHCHO) {
         hchoSensorStatus = false;
         return;
     }
+    
+    // Reset licznik nieudanych prob przy inicjalizacji
+    hchoFailCount = 0;
     
     safePrintln("Initializing HCHO sensor (CB-HCHO-V4) with EspSoftwareSerial...");
     
@@ -88,6 +95,9 @@ bool readHCHO() {
     bool success = hchoSensor.read();
     
     if (success) {
+        // Reset licznik nieudanych prob przy udanym odczycie
+        hchoFailCount = 0;
+        
         // Only collect HCHO data as requested
         hchoData.hcho = hchoSensor.getHcho();
         hchoData.tvoc = hchoSensor.getTvoc();
@@ -115,14 +125,26 @@ bool readHCHO() {
         return true;
         
     } else {
+        // Zwieksz licznik nieudanych prob
+        hchoFailCount++;
+        
         // Failed to read
         hchoData.valid = false;
-        hchoSensorStatus = false;
+        
+        // Sprawdz czy przekroczono limit nieudanych prob
+        if (hchoFailCount >= MAX_HCHO_FAILS) {
+            hchoSensorStatus = false;
+            safePrint("HCHO sensor status changed to FALSE after ");
+            safePrint(String(hchoFailCount));
+            safePrintln(" failed attempts");
+        }
         
         static unsigned long lastErrorLog = 0;
         if (millis() - lastErrorLog > 30000) { // Log error every 30 seconds
             lastErrorLog = millis();
-            safePrintln("Error: Failed to read from HCHO sensor");
+            safePrint("Error: Failed to read from HCHO sensor (fail count: ");
+            safePrint(String(hchoFailCount));
+            safePrintln("/" + String(MAX_HCHO_FAILS) + ")");
         }
         
         return false;
@@ -137,6 +159,12 @@ void resetHCHOData() {
     hchoData.hcho = 0.0;
     hchoData.valid = false;
     hchoData.lastUpdate = 0;
+}
+
+// Funkcja do resetowania licznika nieudanych prob
+void resetHCHOFailCount() {
+    hchoFailCount = 0;
+    safePrintln("HCHO fail count reset to 0");
 }
 
 // Configuration functions
@@ -170,6 +198,7 @@ void printHCHODiagnostics() {
     safePrint("Initialized: "); safePrintln(hchoInitialized ? "YES" : "NO");
     safePrint("Status: "); safePrintln(hchoSensorStatus ? "OK" : "ERROR");
     safePrint("Data Valid: "); safePrintln(hchoData.valid ? "YES" : "NO");
+    safePrint("Fail Count: "); safePrint(String(hchoFailCount)); safePrintln("/" + String(MAX_HCHO_FAILS));
     
     if (hchoData.valid) {
         safePrint("HCHO: "); safePrint(String(hchoData.hcho, 3)); safePrintln(" mg/m³");

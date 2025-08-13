@@ -507,6 +507,8 @@ void wsBroadcastTask(void *parameter) {
         if (jsonData.length() > 0 && jsonData.length() < 8192) { // Limit rozmiaru
             ws.textAll(jsonData);
         }
+        // Okresowe czyszczenie rozlaczonych klientow, aby uniknac wyciekow
+        ws.cleanupClients();
         
         // Regularne opóźnienie
         vTaskDelayUntil(&xLastWakeTime, xFrequency);

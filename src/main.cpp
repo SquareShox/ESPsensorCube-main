@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <esp_task_wdt.h>
 #include <Adafruit_NeoPixel.h>
+#include <led.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <time.h>
@@ -39,6 +40,7 @@ static unsigned long last_heap_report = 0;
 // Hardware objects
 HardwareSerial MySerial(2); // Solar sensor serial
 Adafruit_NeoPixel pixels(1, WS2812_PIN, NEO_GRB + NEO_KHZ800);
+extern Adafruit_NeoPixel& getExtPixels();
 
 // Global variables
 bool sendDataFlag = false;
@@ -189,6 +191,10 @@ void setup()
 
     // Initialize hardware
     initializeHardware();
+    // Initialize external LED strip
+    initExtLeds();
+    // Optional: uncomment to force debug white
+    // ledSetDebugWhite(true);
 
     // Initialize sensors
     initializeSensors();
@@ -291,6 +297,9 @@ void loop()
         {
             performCalibration();
         }
+        ledSetAirQualityColorFromPM25(calibratedData.PM25);
+        // Update LED color from calibrated PM2.5 if available
+       
     }
 
     if (config.enableIPS)
@@ -513,6 +522,7 @@ void loop()
     }
 
     // Small delay to prevent overwhelming the system
+    updateExtBreathing();
     delay(10);
 }
 
@@ -522,7 +532,9 @@ void initializeHardware()
     if (!config.lowPowerMode)
     {
         pixels.begin();
+        pixels.setBrightness(60);
         pixels.setPixelColor(0, pixels.Color(255, 255, 255)); // White during initialization
+
         pixels.show();
     }
     else

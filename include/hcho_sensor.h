@@ -9,6 +9,7 @@ void initializeHCHO();
 bool readHCHO();
 bool isHCHODataValid();
 void resetHCHOData();
+void resetHCHOFailCount();
 
 // Configuration functions
 bool setHCHOAutoCalibration(uint8_t mode);

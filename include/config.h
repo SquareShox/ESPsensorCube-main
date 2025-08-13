@@ -9,7 +9,7 @@
 #define WIFI_TIMEOUT 20000
 #define CONNECTION_TIMEOUT (20 * 60 * 1000) // 20 minutes
 
-#define FIRMWARE_VERSION "1.1.0"
+#define FIRMWARE_VERSION "1.1.2"
 #define DEVICE_ID "SCUBE-001"
 
 // Pin Definitions
@@ -32,6 +32,9 @@
 #define PWM_PIN 13 
 #define GLine_PIN 12
 #define OFF_PIN 1
+#define EXT_LED_PIN 3
+#define EXT_LED_COUNT 6
+
 
 // Serial Configuration
 #define SERIAL_BAUD 115200

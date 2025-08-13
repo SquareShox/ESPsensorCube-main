@@ -651,10 +651,20 @@ void updateModbusSPS30Registers() {
     mb.setHreg(baseReg + 3, (updateTime >> 16) & 0xFFFF); // Upper 16 bits
     
     if (dataToUse.valid) {
-        mb.setHreg(baseReg + 4, (uint16_t)(dataToUse.pm1_0 * 1000)); // PM1.0 * 1000
-        mb.setHreg(baseReg + 5, (uint16_t)(dataToUse.pm2_5 * 1000)); // PM2.5 * 1000
-        mb.setHreg(baseReg + 6, (uint16_t)(dataToUse.pm4_0 * 1000)); // PM4.0 * 1000
-        mb.setHreg(baseReg + 7, (uint16_t)(dataToUse.pm10 * 1000)); // PM10 * 1000
+        // PM values scaled x10 with 16-bit saturation
+        uint32_t pm1_scaled = (uint32_t)(dataToUse.pm1_0 * 10);
+        if (pm1_scaled > 65535) pm1_scaled = 65535;
+        uint32_t pm25_scaled = (uint32_t)(dataToUse.pm2_5 * 10);
+        if (pm25_scaled > 65535) pm25_scaled = 65535;
+        uint32_t pm4_scaled = (uint32_t)(dataToUse.pm4_0 * 10);
+        if (pm4_scaled > 65535) pm4_scaled = 65535;
+        uint32_t pm10_scaled = (uint32_t)(dataToUse.pm10 * 10);
+        if (pm10_scaled > 65535) pm10_scaled = 65535;
+
+        mb.setHreg(baseReg + 4, (uint16_t)pm1_scaled);  // PM1.0 * 10
+        mb.setHreg(baseReg + 5, (uint16_t)pm25_scaled); // PM2.5 * 10
+        mb.setHreg(baseReg + 6, (uint16_t)pm4_scaled);  // PM4.0 * 10
+        mb.setHreg(baseReg + 7, (uint16_t)pm10_scaled); // PM10 * 10
         mb.setHreg(baseReg + 8, (uint16_t)(dataToUse.nc0_5 * 1000)); // NC0.5 * 1000
         mb.setHreg(baseReg + 9, (uint16_t)(dataToUse.nc1_0 * 1000)); // NC1.0 * 1000
         mb.setHreg(baseReg + 10, (uint16_t)(dataToUse.nc2_5 * 1000)); // NC2.5 * 1000

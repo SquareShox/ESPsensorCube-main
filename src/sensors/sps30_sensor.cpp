@@ -208,8 +208,8 @@ bool readSPS30(SPS30Data& data) {
     }
     
     // Validate readings (check for reasonable values)
-    if (m.mc_1p0 < 0 || m.mc_1p0 > 1000 || m.mc_2p5 < 0 || m.mc_2p5 > 1000 ||
-        m.mc_4p0 < 0 || m.mc_4p0 > 1000 || m.mc_10p0 < 0 || m.mc_10p0 > 1000) {
+    if (m.mc_1p0 < 0 || m.mc_1p0 > 10000 || m.mc_2p5 < 0 || m.mc_2p5 > 10000 ||
+        m.mc_4p0 < 0 || m.mc_4p0 > 10000 || m.mc_10p0 < 0 || m.mc_10p0 > 10000) {
         safePrintln("SPS30: Invalid PM readings detected");
         if (i2c_semaphore) xSemaphoreGive(i2c_semaphore);
         return false;

@@ -1,13 +1,13 @@
 # -----------------------------------------------------------------------------
 # Slownik kalibracji
-# Sbox v3.5 
+# SCube v1.0 
 # nowa wersja elchem!
 # nowe funkcje elchem
 
 set calibration_dict {
 
   "obliczenie temperatury K1 C" {
-    slot_name {K1_3}
+    slot_name {K1_T}
     values {RAW_T K1_3 RAW_V K1_4}
     params {
       T {[B4_T $RAW_T $RAW_V]}
@@ -16,7 +16,7 @@ set calibration_dict {
     clamp {min -30 max 1000}}
 
   "obliczenie temperatury K2 C" {
-    slot_name {K2_3}
+    slot_name {K2_T}
     values {RAW_T K2_3 RAW_V K2_4}
     params {
       T {[B4_T $RAW_T $RAW_V]}
@@ -25,7 +25,7 @@ set calibration_dict {
     clamp {min -30 max 1000}}
 
   "obliczenie temperatury K3 C" {
-    slot_name {K3_3}
+    slot_name {K3_T}
     values {RAW_T K3_3 RAW_V K3_4}
     params {
       T {[B4_T $RAW_T $RAW_V]}
@@ -34,7 +34,7 @@ set calibration_dict {
     clamp {min -30 max 1000}}
 		
   "obliczenie temperatury K4 C" {
-    slot_name {K4_3}
+    slot_name {K4_T}
     values {RAW_T K4_3 RAW_V K4_4}
     params {
       T {[B4_T $RAW_T $RAW_V]}
@@ -61,7 +61,7 @@ set calibration_dict {
     clamp {min -30 max 250}}
 
   "obliczenie temperatury K7 C" {
-   slot_name {K7_1}
+   slot_name {K7_T}
     values {C1 K7_1 C2 K7_2}
     params {
       T {[TGS_T $C1 $C2]}
@@ -97,7 +97,7 @@ set calibration_dict {
     clamp {min -30 max 250}}	
 
   "obliczenie napiecia K1 mV" {
-    slot_name {K1_4}
+    slot_name {K1_V}
     values {RAW K1_4}
     params {
       V {[B4_mV $RAW]}
@@ -106,7 +106,7 @@ set calibration_dict {
     clamp {min 0 max 6000}}
 
   "obliczenie napiecia K2 mV" {
-    slot_name {K2_4}
+    slot_name {K2_V}
     values {RAW K2_4}
     params {
       V {[B4_mV $RAW]}
@@ -115,7 +115,7 @@ set calibration_dict {
     clamp {min 0 max 6000}}
 
  "obliczenie napiecia K3 mV" {
-    slot_name {K3_4}
+    slot_name {K3_V}
     values {RAW K3_4}
     params {
       V {[B4_mV $RAW]}
@@ -124,7 +124,7 @@ set calibration_dict {
     clamp {min 0 max 6000}}
 	
   "obliczenie napiecia K4 mV" {
-    slot_name {K4_4}
+    slot_name {K4_V}
     values {RAW K4_4}
     params {
       V {[B4_mV $RAW]}
@@ -133,7 +133,7 @@ set calibration_dict {
     clamp {min 0 max 6000}}
 
  "obliczenie napiecia K5 mV" {
-    slot_name {K5_4}
+    slot_name {K5_V}
     values {RAW K5_4}
     params {
       V {[B4_mV $RAW]}
@@ -151,7 +151,7 @@ set calibration_dict {
     clamp {min 0 max 7000}}
 	
   "obliczenie napiecia K7 mV FIX" {
-    slot_name {K7_2}
+    slot_name {K7_V}
     values {C3 K7_3 C4 K7_4}
     params {
       V {[TGSv4_mV_FIX $C3 $C4]}
@@ -543,28 +543,26 @@ set calibration_dict {
 
   "kalibracja CO ug/m3" {
     slot_name {CO}
-    values {WRK K4_1 AUX K4_2 TRM K4_3 VCC K4_4}
+    values {WRK K3_1 AUX K3_2 TRM K3_T VCC K3_V}
     params {
     b0  70.0
     b1  0.4
-	b2  -0.4
-	b3  0
-	T {[B4_T $TRM $VCC]}
+	  b2  -0.4
+	  b3  0
     }
-    equation { $b0 + $b1 * $WRK + $b2 * $AUX + $b3 * $T }
+    equation { $b0 + $b1 * $WRK + $b2 * $AUX + $b3 * $TRM }
     clamp {min 0 max 50000}}
 
   "kalibracja NO ug/m3" {
     slot_name {NO}
-    values {WRK K1_1 AUX K1_2 TRM K1_3 VCC K1_4}
+    values {WRK K4_1 AUX K4_2 TRM K4_T VCC K4_V}
     params {
     b0  0.2
     b1  0.03
-	b2  -0.03
-	b3  0
-	T {[B4_T $TRM $VCC]}
+	  b2  -0.03
+	  b3  0
     }
-    equation { $b0 + $b1 * $WRK + $b2 * $AUX + $b3 * $T }
+    equation { $b0 + $b1 * $WRK + $b2 * $AUX + $b3 * $TRM }
     clamp {min 0 max 50000}}
 
   "kalibracja SO2 ug/m3" {
@@ -582,20 +580,19 @@ set calibration_dict {
 
   "kalibracja NO2 ug/m3" {
     slot_name {NO2}
-    values {WRK K3_1 AUX K3_2 TRM K3_3 VCC K3_4}
+    values {WRK K2_1 AUX K2_2 TRM K2_T VCC K2_V}
     params {
     b0  20.0
     b1  -0.09
-	b2  -0.063
-	b3  0
-	T {[B4_T $TRM $VCC]}
+	  b2  -0.063
+	  b3  0
     }
-    equation { $b0 + $b1 * $WRK + $b2 * $AUX + $b3 * $T }
+    equation { $b0 + $b1 * $WRK + $b2 * $AUX + $b3 * $TRM }
     clamp {min 0 max 50000}}
 
   "kalibracja O3 ug/m3" {
     slot_name {O3}
-    values {WRK K2_1 AUX K2_2 TRM K2_3 VCC K2_4 NO2_COMP NO2}
+    values {WRK K5_1 AUX K5_2 TRM K5_T VCC K5_V NO2_COMP NO2}
     params {
     b0  -20.0
     b1  -0.09
@@ -631,26 +628,25 @@ set calibration_dict {
 
   "kalibracja NH3 ug/m3" {
     slot_name {NH3}
-    values {WRK Kx_1 TRM Kx_3 VCC Kx_4}
+    values {WRK Kx_1 TRM Kx_T VCC Kx_V}
     params {
       b0 0.2
       b1 0.00014
       b3 0
-	  T {[B4_T $TRM $VCC]}
     }
-    equation { $b0 + $b1 * $WRK + $b3 * $T }
+    equation { $b0 + $b1 * $WRK + $b3 * $TRM }
     clamp {min 0 max 50000}}
 
   "kalibracja H2S ug/m3" {
     slot_name {H2S}
-    values {WRK Kx_1 AUX Kx_2 TRM Kx_3 VCC Kx_4}
+    values {WRK K1_1 AUX K1_2 TRM K1_T VCC K1_V}
     params {
       b0 0.2
 	  b1 0.00005
       b2 -0.00009
 	  b3 0.0 
     }
-    equation { $b0 + $b1 * $WRK + $b2 * $AUX + $b3 * $T }
+    equation { $b0 + $b1 * $WRK + $b2 * $AUX + $b3 * $TRM }
     clamp {min 0 max 50000}}
 
  "wyliczenie ODO w oparciu o ug/m3" {
@@ -1036,7 +1032,7 @@ set calibration_dict {
     equation {$fx_lin}
     clamp {min 0 max 5000}}
 
- "kalibracja pylu PM1 ug/m3" {
+  "kalibracja pylu PM1 ug/m3" {
     slot_name {PM1}
     values {RAW US3_SPS30_PM01}
     params {
@@ -1046,7 +1042,85 @@ set calibration_dict {
     }
     equation {$fx_lin}
     clamp {min 0 max 5000}}
-	
+
+  "RAW K1_1" { slot_name {RAW_K1_1} values {RAW K1_1} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K1_2" { slot_name {RAW_K1_2} values {RAW K1_2} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K1_3" { slot_name {RAW_K1_3} values {RAW K1_3} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K1_4" { slot_name {RAW_K1_4} values {RAW K1_4} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+
+  "RAW K2_1" { slot_name {RAW_K2_1} values {RAW K2_1} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K2_2" { slot_name {RAW_K2_2} values {RAW K2_2} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K2_3" { slot_name {RAW_K2_3} values {RAW K2_3} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K2_4" { slot_name {RAW_K2_4} values {RAW K2_4} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+
+  "RAW K3_1" { slot_name {RAW_K3_1} values {RAW K3_1} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K3_2" { slot_name {RAW_K3_2} values {RAW K3_2} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K3_3" { slot_name {RAW_K3_3} values {RAW K3_3} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K3_4" { slot_name {RAW_K3_4} values {RAW K3_4} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+
+  "RAW K4_1" { slot_name {RAW_K4_1} values {RAW K4_1} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K4_2" { slot_name {RAW_K4_2} values {RAW K4_2} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K4_3" { slot_name {RAW_K4_3} values {RAW K4_3} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K4_4" { slot_name {RAW_K4_4} values {RAW K4_4} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+
+  "RAW K5_1" { slot_name {RAW_K5_1} values {RAW K5_1} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K5_2" { slot_name {RAW_K5_2} values {RAW K5_2} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K5_3" { slot_name {RAW_K5_3} values {RAW K5_3} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K5_4" { slot_name {RAW_K5_4} values {RAW K5_4} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+
+  "RAW K6_1" { slot_name {RAW_K6_1} values {RAW K6_1} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K6_2" { slot_name {RAW_K6_2} values {RAW K6_2} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K6_3" { slot_name {RAW_K6_3} values {RAW K6_3} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K6_4" { slot_name {RAW_K6_4} values {RAW K6_4} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+
+  "RAW K7_1" { slot_name {RAW_K7_1} values {RAW K7_1} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K7_2" { slot_name {RAW_K7_2} values {RAW K7_2} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K7_3" { slot_name {RAW_K7_3} values {RAW K7_3} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K7_4" { slot_name {RAW_K7_4} values {RAW K7_4} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+
+  "RAW K8_1" { slot_name {RAW_K8_1} values {RAW K8_1} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K8_2" { slot_name {RAW_K8_2} values {RAW K8_2} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K8_3" { slot_name {RAW_K8_3} values {RAW K8_3} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K8_4" { slot_name {RAW_K8_4} values {RAW K8_4} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+
+  "RAW K9_1" { slot_name {RAW_K9_1} values {RAW K9_1} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K9_2" { slot_name {RAW_K9_2} values {RAW K9_2} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K9_3" { slot_name {RAW_K9_3} values {RAW K9_3} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K9_4" { slot_name {RAW_K9_4} values {RAW K9_4} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+
+  "RAW K12_1" { slot_name {RAW_K12_1} values {RAW K12_1} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K12_2" { slot_name {RAW_K12_2} values {RAW K12_2} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K12_3" { slot_name {RAW_K12_3} values {RAW K12_3} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "RAW K12_4" { slot_name {RAW_K12_4} values {RAW K12_4} params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+
+  "CUBE CO ug/m3 (alias)" { slot_name {CUBE_CO} values {V CALIBRATED_CO} params {} equation {$V} clamp {min 0 max 50000}}
+  "CUBE NO ug/m3 (alias)" { slot_name {CUBE_NO} values {V CALIBRATED_NO} params {} equation {$V} clamp {min 0 max 50000}}
+  "CUBE NO2 ug/m3 (alias)" { slot_name {CUBE_NO2} values {V CALIBRATED_NO2} params {} equation {$V} clamp {min 0 max 50000}}
+
+  "CUBE H2S ug/m3 (alias)" { slot_name {CUBE_H2S} values {V CALIBRATED_H2S} params {} equation {$V} clamp {min 0 max 50000}}
+  "CUBE NH3 ug/m3 (alias)" { slot_name {CUBE_NH3} values {V CALIBRATED_NH3} params {} equation {$V} clamp {min 0 max 50000}}
+  "CUBE CO ppb" { slot_name {CUBE_CO_PPB} values {ug CALIBRATED_CO_PPB}  params {} equation {$ug} clamp {min -100000000 max 100000000}}
+  "CUBE NO ppb" { slot_name {CUBE_NO_PPB} values {ug CALIBRATED_NO_PPB}  params {} equation {$ug} clamp {min -100000000 max 100000000}}
+
+  "CUBE H2S ppb" { slot_name {CUBE_H2S_PPB} values {ug CALIBRATED_H2S_PPB}  params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "CUBE NH3 ppb" { slot_name {CUBE_NH3_PPB} values {ug CALIBRATED_NH3_PPB}  params {} equation {$RAW} clamp {min -100000000 max 100000000}}
+  "CUBE_TGS02" { slot_name {CUBE_TGS02} values {V CALIBRATED_TGS02} params {} equation {$V} clamp {min -100000000 max 100000000}}
+
+  "CUBE_TGS02_OHM" { slot_name {CUBE_TGS02_OHM} values {V CALIBRATED_TGS02_OHM} params {} equation {$V} clamp {min -100000000 max 100000000}}
+  "scd41_valid" { slot_name {scd41_valid} values {V SCD41_VALID} params {} equation {$V} clamp {min 0 max 1}}
+  "scd41_co2" { slot_name {scd41_co2} values {V SCD41_CO2} params {} equation {$V} clamp {min 0 max 1000000}}
+  "scd41_temperature" { slot_name {scd41_temperature} values {V SCD41_TEMP} params {} equation {$V} clamp {min -100 max 100}}
+  "scd41_humidity" { slot_name {scd41_humidity} values {V SCD41_HUMID} params {} equation {$V} clamp {min 0 max 100}}
+
+
+  "battery" { slot_name {battery} values {V BATTERY_VOLTAGE} params {} equation {$V} clamp {min 0 max 20}}
+  "battery_voltage" { slot_name {BATTERY_VOLTAGE} values {V BATTERY_VOLTAGE} params {} equation {$V} clamp {min 0 max 20}}
+  "battery_current" { slot_name {BATTERY_CURRENT} values {I BATTERY_CURRENT} params {} equation {$I} clamp {min -10 max 10}}
+  "battery_power" { slot_name {BATTERY_POWER} values {P BATTERY_POWER} params {} equation {$P} clamp {min -200 max 200}}
+  "battery_charge_percent" { slot_name {BATTERY_CHARGE_PERCENT} values {P BATTERY_CHARGE_PERCENT} params {} equation {$P} clamp {min 0 max 100}}
+  "cube_uptime" { slot_name {CUBE_UPTIME} values {V SYSTEM_UPTIME} params {} equation {$V} clamp {min 0 max 100000000}}
+  "cube_free_heap" { slot_name {CUBE_FREE_HEAP} values {V SYSTEM_FREE_HEAP} params {} equation {$V} clamp {min 0 max 100000000}}
+  "cube_wifi_signal" { slot_name {CUBE_WIFI_SIGNAL} values {V SYSTEM_WIFI_SIGNAL} params {} equation {$V} clamp {min -100 max 100}}
 }
 
 
