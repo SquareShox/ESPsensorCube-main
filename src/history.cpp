@@ -1284,7 +1284,11 @@ size_t getHistoricalData(const String& sensor, const String& timeRange,
                 JsonObject data = sample.createNestedObject("data");
                 data["hcho_mg"] = buffer[idx].data.hcho;
                 data["hcho_ppb"] = buffer[idx].data.hcho_ppb;
-                data["tvoc_mg"] = buffer[idx].data.tvoc;
+                data["tvoc_ppb"] = buffer[idx].data.tvoc;
+                data["voc_ppb"] = buffer[idx].data.voc;
+                data["temperature"] = buffer[idx].data.temperature;
+                data["humidity"] = buffer[idx].data.humidity;
+                data["sensorStatus"] = buffer[idx].data.sensorStatus;
                 totalSamples++;
             }
             

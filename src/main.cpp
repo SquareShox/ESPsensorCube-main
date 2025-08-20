@@ -15,6 +15,7 @@
 #include <sensors.h>
 #include <i2c_sensors.h>
 #include <ips_sensor.h>
+#include <hcho_sensor.h>
 #include <modbus_handler.h>
 #include <web_server.h>
 #include <web_socket.h>
@@ -193,6 +194,8 @@ void setup()
     initializeHardware();
     // Initialize external LED strip
     initExtLeds();
+    // Set external LED state based on low power mode configuration
+    ledSetLowPowerMode(config.lowPowerMode);
     // Optional: uncomment to force debug white
     // ledSetDebugWhite(true);
 
@@ -310,6 +313,8 @@ void loop()
     if (config.enableHCHO)
     {
         readHCHO();
+        // Check HCHO watchdog and recovery mechanisms
+       // checkHCHOWatchdog();
     }
 
     readBatteryVoltage();
@@ -541,7 +546,7 @@ void initializeHardware()
     {
         safePrintln("Low power mode: LED disabled");
     }
-
+    
     // Initialize solar sensor serial if enabled
     // if (config.enableSolarSensor) {
     //     MySerial.begin(SOLAR_SERIAL_BAUD, SERIAL_8N1, SOLAR_RX_PIN, SOLAR_TX_PIN);
@@ -893,11 +898,13 @@ void processSerialCommands()
             else if (command.equals("CONFIG_LOW_POWER_ON"))
             {
                 config.lowPowerMode = true;
+                ledSetLowPowerMode(true);
                 safePrintln("Low power mode enabled - LED disabled");
             }
             else if (command.equals("CONFIG_LOW_POWER_OFF"))
             {
                 config.lowPowerMode = false;
+                ledSetLowPowerMode(false);
                 safePrintln("Low power mode disabled - LED enabled");
             }
             else if (command.equals("PUSHBULLET_TEST"))

@@ -1111,8 +1111,27 @@ set calibration_dict {
   "scd41_co2" { slot_name {scd41_co2} values {V SCD41_CO2} params {} equation {$V} clamp {min 0 max 1000000}}
   "scd41_temperature" { slot_name {scd41_temperature} values {V SCD41_TEMP} params {} equation {$V} clamp {min -100 max 100}}
   "scd41_humidity" { slot_name {scd41_humidity} values {V SCD41_HUMID} params {} equation {$V} clamp {min 0 max 100}}
+ 
+  "CUBE_HCHO" { slot_name {CUBE_HCHO} values {V US0_PMS5003ST_HCHO_UG} params {} equation {$V} clamp {min 0 max 1000000}}
+  "CUBE_HCHO_PPB" { slot_name {CUBE_HCHO_PPB} values {V HCHO_PPB} params {} equation {$V} clamp {min 0 max 1000000}}
+  "CUBE_HCHO_VOC" { slot_name {CUBE_HCHO_VOC_PPB} values {V HCHO_VOC_PPB} params {} equation {$V} clamp {min 0 max 1000000}}
+  "CUBE_TGS02_TVOC" { slot_name {CUBE_TGS02_TVOC_PPB} values {V CALIBRATED_VOC_PPB} params {} equation {$V} clamp {min 0 max 1000000}}
+  "CUBE_HCHO_TVOC" { slot_name {CUBE_HCHO_TVOC_PPB} values {V HCHO_TVOC_PPB} params {} equation {$V} clamp {min 0 max 1000000}}
+  "CUBE_HCHO_TEMP" { slot_name {CUBE_HCHO_TEMP} values {V HCHO_TEMP} params {} equation {$V} clamp {min -100 max 100}}
+  "CUBE_HCHO_HUMID" { slot_name {CUBE_HCHO_HUMID} values {V HCHO_HUMID} params {} equation {$V} clamp {min 0 max 100}}
+  "CUBE_HCHO_STATUS" { slot_name {CUBE_HCHO_STATUS} values {V HCHO_STATUS} params {} equation {$V} clamp {min 0 max 1}}
 
+ 
 
+  "IPS_PM_01" { slot_name {IPS_PM_01} values {V IPS_PM_1} params {} equation {$V} clamp {min 0 max 1000000}}
+  "IPS_PM_03" { slot_name {IPS_PM_03} values {V IPS_PM_2} params {} equation {$V} clamp {min 0 max 1000000}}
+  "IPS_PM_05" { slot_name {IPS_PM_05} values {V IPS_PM_3} params {} equation {$V} clamp {min 0 max 1000000}}
+  "IPS_PM_10" { slot_name {IPS_PM_10} values {V IPS_PM_4} params {} equation {$V} clamp {min 0 max 1000000}}
+  "IPS_PM_25" { slot_name {IPS_PM_25} values {V IPS_PM_5} params {} equation {$V} clamp {min 0 max 1000000}}
+  "IPS_PM_50" { slot_name {IPS_PM_50} values {V IPS_PM_6} params {} equation {$V} clamp {min 0 max 1000000}}
+  "IPS_PM_100" { slot_name {IPS_PM_100} values {V IPS_PM_7} params {} equation {$V} clamp {min 0 max 1000000}}
+
+ 
   "battery" { slot_name {battery} values {V BATTERY_VOLTAGE} params {} equation {$V} clamp {min 0 max 20}}
   "battery_voltage" { slot_name {BATTERY_VOLTAGE} values {V BATTERY_VOLTAGE} params {} equation {$V} clamp {min 0 max 20}}
   "battery_current" { slot_name {BATTERY_CURRENT} values {I BATTERY_CURRENT} params {} equation {$I} clamp {min -10 max 10}}

@@ -32,3 +32,6 @@ bool ads1110SensorStatus = false;
 bool ina219SensorStatus = false;
 bool ipsSensorStatus = false; 
 bool hchoSensorStatus = false;  // Global HCHO sensor status 
+
+// HCHO sensor recovery functions are now implemented directly in hcho.cpp
+// No wrapper functions needed - they are accessible through the header files 

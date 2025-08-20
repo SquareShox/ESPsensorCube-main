@@ -298,7 +298,11 @@ String getAllSensorJson() {
         if (hchoSensorStatus && avgData.valid) {
             hcho["hcho_mg"] = avgData.hcho;
             hcho["hcho_ppb"] = avgData.hcho_ppb;
-            hcho["tvoc_mg"] = avgData.tvoc;
+            hcho["tvoc_ppb"] = avgData.tvoc;
+            hcho["voc_ppb"] = avgData.voc;
+            hcho["temperature"] = avgData.temperature;
+            hcho["humidity"] = avgData.humidity;
+            hcho["sensorStatus"] = avgData.sensorStatus;
             hcho["age"] = (millis() - avgData.lastUpdate) / 1000;
         }
     } else {
@@ -306,7 +310,11 @@ String getAllSensorJson() {
         if (hchoSensorStatus && hchoData.valid) {
             hcho["hcho_mg"] = hchoData.hcho;
             hcho["hcho_ppb"] = hchoData.hcho_ppb;
-            hcho["tvoc_mg"] = hchoData.tvoc;
+            hcho["tvoc_ppb"] = hchoData.tvoc;
+            hcho["voc_ppb"] = hchoData.voc;
+            hcho["temperature"] = hchoData.temperature;
+            hcho["humidity"] = hchoData.humidity;
+            hcho["sensorStatus"] = hchoData.sensorStatus;
             hcho["age"] = (millis() - hchoData.lastUpdate) / 1000;
         }
     }

@@ -1,5 +1,6 @@
 {
-  "deviceCount": 8,
+  "deviceCount": 5,
+  "configValid": true,
   "devices": [
     {
       "deviceIndex": 0,

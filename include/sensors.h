@@ -82,6 +82,8 @@ bool isHCHODataValid();
 void resetHCHOData();
 void resetHCHOFailCount();
 
+// HCHO sensor recovery functions are declared in hcho_sensor.h
+
 // Serial sensors functions
 void initializeSerialSensors();
 void readSerialSensors();

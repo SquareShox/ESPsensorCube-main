@@ -9,6 +9,7 @@ static unsigned long lastBreathUpdate = 0;
 static uint16_t breathPeriodMs = 5000; // full cycle ~2s
 static bool debugWhite = false;
 static uint8_t baseBrightness = 100; // baseline brightness for breathing
+static bool lowPowerModeEnabled = false; // Low power mode flag
 
 void initExtLeds() {
     extPixels.begin();
@@ -18,6 +19,8 @@ void initExtLeds() {
 }
 
 void extLedSetAll(uint8_t r, uint8_t g, uint8_t b) {
+    if (lowPowerModeEnabled) return; // Skip if low power mode is enabled
+    
     for (uint16_t i = 0; i < extPixels.numPixels(); i++) {
         extPixels.setPixelColor(i, extPixels.Color(r, g, b));
     }
@@ -25,6 +28,7 @@ void extLedSetAll(uint8_t r, uint8_t g, uint8_t b) {
 }
 
 void extLedSetPixel(uint16_t idx, uint8_t r, uint8_t g, uint8_t b) {
+    if (lowPowerModeEnabled) return; // Skip if low power mode is enabled
     if (idx >= extPixels.numPixels()) return;
     extPixels.setPixelColor(idx, extPixels.Color(r, g, b));
     extPixels.show();
@@ -51,6 +55,8 @@ static void setBaseColorByPM25(float pm25) {
 }
 
 void ledSetAirQualityColorFromPM25(float pm25) {
+    if (lowPowerModeEnabled) return; // Skip if low power mode is enabled
+    
     if (debugWhite) {
         extLedSetAll(255, 255, 255);
         return;
@@ -61,6 +67,8 @@ void ledSetAirQualityColorFromPM25(float pm25) {
 }
 
 void updateExtBreathing() {
+    if (lowPowerModeEnabled) return; // Skip if low power mode is enabled
+    
     if (debugWhite) {
         // Keep solid white in debug mode
         extLedSetAll(255, 255, 255);
@@ -91,6 +99,8 @@ void updateExtBreathing() {
 }
 
 void ledSetDebugWhite(bool enabled) {
+    if (lowPowerModeEnabled) return; // Skip if low power mode is enabled
+    
     debugWhite = enabled;
     if (enabled) {
         extPixels.setBrightness(255);
@@ -99,5 +109,20 @@ void ledSetDebugWhite(bool enabled) {
         // Re-apply current base color
         extPixels.setBrightness(baseBrightness);
         extLedSetAll(baseR, baseG, baseB);
+    }
+}
+
+void ledSetLowPowerMode(bool enabled) {
+    lowPowerModeEnabled = enabled;
+    if (enabled) {
+        // Turn off all LEDs and set brightness to 0
+        extPixels.setBrightness(0);
+        extPixels.show();
+    } else {
+        // Restore previous brightness and re-apply base color
+        extPixels.setBrightness(baseBrightness);
+        if (!debugWhite) {
+            extLedSetAll(baseR, baseG, baseB);
+        }
     }
 }

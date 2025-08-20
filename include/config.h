@@ -9,7 +9,7 @@
 #define WIFI_TIMEOUT 20000
 #define CONNECTION_TIMEOUT (20 * 60 * 1000) // 20 minutes
 
-#define FIRMWARE_VERSION "1.1.2"
+#define FIRMWARE_VERSION "1.2.0"
 #define DEVICE_ID "SCUBE-001"
 
 // Pin Definitions
@@ -66,7 +66,7 @@
 #define OPCN3_SEND_INTERVAL 10000 // 10 seconds
 #define I2C_TIMEOUT_MS 100        // I2C timeout 100ms
 #define HCHO_TIMEOUT_MS 5000      // HCHO sensor timeout 2 seconds
-#define HCHO_READ_INTERVAL 5000   // HCHO read interval 5 seconds
+#define HCHO_READ_INTERVAL 3000   // HCHO read interval 5 seconds
 
 // Feature configuration structure for easy enable/disable of components
 struct FeatureConfig {
@@ -258,7 +258,11 @@ struct SPS30Data {
 struct HCHOData {
     float hcho = 0.0;              // Formaldehyde concentration [mg/m³]
     float hcho_ppb = 0.0;          // Formaldehyde concentration [ppb]
-    float tvoc = 0.0;              // TVOC concentration [mg/m³]
+    float tvoc = 0.0;              // TVOC concentration [ppb]
+    float temperature = 0.0;        // Temperature [°C]
+    float humidity = 0.0;           // Relative humidity [%]
+    float voc = 0.0;                // VOC concentration [ppb]
+    uint8_t sensorStatus = 0;       // Sensor status code
     bool valid = false;
     unsigned long lastUpdate = 0;
 };

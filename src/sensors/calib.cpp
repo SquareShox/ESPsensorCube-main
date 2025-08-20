@@ -267,7 +267,9 @@ void calibrateGases() {
     if (deviceNO >= 0) {
         float K1_1 = getMCP3424Value(deviceNO, 0); // WRK
         float K1_2 = getMCP3424Value(deviceNO, 1); // AUX
-        float T_NO = calibratedData.K1_temp;
+        float K1_3 = getMCP3424Value(deviceNO, 2); // TRM
+        float K1_4 = getMCP3424Value(deviceNO, 3); // VCC
+        float T_NO = B4_T(K1_3, K1_4);
         calibratedData.NO = calibConstants.NO_B0 + calibConstants.NO_B1 * K1_1 + calibConstants.NO_B2 * K1_2 + calibConstants.NO_B3 * T_NO;
         calibratedData.NO = fmax(calibConstants.GAS_MIN, fmin(calibratedData.NO, calibConstants.GAS_MAX));
     }
@@ -277,7 +279,9 @@ void calibrateGases() {
     if (deviceNO2 >= 0) {
         float K3_1 = getMCP3424Value(deviceNO2, 0); // WRK
         float K3_2 = getMCP3424Value(deviceNO2, 1); // AUX
-        float T_NO2 = calibratedData.K3_temp;
+        float K3_3 = getMCP3424Value(deviceNO2, 2); // TRM
+        float K3_4 = getMCP3424Value(deviceNO2, 3); // VCC
+        float T_NO2 = B4_T(K3_3, K3_4);
         calibratedData.NO2 = calibConstants.NO2_B0 + calibConstants.NO2_B1 * K3_1 + calibConstants.NO2_B2 * K3_2 + calibConstants.NO2_B3 * T_NO2;
         // Zastosuj kompensacje temperatury dedykowana dla NO2
        // calibratedData.NO2 = Linear_basic(A4_NO2(T_NO2), calibratedData.NO2, B4_NO2(T_NO2));
@@ -289,7 +293,9 @@ void calibrateGases() {
     if (deviceO3 >= 0) {
         float K2_1 = getMCP3424Value(deviceO3, 0); // WRK
         float K2_2 = getMCP3424Value(deviceO3, 1); // AUX
-        float T_O3 = calibratedData.K2_temp;
+        float K2_3 = getMCP3424Value(deviceO3, 2); // TRM
+        float K2_4 = getMCP3424Value(deviceO3, 3); // VCC
+        float T_O3 = B4_T(K2_3, K2_4);
         calibratedData.O3 = calibConstants.O3_B0 + calibConstants.O3_B1 * K2_1 + calibConstants.O3_B2 * K2_2 + calibConstants.O3_B3 * T_O3 + calibConstants.O3_D * calibratedData.NO2;
         // Zastosuj kompensacje temperatury dedykowana dla O3
       //  calibratedData.O3 = Linear_basic(A4_O3(T_O3), calibratedData.O3, B4_O3(T_O3));
@@ -399,7 +405,7 @@ void calibrateSpecialSensors() {
         // Uwaga: jezeli HCHO tvoc nieobecne, pozostaje z poprzednich zrodel
         // Tutaj aktualizujemy tylko gdy wartosc jest > 0
         if (hchoData.tvoc > 0) {
-            float tvoc_ugm3 = hchoData.tvoc * 1000.0f;
+            float tvoc_ugm3 = hchoData.tvoc;
             calibratedData.VOC = tvoc_ugm3; // nadpisujemy VOC ug/m3 wartoscia z HCHO
             calibratedData.VOC = fmax(calibConstants.GAS_MIN, fmin(calibratedData.VOC, calibConstants.GAS_MAX));
         }

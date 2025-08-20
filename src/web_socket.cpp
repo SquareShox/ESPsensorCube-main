@@ -12,6 +12,7 @@
 #include <Wire.h>
 #include <LittleFS.h>
 #include <mean.h>
+#include <led.h>
 
 // Forward declarations for safe printing functions
 void safePrint(const String& message);
@@ -28,10 +29,11 @@ static unsigned long lastHeapCheck = 0;
 static bool webSocketResetPending = false;
 static uint32_t webSocketResetCount = 0;
 
-// Struktura dla komunikatów WebSocket
+// Struktura dla komunikatow WebSocket - uzywamy surowego bufora, aby uniknac String w FreeRTOS queue
 struct WebSocketMessage {
     AsyncWebSocketClient* client;
-    String message;
+    char* message;        // wskaznik na bufor (null-terminated)
+    size_t length;        // dlugosc danych w buforze (bez null)
     uint32_t timestamp;
 };
 
@@ -262,7 +264,11 @@ void handleGetSensorData(AsyncWebSocketClient* client, JsonDocument& doc) {
             JsonObject hcho = data.createNestedObject("hcho");
             hcho["hcho_mg"] = hchoData.hcho;
             hcho["hcho_ppb"] = hchoData.hcho_ppb;
-            hcho["tvoc_mg"] = hchoData.tvoc;
+            hcho["tvoc_ppb"] = hchoData.tvoc;
+            hcho["voc_ppb"] = hchoData.voc;
+            hcho["temperature"] = hchoData.temperature;
+            hcho["humidity"] = hchoData.humidity;
+            hcho["sensorStatus"] = hchoData.sensorStatus;
             hcho["valid"] = true;
         }
         
@@ -359,6 +365,11 @@ void handleGetSensorData(AsyncWebSocketClient* client, JsonDocument& doc) {
         } else if (sensorType == "hcho" && hchoSensorStatus && hchoData.valid) {
             data["hcho_mg"] = hchoData.hcho;
             data["hcho_ppb"] = hchoData.hcho_ppb;
+            data["tvoc_ppb"] = hchoData.tvoc;
+            data["voc_ppb"] = hchoData.voc;
+            data["temperature"] = hchoData.temperature;
+            data["humidity"] = hchoData.humidity;
+            data["sensorStatus"] = hchoData.sensorStatus;
             data["valid"] = true;
         } else {
             response["error"] = "Sensor not available or invalid: " + sensorType;
@@ -917,7 +928,11 @@ void handleGetAverages(AsyncWebSocketClient* client, JsonDocument& doc) {
                 JsonObject hcho = data.createNestedObject("hcho");
                 hcho["hcho_mg"] = avg.hcho;
                 hcho["hcho_ppb"] = avg.hcho_ppb;
-                hcho["tvoc_mg"] = avg.tvoc;
+                hcho["tvoc_ppb"] = avg.tvoc;
+                hcho["voc_ppb"] = avg.voc;
+                hcho["temperature"] = avg.temperature;
+                hcho["humidity"] = avg.humidity;
+                hcho["sensorStatus"] = avg.sensorStatus;
                 hcho["valid"] = true;
             }
         } else {
@@ -926,7 +941,11 @@ void handleGetAverages(AsyncWebSocketClient* client, JsonDocument& doc) {
                 JsonObject hcho = data.createNestedObject("hcho");
                 hcho["hcho_mg"] = avg.hcho;
                 hcho["hcho_ppb"] = avg.hcho_ppb;
-                hcho["tvoc_mg"] = avg.tvoc;
+                hcho["tvoc_ppb"] = avg.tvoc;
+                hcho["voc_ppb"] = avg.voc;
+                hcho["temperature"] = avg.temperature;
+                hcho["humidity"] = avg.humidity;
+                hcho["sensorStatus"] = avg.sensorStatus;
                 hcho["valid"] = true;
             }
         }
@@ -1477,6 +1496,8 @@ void handleSetConfig(AsyncWebSocketClient* client, JsonDocument& doc) {
     if (doc.containsKey("lowPowerMode")) {
         config.lowPowerMode = doc["lowPowerMode"];
         response["lowPowerMode"] = config.lowPowerMode;
+        // Update LED state based on low power mode
+        ledSetLowPowerMode(config.lowPowerMode);
     }
     
     if (doc.containsKey("enablePushbullet")) {
@@ -1845,12 +1866,18 @@ void webSocketTask(void* parameters) {
             if ((millis() - msg.timestamp) > 5000) {
                 safePrintln("WebSocket Task: Dropping old message (" + 
                            String(millis() - msg.timestamp) + "ms old)");
+                if (msg.message) {
+                    free(msg.message);
+                }
                 continue;
             }
             
             // Sprawdź czy klient nadal jest połączony
             if (!msg.client || msg.client->status() != WS_CONNECTED) {
                 safePrintln("WebSocket Task: Client disconnected, dropping message");
+                if (msg.message) {
+                    free(msg.message);
+                }
                 continue;
             }
             
@@ -1859,27 +1886,33 @@ void webSocketTask(void* parameters) {
             
             // Przetwórz komunikat JSON - zwiększony buffer dla MCP3424 config (8 devices = ~1KB)
             DynamicJsonDocument doc(4096);
-            DeserializationError error = deserializeJson(doc, msg.message);
+            DeserializationError error = deserializeJson(doc, msg.message, msg.length);
             
             if (error) {
                 safePrintln("WebSocket Task: JSON parse error: " + String(error.c_str()));
-                safePrintln("Problematic message: '" + msg.message + "'");
-                safePrintln("Message length: " + String(msg.message.length()));
+                // Nie drukujemy calej wiadomosci aby oszczedzic RAM
+                safePrintln("Message length: " + String(msg.length));
                 
                 DynamicJsonDocument errorResponse(256);
                 errorResponse["error"] = "Invalid JSON format";
                 errorResponse["code"] = "PARSE_ERROR";
                 errorResponse["details"] = String(error.c_str());
-                errorResponse["messageLength"] = msg.message.length();
+                errorResponse["messageLength"] = msg.length;
                 
                 String errorStr;
                 serializeJson(errorResponse, errorStr);
                 msg.client->text(errorStr);
+                if (msg.message) {
+                    free(msg.message);
+                }
                 continue;
             }
             
             // Obsłuż komunikat w kontekście task
             handleWebSocketMessageInTask(msg.client, doc);
+            if (msg.message) {
+                free(msg.message);
+            }
             
         } else {
             // Timeout - sprawdź stan systemu
@@ -2121,6 +2154,8 @@ void handleWebSocketMessageInTask(AsyncWebSocketClient* client, DynamicJsonDocum
         JsonObject scd41 = data.createNestedObject("scd41");
         scd41["valid"] = "CO2_VALID";
         scd41["co2"] = "I2C5_PRESS";
+        scd41["temperature"] = "I2C5_TEMP";
+        scd41["humidity"] = "I2C5_HUMID";
         
         // Power
         JsonObject power = data.createNestedObject("power");
@@ -2133,8 +2168,13 @@ void handleWebSocketMessageInTask(AsyncWebSocketClient* client, DynamicJsonDocum
         // HCHO
         JsonObject hcho = data.createNestedObject("hcho");
         hcho["valid"] = "HCHO_VALID";
-        hcho["hcho"] = "US0_PMS5003ST_HCHO_UG";
+        hcho["hcho_mg"] = "US0_PMS5003ST_HCHO_UG";
         hcho["hcho_ppb"] = "HCHO_PPB";
+        hcho["tvoc_ppb"] = "HCHO_TVOC_PPB";
+        hcho["voc_ppb"] = "HCHO_VOC_PPB";
+        hcho["temperature"] = "HCHO_TEMP";
+        hcho["humidity"] = "HCHO_HUMID"; 
+        hcho["sensorStatus"] = "HCHO_STATUS";
         
         // IPS Sensor
         JsonObject ips = data.createNestedObject("ips");
@@ -2395,6 +2435,8 @@ void handleWebSocketMessageInTask(AsyncWebSocketClient* client, DynamicJsonDocum
     } else if (cmd == "lowPowerOn" || cmd == "lowPowerOff") {
         // Low power mode commands
         config.lowPowerMode = (cmd == "lowPowerOn");
+        // Update LED state based on low power mode
+        ledSetLowPowerMode(config.lowPowerMode);
         
         DynamicJsonDocument response(512);
         response["cmd"] = cmd;
@@ -2721,10 +2763,21 @@ bool sendToWebSocketTask(AsyncWebSocketClient* client, const String& message) {
         return false;
     }
     
-    // Utwórz komunikat
+    // Alokuj bufor i skopiuj dane, aby uniknac uzycia String w kolejce
+    size_t len = message.length();
+    char* buf = (char*)malloc(len + 1);
+    if (!buf) {
+        safePrintln("WebSocket Task: malloc failed for message buffer");
+        return false;
+    }
+    memcpy(buf, message.c_str(), len);
+    buf[len] = '\0';
+
+    // Utworz komunikat
     WebSocketMessage msg;
     msg.client = client;
-    msg.message = message;
+    msg.message = buf;
+    msg.length = len;
     msg.timestamp = millis();
     
     // Wyślij do kolejki
@@ -2732,6 +2785,7 @@ bool sendToWebSocketTask(AsyncWebSocketClient* client, const String& message) {
         return true;
     } else {
         safePrintln("WebSocket Task: Failed to send message to queue");
+        free(buf);
         return false;
     }
 }
@@ -2877,7 +2931,10 @@ void resetWebSocket() {
     if (webSocketQueue) {
         WebSocketMessage msg;
         while (xQueueReceive(webSocketQueue, &msg, 0) == pdTRUE) {
-            // Usuń wszystkie oczekujące komunikaty
+            // Zwolnij bufor wiadomosci jesli istnieje
+            if (msg.message) {
+                free(msg.message);
+            }
         }
     }
     

@@ -24,5 +24,8 @@ void updateExtBreathing();
 // Enable/disable debug override: force solid white and disable breathing/color mapping
 void ledSetDebugWhite(bool enabled);
 
+// Enable/disable low power mode for external LEDs
+void ledSetLowPowerMode(bool enabled);
+
 #endif // LED_H
 

@@ -20,7 +20,7 @@ bool hchoInitialized = false;
 
 // Licznik nieudanych prob dla HCHO sensora
 static int hchoFailCount = 0;
-static const int MAX_HCHO_FAILS = 20; // Po 20 nieudanych probach zmien status na false
+static const int MAX_HCHO_FAILS = 50; // Po 20 nieudanych probach zmien status na false
 
 void initializeHCHO() {
     if (!config.enableHCHO) {
@@ -100,9 +100,14 @@ bool readHCHO() {
         
         // Only collect HCHO data as requested
         hchoData.hcho = hchoSensor.getHcho();
-        hchoData.tvoc = hchoSensor.getTvoc();
+        hchoData.tvoc = hchoSensor.getTvocRaw();
+        hchoData.voc = hchoSensor.getVocRaw();
+        hchoData.temperature = hchoSensor.getTemp();
+        hchoData.humidity = hchoSensor.getHumidity();
+        hchoData.sensorStatus = hchoSensor.getSensorStatus();
+
         //calculate mg/m3 to ppb for HCHO (molar mass: 30.03 g/mol)
-        hchoData.hcho_ppb = hchoData.hcho * 814.2; // ppb = mg/m³ × (24.45/30.03) × 1000
+        hchoData.hcho_ppb = hchoSensor.getHchoRaw();
         hchoData.valid = true;
         hchoData.lastUpdate = millis();
         
@@ -115,7 +120,7 @@ bool readHCHO() {
         if (readCount % 10 == 0) {
             safePrint("HCHO reading - HCHO: ");
             safePrint(String(hchoData.hcho, 3));
-            safePrintln(" mg/m³");
+            safePrintln(" ppm");
             //voc
             safePrint("HCHO reading - TVOC: ");
             safePrint(String(hchoData.tvoc, 3));
@@ -157,6 +162,12 @@ bool isHCHODataValid() {
 
 void resetHCHOData() {
     hchoData.hcho = 0.0;
+    hchoData.hcho_ppb = 0.0;
+    hchoData.tvoc = 0.0;
+    hchoData.voc = 0.0;
+    hchoData.temperature = 0.0;
+    hchoData.humidity = 0.0;
+    hchoData.sensorStatus = 0;
     hchoData.valid = false;
     hchoData.lastUpdate = 0;
 }

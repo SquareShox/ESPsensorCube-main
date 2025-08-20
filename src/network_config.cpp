@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <network_config.h>
 #include <Wire.h>
+#include <led.h>
 
 // Global network configuration
 NetworkConfig networkConfig;
@@ -486,7 +487,9 @@ bool loadMCP3424Config(MCP3424Config& config) {
     }
     
     config.deviceCount = doc["deviceCount"] | 0;
-    config.configValid = doc["configValid"] | false;
+    // Nie ustawiaj na true domyslnie; jesli brak pola w JSON, obliczymy po wczytaniu urzadzen
+    bool hasConfigValidField = doc.containsKey("configValid");
+    config.configValid = hasConfigValidField ? (bool)doc["configValid"] : false;
     
     if (config.deviceCount > 8) {
         config.deviceCount = 8; // Safety limit
@@ -514,9 +517,43 @@ bool loadMCP3424Config(MCP3424Config& config) {
             config.devices[deviceIndex].i2cAddress = device["i2cAddress"] | defaultAddresses[deviceIndex];
             strlcpy(config.devices[deviceIndex].gasType, device["gasType"] | "", sizeof(config.devices[deviceIndex].gasType));
             strlcpy(config.devices[deviceIndex].description, device["description"] | "", sizeof(config.devices[deviceIndex].description));
-            config.devices[deviceIndex].enabled = device["enabled"] | false;
+            // Nie wlaczaj domyslnie; uzywaj tylko tego co w pliku (lub false, jesli brak)
+            config.devices[deviceIndex].enabled = device.containsKey("enabled") ? (bool)device["enabled"] : false;
             config.devices[deviceIndex].autoDetected = device["autoDetected"] | false;
         }
+    }
+
+    // Jesli w JSON nie ma pola configValid, wyznacz na podstawie 'enabled' oraz poprawnosci adresow/unikalnosci
+    if (!hasConfigValidField) {
+        bool anyEnabled = false;
+        bool addressesValid = true;
+        bool addressesUnique = true;
+        bool gasTypesUnique = true;
+        
+        // Sprawdz zakres adresow i unikalnosc wsrod wlaczonych urzadzen
+        for (uint8_t i = 0; i < 8; i++) {
+            if (config.devices[i].enabled) {
+                anyEnabled = true;
+                uint8_t addr_i = config.devices[i].i2cAddress;
+                if (addr_i < 0x68 || addr_i > 0x6F) {
+                    addressesValid = false;
+                }
+                for (uint8_t j = i + 1; j < 8; j++) {
+                    if (config.devices[j].enabled) {
+                        uint8_t addr_j = config.devices[j].i2cAddress;
+                        if (addr_i == addr_j) {
+                            addressesUnique = false;
+                        }
+                        if (strlen(config.devices[i].gasType) > 0 && strlen(config.devices[j].gasType) > 0) {
+                            if (strcmp(config.devices[i].gasType, config.devices[j].gasType) == 0) {
+                                gasTypesUnique = false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        config.configValid = anyEnabled && addressesValid && addressesUnique && gasTypesUnique;
     }
     
     safePrintln("MCP3424 config loaded successfully");
@@ -1034,6 +1071,8 @@ bool loadSystemConfig(FeatureConfig& config) {
     config.enableFan = doc["enableFan"] | false;
     config.autoReset = doc["autoReset"] | false;
     config.lowPowerMode = doc["lowPowerMode"] | false;
+    // Update LED state based on loaded low power mode setting
+    ledSetLowPowerMode(config.lowPowerMode);
     config.enablePushbullet = doc["enablePushbullet"] | true;
     strlcpy(config.pushbulletToken, doc["pushbulletToken"] | "", sizeof(config.pushbulletToken));
     strlcpy(config.DeviceID, doc["DeviceID"] | "SCUBE-001", sizeof(config.DeviceID));

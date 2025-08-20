@@ -1874,6 +1874,10 @@ HCHOData CircularBuffer<HCHOData, FAST_BUFFER_SIZE>::addWeighted(const HCHOData&
         result.hcho += b.hcho * weight;
         result.hcho_ppb += b.hcho_ppb * weight;
         result.tvoc += b.tvoc * weight;
+        result.voc += b.voc * weight;
+        result.temperature += b.temperature * weight;
+        result.humidity += b.humidity * weight;
+        result.sensorStatus = b.sensorStatus; // Take latest status
     }
     return result;
 }
@@ -1886,6 +1890,10 @@ HCHOData CircularBuffer<HCHOData, FAST_BUFFER_SIZE>::addSimple(const HCHOData& a
         result.hcho += b.hcho;
         result.hcho_ppb += b.hcho_ppb;
         result.tvoc += b.tvoc;
+        result.voc += b.voc;
+        result.temperature += b.temperature;
+        result.humidity += b.humidity;
+        result.sensorStatus = b.sensorStatus; // Take latest status
     }
     return result;
 }
@@ -1897,6 +1905,10 @@ HCHOData CircularBuffer<HCHOData, FAST_BUFFER_SIZE>::divideByWeight(const HCHODa
         result.hcho /= weight;
         result.hcho_ppb /= weight;
         result.tvoc /= weight;
+        result.voc /= weight;
+        result.temperature /= weight;
+        result.humidity /= weight;
+        // sensorStatus doesn't need division - keep latest value
     }
     return result;
 }
@@ -1908,6 +1920,10 @@ HCHOData CircularBuffer<HCHOData, FAST_BUFFER_SIZE>::divideByCount(const HCHODat
         result.hcho /= count;
         result.hcho_ppb /= count;
         result.tvoc /= count;
+        result.voc /= count;
+        result.temperature /= count;
+        result.humidity /= count;
+        // sensorStatus doesn't need division - keep latest value
     }
     return result;
 }
@@ -1921,6 +1937,10 @@ HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::addWeighted(const HCHOData&
         result.hcho += b.hcho * weight;
         result.hcho_ppb += b.hcho_ppb * weight;
         result.tvoc += b.tvoc * weight;
+        result.voc += b.voc * weight;
+        result.temperature += b.temperature * weight;
+        result.humidity += b.humidity * weight;
+        result.sensorStatus = b.sensorStatus; // Take latest status
     }
     return result;
 }
@@ -1933,6 +1953,10 @@ HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::addSimple(const HCHOData& a
         result.hcho += b.hcho;
         result.hcho_ppb += b.hcho_ppb;
         result.tvoc += b.tvoc;
+        result.voc += b.voc;
+        result.temperature += b.temperature;
+        result.humidity += b.humidity;
+        result.sensorStatus = b.sensorStatus; // Take latest status
     }
     return result;
 }
@@ -1944,6 +1968,10 @@ HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::divideByWeight(const HCHODa
         result.hcho /= weight;
         result.hcho_ppb /= weight;
         result.tvoc /= weight;
+        result.voc /= weight;
+        result.temperature /= weight;
+        result.humidity /= weight;
+        // sensorStatus doesn't need division - keep latest value
     }
     return result;
 }
@@ -1955,6 +1983,10 @@ HCHOData CircularBuffer<HCHOData, SLOW_BUFFER_SIZE>::divideByCount(const HCHODat
         result.hcho /= count;
         result.hcho_ppb /= count;
         result.tvoc /= count;
+        result.voc /= count;
+        result.temperature /= count;
+        result.humidity /= count;
+        // sensorStatus doesn't need division - keep latest value
     }
     return result;
 }

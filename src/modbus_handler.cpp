@@ -882,11 +882,23 @@ void updateModbusHCHORegisters() {
     if (dataToUse.valid) {
         // HCHO concentration (x1000 for 0.001 mg/m³ precision) - primary measurement
         mb.setHreg(baseReg + 4, (uint16_t)(dataToUse.hcho * 1000));
+        // HCHO concentration in ppb (x10 for 0.1 ppb precision)
+        mb.setHreg(baseReg + 5, (uint16_t)(dataToUse.hcho_ppb * 10));
+        // TVOC concentration in ppb (x10 for 0.1 ppb precision)
+        mb.setHreg(baseReg + 6, (uint16_t)(dataToUse.tvoc * 10));
+        // VOC concentration in ppb (x10 for 0.1 ppb precision)
+        mb.setHreg(baseReg + 7, (uint16_t)(dataToUse.voc * 10));
+        // Temperature (x10 for 0.1°C precision)
+        mb.setHreg(baseReg + 8, (uint16_t)((dataToUse.temperature + 50) * 10)); // +50 to handle negative temps
+        // Humidity (x10 for 0.1% precision)
+        mb.setHreg(baseReg + 9, (uint16_t)(dataToUse.humidity * 10));
+        // Sensor status code
+        mb.setHreg(baseReg + 10, (uint16_t)dataToUse.sensorStatus);
         // Age in seconds
-        mb.setHreg(baseReg + 5, (uint16_t)((millis() - dataToUse.lastUpdate) / 1000));
+        mb.setHreg(baseReg + 11, (uint16_t)((millis() - dataToUse.lastUpdate) / 1000));
     } else {
         // Clear data registers if invalid
-        for (int i = 4; i < 6; i++) {
+        for (int i = 4; i < 12; i++) {
             mb.setHreg(baseReg + i, 0);
         }
     }
@@ -1006,7 +1018,7 @@ void updateModbusCalibrationRegisters() {
         mb.setHreg(baseReg + 39, (int16_t)(dataToUse.HCHO * 100));
         mb.setHreg(baseReg + 40, (int16_t)(dataToUse.PID * 100));
         mb.setHreg(baseReg + 41, (int16_t)(dataToUse.VOC ));        // VOC ug/m3
-        mb.setHreg(baseReg + 42, (int16_t)(dataToUse.VOC_ppb  ));    // TVOC ppb (TGS02)
+        mb.setHreg(baseReg + 42, (int16_t)(dataToUse.VOC_ppb*100  ));    // TVOC ppb (TGS02)
         mb.setHreg(baseReg + 43, (int16_t)(dataToUse.ODO * 100));        // ODO value
         
         // PM sensors (SPS30) - rejestry 44-46
