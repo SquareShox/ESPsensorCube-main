@@ -18,6 +18,7 @@
 #include <ArduinoJson.h>
 #include <fan.h>
 #include <mean.h>
+#include <led.h>
 
 // Forward declarations for safe printing functions
 void safePrint(const String& message);
@@ -26,6 +27,14 @@ void safePrintln(const String& message);
 // Global objects
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
+
+// Global flags for network management
+static bool inDefaultNetworkMode = false;
+
+// AP timeout management
+static unsigned long apStartTime = 0;
+static bool apTimeoutActive = false;
+static const unsigned long AP_TIMEOUT = 600000; // 10 minutes = 600000ms
 
 // Global variables
 unsigned long lastConnectionTime = 0;
@@ -74,6 +83,74 @@ String getFormattedTime() {
     char timeStr[20];
     strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
     return String(timeStr);
+}
+
+// Force time synchronization after WiFi connection
+void forceTimeSync() {
+    safePrintln("=== Force Time Sync ===");
+    safePrintln("WiFi connected - forcing NTP time synchronization...");
+    
+    // Reset time initialization flag
+    timeInitialized = false;
+    
+    // Restart NTP configuration - simple method for Poland (UTC+2 in summer)
+    // Currently August = summer time = UTC+2
+    configTime(3600, 3600, "pool.ntp.org", "time.nist.gov");
+    
+    // Wait for NTP sync with timeout
+    unsigned long syncStart = millis();
+    const unsigned long SYNC_TIMEOUT = 30000; // 30 seconds timeout
+    
+    safePrintln("Waiting for NTP synchronization...");
+    
+    while (!timeInitialized && (millis() - syncStart) < SYNC_TIMEOUT) {
+        // Check if time is valid
+        time_t now = time(nullptr);
+        if (now > 8 * 3600 * 2) { // > year 1970
+            timeInitialized = true;
+            safePrintln("NTP synchronization successful!");
+            
+            // Get and display current time
+            struct tm timeinfo;
+            if (getLocalTime(&timeinfo)) {
+                char timeStr[20];
+                strftime(timeStr, sizeof(timeStr), "%H:%M:%S %d/%m/%Y", &timeinfo);
+                safePrintln("Current time: " + String(timeStr));
+            }
+            break;
+        }
+        
+        // Small delay to prevent blocking
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        safePrint(".");
+    }
+    
+    if (!timeInitialized) {
+        safePrintln("NTP synchronization timeout - using fallback time");
+        // Set fallback time if NTP fails
+        struct tm fallbackTime = {
+            .tm_sec = 0,
+            .tm_min = 0,
+            .tm_hour = 0,
+            .tm_mday = 20,
+            .tm_mon = 7,  // August (0-based)
+            .tm_year = 125, // 2025 (years since 1900)
+            .tm_wday = 3,   // Wednesday
+            .tm_yday = 231, // Day of year
+            .tm_isdst = 0   // No DST
+        };
+        
+        time_t fallbackEpoch = mktime(&fallbackTime);
+        if (fallbackEpoch != -1) {
+            struct timeval tv;
+            tv.tv_sec = fallbackEpoch;
+            tv.tv_usec = 0;
+            settimeofday(&tv, NULL);
+            safePrintln("Fallback time set: 00:00 20.08.2025");
+        }
+    }
+    
+    safePrintln("=== Time Sync Complete ===");
 }
 
 String getFormattedDate() {
@@ -133,6 +210,30 @@ String getAllSensorJson() {
     doc["freePsram"] = ESP.getFreePsram();
     doc["lowPowerMode"] = config.lowPowerMode;
     doc["enablePushbullet"] = config.enablePushbullet;
+    
+    // WiFi and AP status
+    JsonObject wifi = doc.createNestedObject("wifi");
+    wifi["connected"] = WiFi.status() == WL_CONNECTED;
+    wifi["ssid"] = WiFi.SSID();
+    wifi["rssi"] = WiFi.RSSI();
+    wifi["ip"] = WiFi.localIP().toString();
+    
+    // Check if we're in default network mode (AP active + default SSID)
+    // Also check the global flag for consistency
+    bool inDefaultMode = (WiFi.getMode() == WIFI_AP_STA || WiFi.getMode() == WIFI_AP) && 
+                         (WiFi.SSID() == String(WIFI_SSID));
+    
+    // Use the global flag as primary indicator, but also show the detected mode
+    wifi["inDefaultNetworkMode"] = inDefaultNetworkMode;
+    wifi["detectedDefaultMode"] = inDefaultMode;
+    wifi["networkModeConsistent"] = (inDefaultNetworkMode == inDefaultMode);
+    
+    wifi["apActive"] = WiFi.getMode() == WIFI_AP_STA || WiFi.getMode() == WIFI_AP;
+    if (wifi["apActive"]) {
+        wifi["apName"] = "AP_" + String(config.DeviceID);
+        wifi["apIP"] = WiFi.softAPIP().toString();
+        wifi["webSocketClients"] = ws.count();
+    }
     
     JsonObject sensorsEnabled = doc.createNestedObject("sensorsEnabled");
     sensorsEnabled["solar"] = solarSensorStatus;
@@ -524,19 +625,66 @@ void wsBroadcastTask(void *parameter) {
 }
 
 void timeCheckTask(void *parameter) {
+    static unsigned long lastTimeSync = 0;
+    const unsigned long TIME_SYNC_INTERVAL = 3600000; // 1 hour = 3600000ms
+    
     for (;;) {
         if (WiFi.status() == WL_CONNECTED && !timeInitialized) {
             // Sprawdz czy czas zostal zsynchronizowany
             time_t now = time(nullptr);
             if (now > 8 * 3600 * 2) { // > year 1970
                 timeInitialized = true;
+                lastTimeSync = millis(); // Record first sync time
             }
         }
-        vTaskDelay(10000 / portTICK_PERIOD_MS); // Check every 10 seconds
+        
+        // Periodic time synchronization every hour
+        if (WiFi.status() == WL_CONNECTED && timeInitialized) {
+            if (millis() - lastTimeSync >= TIME_SYNC_INTERVAL) {
+                safePrintln("=== Periodic Time Sync (1 hour) ===");
+                forceTimeSync();
+                lastTimeSync = millis();
+            }
+        }
+        
+        // Check AP timeout - restart system if AP active for 10 minutes
+        if (apTimeoutActive) {
+            unsigned long apDuration = millis() - apStartTime;
+            unsigned long remainingTime = AP_TIMEOUT - apDuration;
+            
+            if (apDuration >= AP_TIMEOUT) {
+                safePrintln("=== AP TIMEOUT REACHED ===");
+                safePrintln("Configuration AP has been active for 10 minutes");
+                safePrintln("No successful WiFi connection - restarting system...");
+                
+                // Send restart notification if possible
+                if (WiFi.getMode() == WIFI_AP_STA || WiFi.getMode() == WIFI_AP) {
+                    safePrintln("Attempting to send restart notification via AP...");
+                }
+                
+                delay(2000); // Give time for final messages
+                ESP.restart();
+            } else if (apDuration % 60000 == 0 && apDuration > 0) {
+                // Log every minute
+                unsigned long minutesElapsed = apDuration / 60000;
+                unsigned long minutesRemaining = remainingTime / 60000;
+                safePrintln("AP timeout warning: " + String(minutesElapsed) + " minutes elapsed, " + 
+                           String(minutesRemaining) + " minutes until restart");
+            }
+        }
+        
+        vTaskDelay(30000 / portTICK_PERIOD_MS); // Check every 30 seconds
     }
 }
 
 void WiFiReconnectTask(void *parameter) {
+    // Track if we're in default network mode
+    // Moved to global scope for use in initializeWiFi()
+    static unsigned long lastConfigRetryTime = 0;
+    static const unsigned long CONFIG_RETRY_INTERVAL = 60000; // 1 minute
+    static const unsigned long STARTUP_DELAY = 90000; // 1.5 minutes after boot before auto-recovery
+    static unsigned long bootTime = millis(); // Track when the task started
+    
     for (;;) {
         if (WiFi.status() != WL_CONNECTED) {
             safePrintln("WiFi disconnected, attempting to reconnect...");
@@ -548,8 +696,12 @@ void WiFiReconnectTask(void *parameter) {
             WiFi.setHostname(hostname.c_str());
             safePrintln("Hostname reset to: " + hostname);
             
-            // Próbuj połączyć się z konfiguracją z LittleFS, potem z domyślną
+            // Próbuj połączyć się z konfiguracją z LittleFS
             bool connected = false;
+            bool usingDefaultNetwork = false;
+            
+            // Check if we're still in startup period (first 1.5 minutes)
+            bool inStartupPeriod = (millis() - bootTime) < STARTUP_DELAY;
             
             // Sprawdź czy LittleFS jest dostępny
             if (initLittleFS()) {
@@ -568,15 +720,76 @@ void WiFiReconnectTask(void *parameter) {
                     }
                     
                     if (WiFi.status() == WL_CONNECTED) {
+                        // Sprawdź czy rzeczywiście połączyliśmy się do skonfigurowanej sieci
+                        if (WiFi.SSID() == String(ssid)) {
                         connected = true;
+                            inDefaultNetworkMode = false; // Reset flag when connected to config
+                            usingDefaultNetwork = false;
+                            safePrintln("Successfully connected to CONFIGURED WiFi network");
+                            safePrint("SSID: ");
+                            safePrintln(WiFi.SSID());
+                            safePrint("IP: ");
+                            safePrintln(WiFi.localIP().toString());
+                            sendSystemStartupNotificationWithTimeout();
+                            forceTimeSync();
+                        } else {
+                            safePrintln("Connected to wrong network, expected: " + String(ssid) + ", got: " + WiFi.SSID());
+                            // Disconnect and try default
+                            WiFi.disconnect();
+                            connected = false;
+                        }
                     }
                 }
             }
             
-            // Jeśli nie udało się połączyć z konfiguracją, spróbuj z domyślną
+            // Jeśli nie udało się połączyć z konfiguracją
             if (!connected) {
-                safePrintln("WiFi reconnect: trying default credentials");
+                if (inStartupPeriod) {
+                    // During startup period, only try configured network
+                    unsigned long remainingTime = STARTUP_DELAY - (millis() - bootTime);
+                    safePrintln("Startup period: Only trying configured network for " + String(remainingTime / 1000) + " more seconds");
+                    safePrintln("Will not try default network yet");
+                } else {
+                    // After startup period, try default network
+                    safePrintln("WiFi reconnect: trying default credentials with DHCP");
+                    
+                    // Set fallback time since we couldn't connect to configured network
+                    // This ensures system has a valid time even without WiFi
+                    if (!isTimeSet()) {
+                        safePrintln("Setting fallback time since WiFi connection failed");
+                        
+                        struct tm fallbackTime = {
+                            .tm_sec = 0,
+                            .tm_min = 0,
+                            .tm_hour = 0,
+                            .tm_mday = 20,
+                            .tm_mon = 7,  // August (0-based)
+                            .tm_year = 125, // 2025 (years since 1900)
+                            .tm_wday = 3,   // Wednesday
+                            .tm_yday = 231, // Day of year
+                            .tm_isdst = 0   // No DST
+                        };
+                        
+                        time_t fallbackEpoch = mktime(&fallbackTime);
+                        if (fallbackEpoch != -1) {
+                            struct timeval tv;
+                            tv.tv_sec = fallbackEpoch;
+                            tv.tv_usec = 0;
+                            settimeofday(&tv, NULL);
+                            
+                            safePrintln("Fallback time set: 00:00 20.08.2025");
+                            safePrintln("Time will be updated when WiFi connects and NTP syncs");
+                        } else {
+                            safePrintln("Failed to set fallback time");
+                        }
+                    }
+                    
+                    // Reset network configuration to use DHCP for default network
+                    WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, INADDR_NONE);
+                    
                 WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+                    usingDefaultNetwork = true;
+                    inDefaultNetworkMode = true; // Set flag for default network mode
                 
                 int retryCount = 0;
                 while (WiFi.status() != WL_CONNECTED && retryCount < 5) {
@@ -584,6 +797,35 @@ void WiFiReconnectTask(void *parameter) {
                     delay(1000);
                     safePrint("Reconnecting to WiFi (default)... attempt ");
                     safePrintln(String(retryCount));
+                    }
+                    
+                    if (WiFi.status() == WL_CONNECTED) {
+                        // Sprawdź czy rzeczywiście połączyliśmy się do domyślnej sieci
+                        if (WiFi.SSID() == String(WIFI_SSID)) {
+                            connected = true;
+                            inDefaultNetworkMode = true; // Set flag for default network mode
+                            safePrintln("Successfully connected to DEFAULT WiFi network");
+                            safePrint("SSID: ");
+                            safePrintln(WiFi.SSID());
+                            safePrint("IP: ");
+                            safePrintln(WiFi.localIP().toString());
+                        } else {
+                            safePrintln("Connected to unexpected network: " + WiFi.SSID() + ", expected: " + String(WIFI_SSID));
+                            // This shouldn't happen but handle it gracefully
+                            connected = true;
+                            inDefaultNetworkMode = true; // Assume default mode
+                        }
+                    } else {
+                        safePrintln("Failed to connect to default WiFi network");
+                        // If we can't connect to any network, start AP for configuration
+                        if (WiFi.getMode() != WIFI_AP_STA && WiFi.getMode() != WIFI_AP) {
+                            safePrintln("Starting emergency AP mode for configuration");
+                            startConfigurationAP();
+                        } else {
+                            safePrintln("Emergency AP already active");
+                        }
+                        inDefaultNetworkMode = true; // Set flag since we're in fallback mode
+                    }
                 }
             }
             
@@ -591,16 +833,228 @@ void WiFiReconnectTask(void *parameter) {
                 safePrintln("WiFi reconnected successfully");
                 safePrint("New IP Address: ");
                 safePrintln(WiFi.localIP().toString());
+                
+                // Show network info based on connection type
+                if (usingDefaultNetwork) {
+                    safePrint("Gateway: ");
+                    safePrintln(WiFi.gatewayIP().toString());
+                    safePrint("Subnet: ");
+                    safePrintln(WiFi.subnetMask().toString());
+                    safePrintln("Using DHCP for default network");
+                    safePrintln("Network mode: DEFAULT (with AP)");
+                } else {
+                    safePrintln("Using configured network settings");
+                    safePrintln("Network mode: CONFIGURED (no AP)");
+                }
+                
                 lastConnectionTime = millis();
                 
                 // Restart time sync after reconnection
-                configTime(3600, 3600, "pool.ntp.org", "time.nist.gov");
+                forceTimeSync();
+                sendSystemStartupNotificationWithTimeout();
                 timeInitialized = false;
+                
+                // Jeśli połączyliśmy się do domyślnej sieci, wystaw AP
+                if (usingDefaultNetwork) {
+                    safePrintln("Connected to default network - starting AP for configuration");
+                    safePrintln("Will attempt to return to configured WiFi every minute if no WebSocket clients");
+                    startConfigurationAP();
+                } else {
+                    // Jeśli połączyliśmy się do skonfigurowanej sieci, zatrzymaj AP
+                    safePrintln("Connected to configured network - stopping configuration AP");
+                    stopConfigurationAP();
+                }
             } else {
                 safePrintln("WiFi reconnection failed");
+                if (!inStartupPeriod) {
+                    // After startup period, if we can't connect to anything, start emergency AP
+                    if (WiFi.getMode() != WIFI_AP_STA && WiFi.getMode() != WIFI_AP) {
+                        safePrintln("No WiFi connection available - starting emergency AP mode");
+                        startConfigurationAP();
+                    } else {
+                        safePrintln("Emergency AP already active - no additional WiFi connections available");
+                    }
+                    inDefaultNetworkMode = true; // Set flag for emergency mode
+                } else {
+                    safePrintln("Startup period: Will keep trying configured network only");
+                }
+            }
+        } else {
+            // WiFi is connected, check if we should try to return to configured network
+            if (inDefaultNetworkMode && WiFi.getMode() == WIFI_AP_STA) {
+                // Check if AP is active but no WebSocket clients
+                if (ws.count() == 0 && (millis() - lastConfigRetryTime) > CONFIG_RETRY_INTERVAL) {
+                    // Auto-recovery logic: try to return to configured WiFi
+                    safePrintln("=== WiFi Auto-Recovery ===");
+                    safePrintln("In default network with AP but no WebSocket clients");
+                    safePrintln("Current SSID: " + WiFi.SSID());
+                    safePrintln("Current IP: " + WiFi.localIP().toString());
+                    safePrintln("WebSocket clients: " + String(ws.count()));
+                    safePrintln("Trying configured WiFi...");
+                    
+                    // Try to connect to configured WiFi
+                    if (initLittleFS()) {
+                        char ssid[32], password[64];
+                        if (loadWiFiConfig(ssid, password, sizeof(ssid), sizeof(password))) {
+                            safePrintln("Attempting to switch to configured WiFi...");
+                            safePrintln("Target SSID: " + String(ssid));
+                            
+                            // Store current connection info
+                            String currentSSID = WiFi.SSID();
+                            IPAddress currentIP = WiFi.localIP();
+                            safePrintln("Switching from: " + currentSSID + " (" + currentIP.toString() + ")");
+                            
+                            // Scan for available networks first to check if target network is available
+                            safePrintln("Scanning for available networks...");
+                            int n = WiFi.scanNetworks();
+                            bool targetFound = false;
+                            if (n > 0) {
+                                for (int i = 0; i < n; i++) {
+                                    if (WiFi.SSID(i) == String(ssid)) {
+                                        targetFound = true;
+                                        safePrintln("Target network found: " + String(ssid) + " (RSSI: " + String(WiFi.RSSI(i)) + ")");
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            if (!targetFound) {
+                                safePrintln("Target network " + String(ssid) + " not found in scan, skipping connection attempt");
+                                safePrintln("Available networks:");
+                                for (int i = 0; i < min(n, 5); i++) {
+                                    safePrintln("  - " + WiFi.SSID(i) + " (RSSI: " + String(WiFi.RSSI(i)) + ")");
+                                }
+                            } else {
+                                // Try to connect to configured network
+                                WiFi.begin(ssid, password);
+                                
+                                int retryCount = 0;
+                                while (WiFi.status() != WL_CONNECTED && retryCount < 10) {
+                                    retryCount++;
+                                    delay(1000);
+                                    safePrint("Trying configured WiFi... attempt ");
+                                    safePrintln(String(retryCount));
+                                }
+                                
+                                if (WiFi.status() == WL_CONNECTED) {
+                                    // Sprawdź czy rzeczywiście połączyliśmy się do skonfigurowanej sieci
+                                    if (WiFi.SSID() == String(ssid)) {
+                                        safePrintln("=== WiFi Switch Success ===");
+                                        safePrintln("Successfully switched to configured WiFi!");
+                                        safePrint("New IP Address: ");
+                                        safePrintln(WiFi.localIP().toString());
+                                        safePrint("New SSID: ");
+                                        safePrintln(WiFi.SSID());
+                                        safePrint("Gateway: ");
+                                        safePrintln(WiFi.gatewayIP().toString());
+                                        forceTimeSync();
+                                        // Stop AP and switch to STA mode
+                                        stopConfigurationAP();
+                                        inDefaultNetworkMode = false;
+                                        
+                                                                                 // Restart time sync
+                                         forceTimeSync();
+                                        timeInitialized = false;
+                                        lastConnectionTime = millis();
+                                        
+                                        safePrintln("Configuration AP stopped, now in STA mode only");
+                                        safePrintln("=== WiFi Auto-Recovery Complete ===");
+                                    } else {
+                                        safePrintln("=== WiFi Switch Failed - Wrong Network ===");
+                                        safePrintln("Connected to different network than expected");
+                                        safePrint("Expected SSID: ");
+                                        safePrintln(String(ssid));
+                                        safePrint("Actual SSID: ");
+                                        safePrintln(WiFi.SSID());
+                                        
+                                        // Stay in default network mode
+                                        inDefaultNetworkMode = true;
+                                        
+                                        // Reconnect to default network
+                                        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+                                        delay(5000); // Wait for reconnection
+                                    }
+                                } else {
+                                    safePrintln("=== WiFi Switch Failed ===");
+                                    safePrintln("Failed to connect to configured WiFi, staying in default network");
+                                    safePrintln("Will retry in 1 minute...");
+                                    
+                                    // Ensure we stay in default network mode
+                                    inDefaultNetworkMode = true;
+                                    
+                                    // Reconnect to default network
+                                    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+                                    delay(5000); // Wait for reconnection
+                                }
+                            }
+                        }
+                    }
+                    
+                    lastConfigRetryTime = millis();
+                    safePrintln("Next auto-recovery attempt in 1 minute");
+                }
             }
         }
-        vTaskDelay(20000 / portTICK_PERIOD_MS); // Check every 20 seconds
+        
+        vTaskDelay(30000 / portTICK_PERIOD_MS); // Check every 60 seconds (less aggressive)
+    }
+}
+
+void startConfigurationAP() {
+    // Check if AP is already active
+    if (WiFi.getMode() == WIFI_AP_STA || WiFi.getMode() == WIFI_AP) {
+        safePrintln("Configuration AP already active - skipping startup");
+        return;
+    }
+    
+    // Start AP timeout tracking
+    apStartTime = millis();
+    apTimeoutActive = true;
+    safePrintln("AP timeout started - system will restart in 10 minutes if AP remains active");
+    
+    // Ustaw tryb WiFi na AP + STA (Access Point + Station)
+    // To pozwoli na równoczesne działanie AP i połączenie WiFi
+    WiFi.mode(WIFI_AP_STA);
+    
+    // Ustaw nazwę AP na AP_[nazwaurzadzenia]
+    String apName = "AP_" + String(config.DeviceID);
+    
+    // Użyj domyślnego hasła z konfiguracji
+    const char* apPassword = WIFI_PASSWORD;
+    
+    // Uruchom AP
+    if (WiFi.softAP(apName.c_str(), apPassword)) {
+        safePrintln("Configuration AP started successfully");
+        safePrint("AP Name: ");
+        safePrintln(apName);
+        safePrint("AP Password: ");
+        safePrintln(apPassword);
+        safePrint("AP IP Address: ");
+        safePrintln(WiFi.softAPIP().toString());
+        
+        // AP będzie działać równolegle z połączeniem WiFi
+        // Użytkownik może się połączyć do AP i skonfigurować urządzenie
+        // przez interfejs web na adresie AP IP (zazwyczaj 192.168.4.1)
+    } else {
+        safePrintln("Failed to start Configuration AP");
+    }
+}
+
+void stopConfigurationAP() {
+    // Zatrzymaj AP
+    WiFi.softAPdisconnect(true);
+    
+    // Przywróć tryb WiFi na STA (tylko klient)
+    WiFi.mode(WIFI_STA);
+    
+    // Stop AP timeout tracking
+    if (apTimeoutActive) {
+        unsigned long apDuration = millis() - apStartTime;
+        apTimeoutActive = false;
+        safePrintln("Configuration AP stopped after " + String(apDuration / 1000) + " seconds");
+        safePrintln("AP timeout cancelled");
+    } else {
+        safePrintln("Configuration AP stopped");
     }
 }
 
@@ -617,29 +1071,34 @@ void initializeWiFi() {
         safePrintln("Failed to initialize LittleFS, using default WiFi config");
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     } else {
-        // Load network configuration
+        // Load WiFi credentials first
+        char ssid[32], password[64];
+        if (loadWiFiConfig(ssid, password, sizeof(ssid), sizeof(password))) {
+            safePrintln("WiFi config loaded from LittleFS");
+            
+            // Load and apply network configuration only for configured networks
         if (loadNetworkConfig(networkConfig)) {
             safePrintln("Network config loaded from LittleFS");
             
-            // Apply network configuration
+                // Apply network configuration (static IP, etc.)
             if (!applyNetworkConfig()) {
                 safePrintln("Failed to apply network config, using defaults");
             }
         } else {
-            safePrintln("No network config found, using defaults");
+                safePrintln("No network config found, using DHCP");
         }
         
-        // Load WiFi credentials
-        char ssid[32], password[64];
-        if (loadWiFiConfig(ssid, password, sizeof(ssid), sizeof(password))) {
-            safePrintln("WiFi config loaded from LittleFS");
             WiFi.begin(ssid, password);
         } else {
-            safePrintln("No WiFi config found, using defaults");
+            safePrintln("No WiFi config found, using defaults with DHCP");
+            
+            // For default network, ensure DHCP is used (don't apply static config)
+            // Reset any previous network configuration
+            WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, INADDR_NONE);
+            
             WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
         }
     }
-    
     
     // Skanuj i wyświetl dostępne sieci WiFi
     safePrintln("=== Skanowanie sieci WiFi ===");
@@ -669,17 +1128,117 @@ void initializeWiFi() {
         delay(1000);
         safePrintln("Connecting to WiFi...");
     }
+    
     if (WiFi.status() == WL_CONNECTED) {
-        safePrintln("Connected to WiFi");
+        // Sprawdź czy to skonfigurowana siec czy domyslna
+        bool isConfiguredNetwork = false;
+        if (initLittleFS()) {
+            char ssid[32], password[64];
+            if (loadWiFiConfig(ssid, password, sizeof(ssid), sizeof(password))) {
+                // Sprawdź czy aktualny SSID to skonfigurowany
+                if (WiFi.SSID() == String(ssid)) {
+                    isConfiguredNetwork = true;
+                    safePrintln("Connected to CONFIGURED WiFi network");
+                    safePrint("Expected SSID: ");
+                    safePrintln(String(ssid));
+                    safePrint("Actual SSID: ");
+                    safePrintln(WiFi.SSID());
+                } else if (WiFi.SSID() == String(WIFI_SSID)) {
+                    safePrintln("Connected to DEFAULT WiFi network (SSID mismatch with config)");
+                    safePrint("Config SSID: ");
+                    safePrintln(String(ssid));
+                    safePrint("Default SSID: ");
+                    safePrintln(WiFi.SSID());
+                } else {
+                    safePrintln("Connected to UNKNOWN WiFi network");
+                    safePrint("Expected config SSID: ");
+                    safePrintln(String(ssid));
+                    safePrint("Expected default SSID: ");
+                    safePrintln(String(WIFI_SSID));
+                    safePrint("Actual SSID: ");
+                    safePrintln(WiFi.SSID());
+                }
+            } else {
+                // No config found, check if we're on default
+                if (WiFi.SSID() == String(WIFI_SSID)) {
+                    safePrintln("Connected to DEFAULT WiFi network (no config found)");
+                } else {
+                    safePrintln("Connected to UNKNOWN WiFi network (no config found)");
+                    safePrint("Expected default SSID: ");
+                    safePrintln(String(WIFI_SSID));
+                    safePrint("Actual SSID: ");
+                    safePrintln(WiFi.SSID());
+                }
+            }
+        } else {
+            // LittleFS failed, check if we're on default
+            if (WiFi.SSID() == String(WIFI_SSID)) {
+                safePrintln("Connected to DEFAULT WiFi network (LittleFS failed)");
+            } else {
+                safePrintln("Connected to UNKNOWN WiFi network (LittleFS failed)");
+                safePrint("Expected default SSID: ");
+                safePrintln(String(WIFI_SSID));
+                safePrint("Actual SSID: ");
+                safePrintln(WiFi.SSID());
+            }
+        }
+        
+        safePrint("SSID: ");
+        safePrintln(WiFi.SSID());
         safePrint("IP Address: ");
         safePrintln(WiFi.localIP().toString());
         lastConnectionTime = millis();
         
-        // Initialize time with Poland timezone (UTC+1/UTC+2 with DST)
-        configTime(3600, 3600, "pool.ntp.org", "time.nist.gov"); // UTC+1 base, 1h DST offset
-        safePrintln("NTP time synchronization started...");
+        // Force time synchronization after WiFi connection
+        forceTimeSync();
+        sendSystemStartupNotificationWithTimeout();
+        
+        if (isConfiguredNetwork) {
+            // Jeśli połączyliśmy się do skonfigurowanej sieci, upewnij się że AP jest zatrzymany
+            safePrintln("Stopping configuration AP (connected to configured network)");
+            inDefaultNetworkMode = false; // Reset flag for configured network
+            stopConfigurationAP();
     } else {
-        safePrintln("WiFi connection failed");
+            // Jeśli połączyliśmy się do domyślnej sieci, wystaw AP dla konfiguracji
+            safePrintln("Starting configuration AP (connected to default network)");
+            inDefaultNetworkMode = true; // Set flag for default network
+            startConfigurationAP();
+        }
+    } else {
+        safePrintln("WiFi connection failed during initialization");
+        safePrintln("Will only try configured network during startup period (1.5 minutes)");
+        safePrintln("Default network and AP will be available after startup period via reconnect task");
+        
+        // Set fallback time since WiFi connection failed during initialization
+        // This ensures system has a valid time even without WiFi
+        if (!isTimeSet()) {
+            safePrintln("Setting fallback time since WiFi connection failed during initialization");
+            
+            struct tm fallbackTime = {
+                .tm_sec = 0,
+                .tm_min = 0,
+                .tm_hour = 0,
+                .tm_mday = 20,
+                .tm_mon = 7,  // August (0-based)
+                .tm_year = 125, // 2025 (years since 1900)
+                .tm_wday = 3,   // Wednesday
+                .tm_yday = 231, // Day of year
+                .tm_isdst = 0   // No DST
+            };
+            
+            time_t fallbackEpoch = mktime(&fallbackTime);
+            if (fallbackEpoch != -1) {
+                struct timeval tv;
+                tv.tv_sec = fallbackEpoch;
+                tv.tv_usec = 0;
+                settimeofday(&tv, NULL);
+                
+                safePrintln("Fallback time set: 00:00 20.08.2025");
+                safePrintln("Time will be updated when WiFi connects and NTP syncs");
+            } else {
+                safePrintln("Failed to set fallback time");
+            }
+        }
     }
 }
 
@@ -708,6 +1267,23 @@ void initializeWebServer() {
     });
     server.on("/test", HTTP_GET, [](AsyncWebServerRequest *request) {
         request->send(200, "text/plain", "WebSocket test: " + String(ws.count()) + " clients connected");
+    });
+    
+    // Configuration AP control endpoints
+    server.on("/api/ap/stop", HTTP_POST, [](AsyncWebServerRequest *request) {
+        stopConfigurationAP();
+        request->send(200, "application/json", "{\"success\":true,\"message\":\"Configuration AP stopped\"}");
+    });
+    
+    server.on("/api/ap/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+        DynamicJsonDocument doc(256);
+        doc["apActive"] = WiFi.getMode() == WIFI_AP_STA || WiFi.getMode() == WIFI_AP;
+        doc["apIP"] = WiFi.softAPIP().toString();
+        doc["apName"] = "AP_" + String(config.DeviceID);
+        
+        String response;
+        serializeJson(doc, response);
+        request->send(200, "application/json", response);
     });
     
     // Calibration constants endpoints
@@ -1038,6 +1614,8 @@ void initializeWebServer() {
     }, [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
         if (!index) {
             safePrint("Firmware Update Start: " + filename);
+            // Notify LED system that OTA update is starting
+            setOtaUpdateStatus(true);
             if (!Update.begin()) {
                 Update.printError(Serial);
             }
@@ -1051,11 +1629,15 @@ void initializeWebServer() {
             if (Update.end(true)) {
                 safePrint("Firmware Update Success: " + String(index + len) + "B");
                 safePrintln("Firmware update complete! Rebooting...");
+                // OTA update finished (though system will restart)
+                setOtaUpdateStatus(false);
                 request->send(200, "text/plain", "Firmware update complete! Rebooting...\n");
                 delay(100);
                 ESP.restart();
             } else {
                 Update.printError(Serial);
+                // OTA update failed
+                setOtaUpdateStatus(false);
             }
         }
     });
@@ -1066,6 +1648,8 @@ void initializeWebServer() {
     }, [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
         if (!index) {
             safePrint("Filesystem Update Start: " + filename);
+            // Notify LED system that OTA update is starting
+            setOtaUpdateStatus(true);
             // Begin filesystem update - use U_FS for filesystem updates
                             if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_SPIFFS)) {
                 Update.printError(Serial);
@@ -1080,10 +1664,14 @@ void initializeWebServer() {
             if (Update.end(true)) {
                 safePrint("Filesystem Update Success: " + String(index + len) + "B");
                 safePrintln("Filesystem update complete!");
+                // OTA update finished
+                setOtaUpdateStatus(false);
                 request->send(200, "text/plain", "Filesystem update complete!\n");
                 // Filesystem update doesn't require restart
             } else {
                 Update.printError(Serial);
+                // OTA update failed
+                setOtaUpdateStatus(false);
             }
         }
     });

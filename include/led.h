@@ -27,5 +27,14 @@ void ledSetDebugWhite(bool enabled);
 // Enable/disable low power mode for external LEDs
 void ledSetLowPowerMode(bool enabled);
 
+// Task management functions
+void startLedTask();
+void stopLedTask();
+bool isLedTaskRunning();
+
+// OTA update control functions
+void setOtaUpdateStatus(bool inProgress);
+bool isOtaUpdateInProgress();
+
 #endif // LED_H
 

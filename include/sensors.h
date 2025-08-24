@@ -124,5 +124,6 @@ extern SPS30Data sps30Data;
 extern SHT40Data sht40Data;
 extern SCD41Data scd41Data;
 extern HCHOData hchoData;           // HCHO sensor data
+extern HCHOData lastValidHCHOData;  // Last valid HCHO data for fallback
 
 #endif 

@@ -184,6 +184,39 @@ void setup()
     if (config.enableWiFi)
     {
         initializeWiFi();
+        
+        // Set fallback time if WiFi connection fails during initialization
+        // This ensures system has a valid time even without WiFi
+        if (WiFi.status() != WL_CONNECTED) {
+            safePrintln("WiFi not connected during initialization - setting fallback time");
+            
+            // Set fallback time: 00:00 20.08.2025 (UTC)
+            // This will be updated when WiFi connects and NTP syncs
+            struct tm fallbackTime = {
+                .tm_sec = 0,
+                .tm_min = 0,
+                .tm_hour = 0,
+                .tm_mday = 20,
+                .tm_mon = 7,  // August (0-based)
+                .tm_year = 125, // 2025 (years since 1900)
+                .tm_wday = 3,   // Wednesday
+                .tm_yday = 231, // Day of year
+                .tm_isdst = 0   // No DST
+            };
+            
+            time_t fallbackEpoch = mktime(&fallbackTime);
+            if (fallbackEpoch != -1) {
+                struct timeval tv;
+                tv.tv_sec = fallbackEpoch;
+                tv.tv_usec = 0;
+                settimeofday(&tv, NULL);
+                
+                safePrintln("Fallback time set: 00:00 20.08.2025");
+                safePrintln("Time will be updated when WiFi connects and NTP syncs");
+            } else {
+                safePrintln("Failed to set fallback time");
+            }
+        }
     }
     if (config.enableWebServer && config.enableWiFi)
     {
@@ -194,6 +227,12 @@ void setup()
     initializeHardware();
     // Initialize external LED strip
     initExtLeds();
+    
+    // Start LED task for smooth 30 FPS updates (only if not in low power mode)
+    if (!config.lowPowerMode) {
+        startLedTask();
+    }
+    
     // Set external LED state based on low power mode configuration
     ledSetLowPowerMode(config.lowPowerMode);
     // Optional: uncomment to force debug white
@@ -266,7 +305,7 @@ void setup()
     {
         Serial.println("=== System initialization complete ===");
     }
-    delay(1000);
+    delay(100);
     // if (config.enablePushbullet && strlen(config.pushbulletToken) > 0) {
     //     // Wait a bit for WiFi to stabilize
     //    // delay(5000);
@@ -526,9 +565,13 @@ void loop()
         }
     }
 
-    // Small delay to prevent overwhelming the system
-    updateExtBreathing();
-    delay(10);
+    // Non-blocking delay to prevent overwhelming the system
+    static unsigned long lastLoopDelay = 0;
+    if (millis() - lastLoopDelay >= 10) {
+        lastLoopDelay = millis();
+        // Allow other tasks to run
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
 }
 
 void initializeHardware()
@@ -1588,7 +1631,33 @@ void updateSystemStatus()
             {
                 pixels.setPixelColor(0, pixels.Color(128, 128, 128)); // Szary - brak wlaczonych czujnikow
             }
+            // Delay to avoid RMT conflict with external LEDs
+            delay(10);
             pixels.show();
+        }
+        
+        // Check LED task status and restart if needed (only if not in OTA update)
+        if (!isLedTaskRunning() && !config.lowPowerMode && !isOtaUpdateInProgress()) {
+            startLedTask();
+        }
+        
+        // Check if we should stop configuration AP (if connected to configured network)
+        if (WiFi.status() == WL_CONNECTED && WiFi.getMode() == WIFI_AP_STA) {
+            // Check if we're connected to a configured network (not default)
+            char ssid[32], password[64];
+            extern bool loadWiFiConfig(char* ssid, char* password, size_t ssidSize, size_t passwordSize);
+            if (loadWiFiConfig(ssid, password, sizeof(ssid), sizeof(password))) {
+                if (String(WiFi.SSID()) == String(ssid)) {
+                    // Connected to configured network - stop AP
+                    extern void stopConfigurationAP();
+                    stopConfigurationAP();
+                }
+            }
+        }
+        
+        // Log AP status if active
+        if (WiFi.getMode() == WIFI_AP_STA || WiFi.getMode() == WIFI_AP) {
+            safePrintln("Configuration AP active: AP_" + String(config.DeviceID) + " at " + WiFi.softAPIP().toString());
         }
     }
 }
@@ -1829,7 +1898,15 @@ void sendSystemStartupNotification()
 }
 
 // Nowa funkcja z timeoutem dla powiadomien - bezpieczniejsza wersja
+// Flaga sprawdzajaca czy powiadomienie startup zostalo juz wyslane
+static bool startupNotificationSent = false;
+
 void sendSystemStartupNotificationWithTimeout() {
+    // Sprawdz czy powiadomienie zostalo juz wyslane
+    if (startupNotificationSent) {
+        return;
+    }
+    
     if (!config.enablePushbullet || strlen(config.pushbulletToken) == 0) {
         return;
     }
@@ -1854,6 +1931,8 @@ void sendSystemStartupNotificationWithTimeout() {
     String message = "Device: ESP32 Sensor Cube\n";
     message += "Version: " + String(FIRMWARE_VERSION) + "\n";
     message += "IP: " + WiFi.localIP().toString() + "\n";
+    //wifi ssid
+    message += "WiFi SSID: " + String(WiFi.SSID()) + "\n";
     message += "WiFi Signal: " + String(WiFi.RSSI()) + " dBm\n";
     message += "Free Heap: " + String(ESP.getFreeHeap() / 1024) + " KB\n";
     message += "Time: " + getFormattedTime() + " " + getFormattedDate() + "\n";
@@ -1868,6 +1947,7 @@ void sendSystemStartupNotificationWithTimeout() {
 
     if (httpResponseCode == 200) {
         safePrintln("Pushbullet notification sent successfully");
+        startupNotificationSent = true; // Oznacz jako wyslane
     } else {
         safePrintln("Pushbullet notification failed: " + String(httpResponseCode));
         // Nie loguj pelnej odpowiedzi dla bezpieczenstwa

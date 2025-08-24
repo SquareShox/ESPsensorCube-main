@@ -10,7 +10,16 @@
 // Function declarations
 void initializeWiFi();
 void initializeWebServer();
+void startConfigurationAP();
+void stopConfigurationAP();
 void WiFiReconnectTask(void *parameter);
+
+// Time helper functions
+String getFormattedTime();
+String getFormattedDate();
+time_t getEpochTime();
+bool isTimeSet();
+void forceTimeSync();
 
 
 // Global objects

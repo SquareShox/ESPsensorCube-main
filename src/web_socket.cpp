@@ -1,4 +1,5 @@
 #include <web_socket.h>
+#include <web_server.h>
 #include <sensors.h>
 #include <history.h>
 #include <calib.h>
@@ -1747,6 +1748,7 @@ void initializeWebSocket(AsyncWebSocket& ws) {
     ws.onEvent([](AsyncWebSocket* server, AsyncWebSocketClient* client, AwsEventType type, void* arg, uint8_t* data, size_t len) {
         if (type == WS_EVT_CONNECT) {
             safePrintln("WebSocket client connected");
+            forceTimeSync();
             
             // Dodaj klienta do sledzenia
             addWebSocketClient(client);

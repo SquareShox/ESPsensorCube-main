@@ -1034,7 +1034,7 @@ set calibration_dict {
 
   "kalibracja pylu PM1 ug/m3" {
     slot_name {PM1}
-    values {RAW US3_SPS30_PM01}
+    values {RAW US3_SPS30_PM1}
     params {
       b1 1.0
       a  0.0

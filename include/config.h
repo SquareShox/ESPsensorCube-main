@@ -4,12 +4,14 @@
 #include <stdint.h>
 
 // WiFi Configuration
-#define WIFI_SSID "DAC_WIFI"
-#define WIFI_PASSWORD "$GrUnWaLdZkA$"
+// #define WIFI_SSID "DAC_WIFI"
+// #define WIFI_PASSWORD "$GrUnWaLdZkA$"
+#define WIFI_SSID "TETABIT_power5306"
+#define WIFI_PASSWORD "2025AirL@b"
 #define WIFI_TIMEOUT 20000
 #define CONNECTION_TIMEOUT (20 * 60 * 1000) // 20 minutes
 
-#define FIRMWARE_VERSION "1.2.0"
+#define FIRMWARE_VERSION "1.3.0"
 #define DEVICE_ID "SCUBE-001"
 
 // Pin Definitions
@@ -65,7 +67,7 @@
 #define OPCN3_READ_INTERVAL 10000 // 10 seconds
 #define OPCN3_SEND_INTERVAL 10000 // 10 seconds
 #define I2C_TIMEOUT_MS 100        // I2C timeout 100ms
-#define HCHO_TIMEOUT_MS 5000      // HCHO sensor timeout 2 seconds
+#define HCHO_TIMEOUT_MS 3000      // HCHO sensor timeout 2 seconds
 #define HCHO_READ_INTERVAL 3000   // HCHO read interval 5 seconds
 
 // Feature configuration structure for easy enable/disable of components

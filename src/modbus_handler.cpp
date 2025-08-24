@@ -1071,13 +1071,13 @@ void processModbusTask() {
         
         if (firstActivity) {
             firstActivity = false;
-          //  safePrintln("First Modbus activity detected!");
+          // safePrintln("First Modbus activity detected!");
         }
         
         // Log activity every 30 seconds
         if (millis() - lastActivityLog > 30000) {
             lastActivityLog = millis();
-          //  safePrintln("Modbus activity detected - updating timestamp");
+            //safePrintln("Modbus activity detected - updating timestamp");
            // Serial2.println("Modbus activity detected - updating timestamp");
         }
     }

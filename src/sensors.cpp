@@ -17,6 +17,7 @@ SPS30Data sps30Data;
 SHT40Data sht40Data;
 SCD41Data scd41Data;
 HCHOData hchoData;  // Global HCHO sensor data
+HCHOData lastValidHCHOData;  // Store last valid HCHO data for fallback
 
 // Global sensor status flags  
 bool solarSensorStatus = false;
